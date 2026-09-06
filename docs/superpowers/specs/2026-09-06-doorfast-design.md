@@ -158,16 +158,16 @@ a finite number of times and cannot block local door-session handling.
 ## Packaging and updates
 
 The source repository is `https://github.com/jieinfo/doorfast`. Each GitHub
-Release publishes an x86_64 IPK, a SHA-256 manifest, and a detached signature.
+Release publishes an x86_64 APK, a SHA-256 manifest, and a detached signature.
 Doorfast ships the administrator-configured public verification key and checks
 the release manifest, package hash, and signature before invoking the local
-opkg installation helper.
+APK installation helper.
 
 LuCI may check a stable or beta release channel. Automatic checks are allowed
 only when enabled; automatic installation is not. Installation requires an
 administrator confirmation and uses a local privileged helper exposed only
 through LuCI/rpcd authorization. A failed download, hash check, signature
-check, or opkg operation leaves the installed package and UCI configuration
+check, or APK operation leaves the installed package and UCI configuration
 unchanged.
 
 ## Error handling and security
@@ -193,12 +193,12 @@ unchanged.
 | Session engine | Call-ID correlation, timeout, DND, and schedule tests are deterministic |
 | Dnake adapter | each supported call, hangup, open, and elevator message has a golden fixture |
 | Integration | HA/Webhook mock tests verify TLS failures and bounded retries |
-| Package | SDK-built IPK installs, starts with procd, and survives a config reload |
+| Package | SDK-built APK installs, starts with procd, and survives a config reload |
 | Device test | user-owned isolated Dnake network verifies all active actions with audit evidence |
 | Discovery | observed endpoint remains a candidate until an administrator accepts it |
 | Diagnostics | overlap warnings and reachability results never alter interface, route, or firewall state |
 | Video (future) | disabled-by-default behavior, authorization, storage limit, and indoor-station regression evidence |
 
-The first release is accepted only when every fixture test passes, the IPK
+The first release is accepted only when every fixture test passes, the APK
 installs on a clean x86_64 ImmortalWrt 25.12.1 image, and each active action
 has been exercised on an isolated user-owned Dnake environment.
