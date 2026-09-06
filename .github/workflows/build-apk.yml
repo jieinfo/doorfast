@@ -20,12 +20,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y zstd
+      - name: Cache verified ImmortalWrt SDK archive
+        uses: actions/cache@v4
+        with:
+          path: .cache/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          key: immortalwrt-sdk-25.12.1-x86-64-gcc-14.3.0-musl
       - name: Download and verify ImmortalWrt SDK
         run: |
           sdk=immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
-          curl -fL --retry 3 -O "https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64/$sdk"
-          echo '02ad8cfc775001ccae8e9282d19696de54e3ab3963f005737ad61f8698263edd  '"$sdk" | sha256sum -c -
-          tar --zstd -xf "$sdk"
+          mkdir -p .cache
+          if [ ! -f ".cache/$sdk" ]; then
+            curl -fL --retry 3 -o ".cache/$sdk" "https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64/$sdk"
+          fi
+          echo '02ad8cfc775001ccae8e9282d19696de54e3ab3963f005737ad61f8698263edd  .cache/'"$sdk" | sha256sum -c -
+          tar --zstd -xf ".cache/$sdk"
       - name: Build APK
         run: |
           sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
@@ -41,5 +49,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: doorfast-apk
-          path: "**/bin/packages/**/*.apk"
+          path: "**/bin/packages/x86_64/base/doorfast-*.apk"
           if-no-files-found: error
