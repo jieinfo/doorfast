@@ -2,6 +2,7 @@
 
 void test_config_validation(void);
 void test_config_redaction(void);
+void test_legacy_config_import_keeps_only_safe_fields(void);
 void test_sip_invite_and_bye(void);
 void test_policy_decisions(void);
 void test_session_rejects_different_call_id(void);
@@ -11,13 +12,14 @@ void test_discovery_requires_approval(void);
 void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 9;
+    return 10;
 }
 
 int main(void) {
-    TEST_ASSERT_INT_EQ(9, test_suite_count());
+    TEST_ASSERT_INT_EQ(10, test_suite_count());
     test_config_validation();
     test_config_redaction();
+    test_legacy_config_import_keeps_only_safe_fields();
     test_sip_invite_and_bye();
     test_policy_decisions();
     test_session_rejects_different_call_id();

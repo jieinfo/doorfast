@@ -17,7 +17,15 @@ struct df_config {
     bool call_elev;
 };
 
+#define DF_LEGACY_BRAND_MAX 32
+
+struct df_legacy_import {
+    struct df_config config;
+    char brand[DF_LEGACY_BRAND_MAX];
+};
+
 int df_config_validate(const struct df_config *config);
 void df_config_redact(char *dst, size_t dst_size, const char *secret);
+int df_config_import_legacy(const char *legacy_uci, struct df_legacy_import *imported);
 
 #endif
