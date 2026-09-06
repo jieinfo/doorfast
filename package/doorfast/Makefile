@@ -17,7 +17,8 @@ endef
 
 define Build/Prepare
 	$(RM) -r $(PKG_BUILD_DIR)
-	$(CP) ./src $(PKG_BUILD_DIR)/
+	$(INSTALL_DIR) $(PKG_BUILD_DIR)/src
+	$(CP) ./src/. $(PKG_BUILD_DIR)/src/
 endef
 
 define Build/Compile
