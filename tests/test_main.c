@@ -8,13 +8,14 @@ void test_session_rejects_different_call_id(void);
 void test_default_capture_filter(void);
 void test_audit_format_is_redacted(void);
 void test_discovery_requires_approval(void);
+void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 8;
+    return 9;
 }
 
 int main(void) {
-    TEST_ASSERT_INT_EQ(8, test_suite_count());
+    TEST_ASSERT_INT_EQ(9, test_suite_count());
     test_config_validation();
     test_config_redaction();
     test_sip_invite_and_bye();
@@ -23,5 +24,6 @@ int main(void) {
     test_default_capture_filter();
     test_audit_format_is_redacted();
     test_discovery_requires_approval();
+    test_network_overlap_is_read_only();
     return test_failures();
 }
