@@ -7,7 +7,7 @@ endif
 PCAP_CFLAGS ?= $(shell $(PCAP_CONFIG) --cflags 2>/dev/null)
 PCAP_LIBS ?= $(shell $(PCAP_CONFIG) --libs 2>/dev/null)
 CFLAGS := -std=c17 -Wall -Wextra -Werror -pedantic -Isrc -Itests $(PCAP_CFLAGS)
-TEST_SOURCES := tests/test_main.c tests/test_config.c tests/test_sip.c tests/test_policy.c tests/test_capture.c src/config.c src/event.c src/sip.c src/session.c src/policy.c src/capture.c
+TEST_SOURCES := tests/test_main.c tests/test_config.c tests/test_sip.c tests/test_policy.c tests/test_capture.c tests/test_audit.c src/config.c src/event.c src/sip.c src/session.c src/policy.c src/capture.c src/audit.c
 
 .PHONY: test clean
 
