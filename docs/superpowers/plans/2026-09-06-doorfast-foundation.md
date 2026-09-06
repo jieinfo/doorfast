@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a native x86_64 ImmortalWrt daemon that loads Doorfast UCI configuration, captures selected SIP traffic, emits normalized Dnake-neutral call events, applies schedule policies, and installs as an IPK without any license or remote-shell behavior.
+**Goal:** Build a native x86_64 ImmortalWrt daemon that loads Doorfast UCI configuration, transparently captures selected Dnake SIP traffic, emits normalized call events and administrator-reviewed discovery candidates, applies schedule policies, and installs as an IPK without any license or remote-shell behavior.
 
-**Architecture:** A C17 daemon is split into configuration, capture, SIP parsing, session/policy, integration, and audit modules. The first increment is deliberately passive: it produces normalized events and scheduled action decisions but does not transmit Dnake door/elevator control frames until user-owned packet fixtures document those frames.
+**Architecture:** A C17 daemon is split into configuration, capture, SIP parsing, session/policy, discovery, diagnostics, integration, and audit modules. The first increment is deliberately transparent and passive: it produces normalized events, reviewed endpoint candidates, and scheduled action decisions but does not transmit Dnake door/elevator control frames until user-owned packet fixtures document those frames.
 
 **Tech Stack:** C17, libuci, libpcap, json-c, OpenSSL, procd, LuCI, ImmortalWrt SDK, host `make` test runner.
 
@@ -19,6 +19,9 @@
 - Do not expose a local unauthenticated HTTP server.
 - Keep active door, hangup, and elevator transmission disabled until user-owned PCAP fixtures define each wire interaction.
 - Redact tokens, passwords, SIP credentials, and raw packet bodies from all logs.
+- Treat transparent mode as the only supported first-release mode; host mode and video are separately gated roadmap work.
+- Discovery may create reviewable candidates but must never add active targets without administrator confirmation.
+- Diagnostics must be read-only: never rewrite UCI network configuration, routes, firewall rules, or interface addresses.
 
 ---
 
@@ -34,11 +37,15 @@
 | `src/policy.h`, `src/policy.c` | DND/schedule/action decision engine |
 | `src/capture.h`, `src/capture.c` | libpcap device/filter/open loop wrapper |
 | `src/audit.h`, `src/audit.c` | syslog and file audit records with redaction |
+| `src/discovery.h`, `src/discovery.c` | Endpoint candidate parsing, deduplication, and approval boundary |
+| `src/diagnostics.h`, `src/diagnostics.c` | Read-only overlap and reachability diagnostics |
 | `src/main.c` | CLI, lifecycle, signal handling, module wiring |
 | `tests/test.h`, `tests/test_main.c` | Minimal host-side C test framework |
 | `tests/test_config.c` | Validation and secret-redaction tests |
 | `tests/test_sip.c` | SIP parser fixture tests |
 | `tests/test_policy.c` | Time and automation policy tests |
+| `tests/test_discovery.c` | Candidate parsing, deduplication, and approval tests |
+| `tests/test_diagnostics.c` | Read-only diagnostic-result tests |
 | `tests/fixtures/*.sip` | Anonymized SIP request/response fixtures |
 | `package/doorfast/Makefile` | ImmortalWrt package recipe |
 | `package/doorfast/files/doorfast.init` | procd service definition |
@@ -406,6 +413,136 @@ Expected: PASS. In the matching SDK, run `make package/doorfast/compile V=s` and
 git add package/doorfast luci-app-doorfast README.md tests/test_package_manifest.sh
 git commit -m "feat: package passive Doorfast for ImmortalWrt"
 ```
+
+## Task 7: Add administrator-reviewed Dnake endpoint discovery
+
+**Files:**
+- Create: `src/discovery.h`
+- Create: `src/discovery.c`
+- Create: `tests/test_discovery.c`
+- Modify: `src/event.h`
+- Modify: `src/config.h`
+- Modify: `Makefile`
+- Modify: `tests/test_main.c`
+
+**Interfaces:**
+- Produces: `int df_endpoint_parse(const char *text, struct df_endpoint *endpoint)`.
+- Produces: `enum df_discovery_result df_discovery_observe(const struct df_event *event, struct df_candidate_store *store)`.
+- Produces: `int df_candidate_approve(const struct df_candidate *candidate, struct df_config *config)`.
+- Consumes: parsed events from Task 3 and validated configuration from Task 2.
+
+- [ ] **Step 1: Write failing endpoint and candidate tests**
+
+```c
+void test_dnake_endpoint_is_structured(void) {
+  struct df_endpoint endpoint = {0};
+  TEST_ASSERT_INT_EQ(DF_OK, df_endpoint_parse("10019901:secret@172.16.1.101:5060", &endpoint));
+  TEST_ASSERT_INT_EQ(0, strcmp("10019901", endpoint.id));
+  TEST_ASSERT_INT_EQ(5060, endpoint.port);
+}
+
+void test_observed_endpoint_requires_approval(void) {
+  struct df_candidate_store store = {0};
+  struct df_event event = {.type = DF_EVENT_INCOMING_CALL, .remote_host = "172.16.1.101", .remote_port = 5060};
+  TEST_ASSERT_INT_EQ(DF_DISCOVERY_CANDIDATE, df_discovery_observe(&event, &store));
+  TEST_ASSERT_INT_EQ(0, store.candidates[0].approved);
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `make test`
+
+Expected: FAIL because discovery interfaces do not exist.
+
+- [ ] **Step 3: Implement structured parsing and approval boundary**
+
+Implement `df_endpoint_parse` for the documented `ID[:credential]@host:port`
+import notation. Enforce bounded lengths, a numeric port from 1 through 65535,
+and reject malformed IPv4/IPv6 host syntax. `df_discovery_observe` must
+deduplicate candidates by normalized host, port, and ID. `df_candidate_approve`
+is the sole path that transfers a candidate into the active endpoint allowlist;
+capture and automation paths must ignore unapproved candidates.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `make test`
+
+Expected: PASS; malformed entries are rejected, duplicate observations do not
+create a second candidate, and unapproved candidates cannot become targets.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Makefile src/discovery.h src/discovery.c src/event.h src/config.h tests/test_discovery.c tests/test_main.c
+git commit -m "feat: add reviewed Dnake endpoint discovery"
+```
+
+## Task 8: Add read-only network diagnostics and integration configuration
+
+**Files:**
+- Create: `src/diagnostics.h`
+- Create: `src/diagnostics.c`
+- Create: `tests/test_diagnostics.c`
+- Modify: `src/config.h`
+- Modify: `luci-app-doorfast/luasrc/model/cbi/doorfast.lua`
+- Modify: `README.md`
+
+**Interfaces:**
+- Produces: `enum df_overlap_state df_diagnostics_overlap(const struct df_network_info *doorfast, const struct df_network_info *entry_network)`.
+- Produces: `int df_diagnostics_probe(const struct df_endpoint *endpoint, struct df_probe_result *result)`.
+- Consumes: administrator-configured networks and approved endpoints only.
+
+- [ ] **Step 1: Write failing diagnostic tests**
+
+```c
+void test_overlapping_networks_warn_without_mutation(void) {
+  struct df_network_info a = {.address = "192.168.5.1", .prefix_length = 24};
+  struct df_network_info b = {.address = "192.168.5.20", .prefix_length = 24};
+  TEST_ASSERT_INT_EQ(DF_OVERLAP_WARNING, df_diagnostics_overlap(&a, &b));
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `make test`
+
+Expected: FAIL because diagnostic interfaces do not exist.
+
+- [ ] **Step 3: Implement no-mutation diagnostics and LuCI presentation**
+
+Implement overlap evaluation and bounded TCP/UDP reachability probes with a
+short timeout. Return observations and remediation guidance only; do not call
+UCI setters, `ip route`, firewall commands, or shell helpers. LuCI displays
+capture-interface status, overlap warnings, approved endpoint probe results,
+and configuration hints. It also exposes HA HTTPS and generic Webhook fields,
+with all secret fields masked and excluded from diagnostics/log output.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `make test && rg -n 'uci set|ip route|firewall' src/diagnostics.c`
+
+Expected: Tests PASS; the `rg` command returns no matches.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/diagnostics.h src/diagnostics.c tests/test_diagnostics.c src/config.h luci-app-doorfast/luasrc/model/cbi/doorfast.lua README.md
+git commit -m "feat: add read-only Doorfast diagnostics"
+```
+
+## Follow-on roadmap gates
+
+The following work is intentionally not included in this foundation plan:
+
+1. **Verified active controls:** opens, hangups, elevator calls, and floor
+   actions require the evidence gate below.
+2. **Experimental host mode:** requires independent registration and call-flow
+   fixtures plus a user-visible acknowledgement that an indoor station may be
+   affected. It must be packaged as disabled by default.
+3. **Video:** requires independent design and tests for authenticated access,
+   storage limits, RTSP passthrough or controlled relay, and proof that the
+   existing indoor-station video function continues to work.
 
 ## Evidence gate for active-control plan
 
