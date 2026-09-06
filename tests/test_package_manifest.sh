@@ -11,3 +11,5 @@ grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/work
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'doorfast-\*.apk' .github/workflows/build-apk.yml
 ! grep -q 'bin/packages/\*\*/\*.apk' .github/workflows/build-apk.yml
+grep -q 'config_load doorfast' package/doorfast/files/doorfast.init
+grep -q 'config_get_bool enabled main enabled 0' package/doorfast/files/doorfast.init
