@@ -33,6 +33,15 @@ sh tests/test_main_cli.sh
 sh tests/test_package_manifest.sh
 ```
 
+要从旧 Doorlink UCI 文件生成一份可人工审核的 Doorfast 起始配置：
+
+```sh
+doorfast --import-legacy /etc/config/doorlink
+```
+
+该命令只输出配置，不会写入路由器；不会导出激活码、云令牌、Webhook 或更新设置，
+并且始终将开门、挂断、召梯自动化选项设为禁用。
+
 GitHub Actions 使用官方 ImmortalWrt 25.12.1 x86_64 SDK 构建 APK。SDK 压缩包会在
 每次使用前校验 SHA-256；CI 产物只包含 `doorfast-*.apk` 本体。
 
