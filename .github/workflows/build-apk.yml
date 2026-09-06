@@ -30,6 +30,11 @@ jobs:
         run: |
           sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
           test -n "$sdk_dir"
+          (
+            cd "$sdk_dir"
+            ./scripts/feeds update -a
+            ./scripts/feeds install libpcap libuci libjson-c libopenssl
+          )
           ./scripts/prepare-sdk-package.sh "$sdk_dir"
           make -C "$sdk_dir" defconfig
           make -C "$sdk_dir" package/doorfast/compile V=s -j"$(nproc)"

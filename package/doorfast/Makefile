@@ -22,7 +22,7 @@ define Build/Prepare
 endef
 
 define Build/Compile
-	$(TARGET_CC) $(TARGET_CFLAGS) -std=c17 -Wall -Wextra -Werror -pedantic \
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -std=c17 -Wall -Wextra -Werror -pedantic \
 		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -o $(PKG_BUILD_DIR)/doorfast
 endef
 
