@@ -1,0 +1,40 @@
+name: Build Doorfast APK
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      - run: make test
+      - run: sh tests/test_main_cli.sh
+      - run: sh tests/test_package_manifest.sh
+
+  apk:
+    runs-on: ubuntu-24.04
+    needs: host-tests
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y zstd
+      - name: Download and verify ImmortalWrt SDK
+        run: |
+          sdk=immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          curl -fL --retry 3 -O "https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64/$sdk"
+          echo '02ad8cfc775001ccae8e9282d19696de54e3ab3963f005737ad61f8698263edd  '"$sdk" | sha256sum -c -
+          tar --zstd -xf "$sdk"
+      - name: Build APK
+        run: |
+          sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
+          test -n "$sdk_dir"
+          ./scripts/prepare-sdk-package.sh "$sdk_dir"
+          make -C "$sdk_dir" defconfig
+          make -C "$sdk_dir" package/doorfast/compile V=s -j"$(nproc)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doorfast-apk
+          path: "**/bin/packages/**/*.apk"
+          if-no-files-found: error
