@@ -8,7 +8,7 @@ struct df_capture {
 };
 
 const char *df_capture_default_filter(void) {
-    return "udp port 5060 or tcp port 5060";
+    return "udp and (port 8300 or port 8302 or port 8303 or port 8304)";
 }
 
 int df_capture_open(const char *device, bool promiscuous, struct df_capture **capture) {
