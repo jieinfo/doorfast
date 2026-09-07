@@ -16,6 +16,24 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的原生门禁网络观察与集�
 - 生成经管理员审批才可使用的发现候选项。
 - 对自动化策略生成可审计的“允许 / 拒绝 / 延迟”决定。
 
+## GVS 接口配置
+
+软件包默认保持停用，也不会猜测本机接口。管理员需要为门禁网络和（可选）上行网络
+显式选择可用的本机接口名，例如物理口、VLAN、bridge 或 bond：
+
+```uci
+config gvs 'main'
+	option enabled '0'
+	option gvs_interface 'br-door'
+	option uplink_interface 'br-lan'
+	option passive_only '1'
+	option capture_promiscuous '0'
+```
+
+只有在填写 `gvs_interface`、保持 `passive_only '1'` 并将 `enabled` 改为 `1` 后，
+GVS 被动处理才可启用。Doorfast 不会修改网络、路由或防火墙；本阶段也不会发送 GVS
+控制报文。
+
 ## 不会做的事
 
 - 不包含 Doorlink 的程序代码、激活机制、激活码、供应商云部署或远程脚本执行。

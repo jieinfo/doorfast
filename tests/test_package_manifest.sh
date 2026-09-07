@@ -13,3 +13,8 @@ grep -q 'doorfast-\*.apk' .github/workflows/build-apk.yml
 ! grep -q 'bin/packages/\*\*/\*.apk' .github/workflows/build-apk.yml
 grep -q 'config_load doorfast' package/doorfast/files/doorfast.init
 grep -q 'config_get_bool enabled main enabled 0' package/doorfast/files/doorfast.init
+grep -F "config gvs 'main'" package/doorfast/files/doorfast.config
+grep -F "option enabled '0'" package/doorfast/files/doorfast.config
+grep -F "option gvs_interface ''" package/doorfast/files/doorfast.config
+grep -F "option uplink_interface ''" package/doorfast/files/doorfast.config
+grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
