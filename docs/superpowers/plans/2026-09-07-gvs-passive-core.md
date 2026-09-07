@@ -411,7 +411,7 @@ without probing or changing network state.
 
 - [ ] **Step 4: Run package and host verification**
 
-  Run: `make -B test && sh tests/test_main_cli.sh && sh tests/test_package_manifest.sh && git diff --check`
+  Run: `make -B test doorfast && sh tests/test_main_cli.sh && sh tests/test_package_manifest.sh && git diff --check`
 
   Expected: exit code 0.
 
@@ -429,7 +429,7 @@ without probing or changing network state.
 
 - [ ] **Step 1: Run the complete host verification**
 
-  Run: `make -B test && sh tests/test_main_cli.sh && sh tests/test_package_manifest.sh && git diff --check && git status --short`
+  Run: `make -B test doorfast && sh tests/test_main_cli.sh && sh tests/test_package_manifest.sh && git diff --check && git status --short`
 
   Expected: every test exits 0, the diff check is silent, and status contains
   no uncommitted implementation files.
