@@ -23,7 +23,7 @@ static size_t make_frame(uint8_t *packet, uint8_t family, uint8_t opcode,
 }
 
 void test_gvs_frame_validation_and_event_mapping(void) {
-    uint8_t packet[41];
+    uint8_t packet[41] = {0};
     struct df_gvs_frame frame = {0};
     struct df_event event = {0};
 

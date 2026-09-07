@@ -123,7 +123,7 @@ int df_config_import_legacy(const char *legacy_uci, struct df_legacy_import *imp
             if (strlen(option_value) >= sizeof(imported->brand)) {
                 return DF_ERR_INVALID;
             }
-            (void)snprintf(imported->brand, sizeof(imported->brand), "%s", option_value);
+            memcpy(imported->brand, option_value, strlen(option_value) + 1);
         } else if (section == DF_SECTION_SETTINGS && strcmp(option_name, "enabled") == 0) {
             if (df_parse_legacy_boolean(option_value, &imported->config.enabled) != DF_OK) {
                 return DF_ERR_INVALID;
