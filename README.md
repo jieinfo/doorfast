@@ -45,8 +45,7 @@ doorfast --import-legacy /etc/config/doorlink
 GitHub Actions 使用官方 ImmortalWrt 25.12.1 x86_64 SDK 构建 APK。SDK 压缩包会在
 每次使用前校验 SHA-256；CI 产物只包含 `doorfast-*.apk` 本体。
 
-## 为新品牌贡献证据
+## 协议支持范围
 
-请阅读 [贡献与协议证据规范](CONTRIBUTING.md) 和
-[兼容性矩阵](docs/compatibility.md)。只接受可复现、脱敏且来自贡献者自有设备的
-数据包样本；控制支持必须同时具有请求、响应和现场结果证据。
+Doorfast 仅维护项目自身验证过的 GVS 协议适配。它不接受新增品牌、第三方协议
+适配或第三方控制证据；所有发布的行为说明与匿名化测试夹具均由项目维护。

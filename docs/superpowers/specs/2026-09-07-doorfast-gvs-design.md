@@ -84,11 +84,12 @@ flowchart LR
 
 ## Observed protocol contract
 
-The evidence set establishes a UDP family with ports 8300 through 8304 and a
-fixed `GVSGVS` envelope followed by a fixed marker. Frame addresses and
-per-session fields are treated as opaque bytes until their semantics are
-independently proven. Doorfast therefore parses only the documented envelope,
-declared lengths, direction, and message-family fields in the first milestone.
+Project-maintained private validation material establishes a UDP family with
+ports 8300 through 8304 and a fixed `GVSGVS` envelope followed by a fixed
+marker. Frame addresses and per-session fields are treated as opaque bytes
+until their semantics are independently proven. Doorfast therefore parses only
+the documented envelope, declared lengths, direction, and message-family
+fields in the first milestone.
 
 The normalized lifecycle is:
 
@@ -117,8 +118,8 @@ raw packet bytes by default.
 Doorfast will not replay captured frames. Before any control transport exists,
 the following evidence gate must be satisfied for each action independently:
 
-1. An anonymized request and matching response fixture from an owned test
-   system establishes frame layout and session binding.
+1. A project-maintained anonymized request and matching response fixture from
+   an owned test system establishes frame layout and session binding.
 2. A parser test and state-machine test prove that stale, mismatched, malformed,
    or unallowlisted frames cannot select a target.
 3. The administrator enables the action and names a specific target alias in
