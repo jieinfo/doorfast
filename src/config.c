@@ -12,11 +12,11 @@ int df_config_validate(const struct df_config *config) {
     if (config == NULL || !config->enabled) {
         return DF_OK;
     }
-    if (config->brand == NULL || strcmp(config->brand, "dnake") != 0) {
+    if (config->brand == NULL || strcmp(config->brand, "gvs") != 0) {
         return DF_ERR_INVALID;
     }
-    if (!config->capture_auto &&
-        (config->capture_interface == NULL || config->capture_interface[0] == '\0')) {
+    if (config->gvs_interface == NULL || config->gvs_interface[0] == '\0' ||
+        !config->passive_only) {
         return DF_ERR_INVALID;
     }
     if (!df_delay_is_valid(config->unlock_delay_seconds) ||
@@ -143,5 +143,6 @@ int df_config_import_legacy(const char *legacy_uci, struct df_legacy_import *imp
         }
     }
 
+    imported->config.enabled = false;
     return df_config_validate(&imported->config);
 }

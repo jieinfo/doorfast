@@ -38,7 +38,7 @@ static int df_import_legacy_file(const char *path) {
 
     if (df_config_import_legacy(contents, &imported) != DF_OK) {
         free(contents);
-        (void)fputs("doorfast: legacy configuration is not a supported Dnake configuration\n", stderr);
+        (void)fputs("doorfast: legacy configuration is not supported\n", stderr);
         return 2;
     }
     free(contents);

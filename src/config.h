@@ -12,6 +12,9 @@ struct df_config {
     const char *capture_interface;
     bool capture_auto;
     bool capture_promiscuous;
+    const char *gvs_interface;
+    const char *uplink_interface;
+    bool passive_only;
     int unlock_delay_seconds;
     int hangup_delay_seconds;
     bool call_elev;

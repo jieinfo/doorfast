@@ -6,24 +6,44 @@
 void test_config_validation(void) {
     struct df_config valid = {
         .enabled = true,
-        .brand = "dnake",
-        .capture_interface = "br-door",
+        .brand = "gvs",
+        .gvs_interface = "br-door",
+        .passive_only = true,
     };
     struct df_config invalid_brand = {
         .enabled = true,
         .brand = "other",
-        .capture_interface = "br-door",
+        .gvs_interface = "br-door",
+        .passive_only = true,
     };
     struct df_config invalid_capture = {
         .enabled = true,
-        .brand = "dnake",
-        .capture_interface = "",
-        .capture_auto = false,
+        .brand = "gvs",
+        .gvs_interface = "",
+        .passive_only = true,
     };
 
     TEST_ASSERT_INT_EQ(DF_OK, df_config_validate(&valid));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid_brand));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid_capture));
+}
+
+void test_gvs_config_requires_explicit_passive_interface(void) {
+    struct df_config valid = {
+        .enabled = true,
+        .brand = "gvs",
+        .gvs_interface = "vlan-door.42",
+        .uplink_interface = "bond-home",
+        .passive_only = true,
+    };
+    struct df_config missing_interface = valid;
+    struct df_config active_request = valid;
+
+    missing_interface.gvs_interface = "";
+    active_request.passive_only = false;
+    TEST_ASSERT_INT_EQ(DF_OK, df_config_validate(&valid));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&missing_interface));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&active_request));
 }
 
 void test_config_redaction(void) {
@@ -50,7 +70,7 @@ void test_legacy_config_import_keeps_only_safe_fields(void) {
 
     TEST_ASSERT_INT_EQ(DF_OK, df_config_import_legacy(legacy, &imported));
     TEST_ASSERT_INT_EQ(0, strcmp("dnake", imported.brand));
-    TEST_ASSERT_INT_EQ(1, imported.config.enabled);
+    TEST_ASSERT_INT_EQ(0, imported.config.enabled);
     TEST_ASSERT_INT_EQ(3, imported.config.unlock_delay_seconds);
     TEST_ASSERT_INT_EQ(2, imported.config.hangup_delay_seconds);
     TEST_ASSERT_INT_EQ(1, imported.config.call_elev);
