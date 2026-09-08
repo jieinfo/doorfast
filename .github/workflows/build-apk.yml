@@ -45,13 +45,14 @@ jobs:
           )
           ./scripts/prepare-sdk-package.sh "$sdk_dir"
           make -C "$sdk_dir" defconfig
-          make -C "$sdk_dir" package/doorfast/compile V=s -j"$(nproc)"
-          make -C "$sdk_dir" package/luci-app-doorfast/compile V=s -j"$(nproc)"
+          # Keep package staging file lists for the verification step below.
+          make -C "$sdk_dir" package/doorfast/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
+          make -C "$sdk_dir" package/luci-app-doorfast/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
       - name: Verify generated APK file lists
         run: |
           sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
-          doorfast_list=$(find "$sdk_dir/build_dir" -type f -path '*/lib/apk/packages/doorfast.list' | head -n 1)
-          luci_list=$(find "$sdk_dir/build_dir" -type f -path '*/lib/apk/packages/luci-app-doorfast.list' | head -n 1)
+          doorfast_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/doorfast/lib/apk/packages/doorfast.list' | head -n 1)
+          luci_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/luci-app-doorfast/lib/apk/packages/luci-app-doorfast.list' | head -n 1)
           test -n "$doorfast_list"
           test -n "$luci_list"
           grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
