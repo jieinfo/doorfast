@@ -81,6 +81,32 @@ ubus list doorfast
 
 Doorfast 即使暂时连不上 ubus，也会继续执行被动观察，并每 5 秒尝试重新连接。接口不可用时应以日志和状态阶段共同诊断；不要把 `role=down` 单独解释为设备拒绝。
 
+## 升级与回滚
+
+从 `r3` 开始，安装较新核心包后会自动重启已启用的 Doorfast 服务，使新二进制立即生效。升级前仍应备份两份配置：
+
+```sh
+cp /etc/config/doorfast /tmp/doorfast.backup
+cp /etc/config/doorfast-sync /tmp/doorfast-sync.backup
+apk add ./doorfast-0.1.0-r3.apk ./luci-app-doorfast-0.1.0-r1.apk
+ubus call doorfast status '{}'
+```
+
+ImmortalWrt 25.12.1 的 apk-tools 3 不支持原地降级参数。回滚到旧包需要先移除当前包，再安装旧包；安装完成后停止服务、恢复备份并重新启动：
+
+```sh
+/etc/init.d/doorfast stop
+apk del luci-app-doorfast doorfast
+apk add ./doorfast-0.1.0-r2.apk ./luci-app-doorfast-0.1.0-r1.apk
+/etc/init.d/doorfast stop
+install -m 600 /tmp/doorfast.backup /etc/config/doorfast
+install -m 600 /tmp/doorfast-sync.backup /etc/config/doorfast-sync
+/etc/init.d/doorfast start
+ubus call doorfast status '{}'
+```
+
+上述备份放在 `/tmp`，只适合不重启设备的短时回滚；正式升级应复制到持久存储。虚拟机已验证 `r2 → r3` 自动重启，以及保留同步版本 `321` 的 `r3 → r2 → r3` 恢复流程。
+
 ## 卸载
 
 先停止服务，再移除界面和核心包：
@@ -90,4 +116,4 @@ Doorfast 即使暂时连不上 ubus，也会继续执行被动观察，并每 5 
 apk del luci-app-doorfast doorfast
 ```
 
-卸载会保留用户修改过的 `/etc/config/doorfast`，但运行态 `/etc/config/doorfast-sync` 会被移除；如需保留同步版本，请在卸载前备份两者。ImmortalWrt 25.12.1 x86_64 虚拟机已验证卸载、重装和核心配置保留，版本升级、降级及配置迁移仍待单独验收。
+卸载会保留用户修改过的配置文件；保持软件包默认内容、从未修改的配置则可能被移除。本项目已分别观察到修改后的 `/etc/config/doorfast` 和同步版本非零的 `/etc/config/doorfast-sync` 被保留，而默认同步状态会被移除。因此无论当前值是否为默认值，卸载或回滚前都应备份两者。版本升级与回滚已经验收，未来配置模式发生变化时仍需补迁移测试。

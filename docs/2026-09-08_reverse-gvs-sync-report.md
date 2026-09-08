@@ -157,6 +157,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `linked_workitem`: M1, M5, P
 - `supersedes`: none
 
+#### E-008
+
+- `title`: `r3` APK 通过自动升级重启和备份恢复式回滚验收
+- `observed_at`: 2026-09-08
+- `source_type`: command
+- `source_ref`: `package/doorfast/Makefile`, `tests/test_package_manifest.sh`, GitHub Actions `34243314340`, ImmortalWrt 25.12.1 x86_64 虚拟机
+- `content_hash`: `package/doorfast/Makefile=4a3223714d03ea2b8cc8240abde39a0de467c1e05276883bee6afd5241c33a9c; tests/test_package_manifest.sh=8e61e71f32296ba98255ea057df307cdd6f19467677a83bc837acb30ab373609; doorfast-0.1.0-r3.apk=7b3f26d1df5e31f6656602dc6d49ec3895a92f6804658ded7d9198542d4f2c03; luci-app-doorfast-0.1.0-r1.apk=4a131ce902750d7333aa7144557e0b4c4ea85e64cc1f26e561472a82966b2430`
+- `artifact_path`: `build/ci-34243314340/doorfast-apk/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64/bin/packages/x86_64/base/`
+- `repro_command`: `sh tests/test_package_manifest.sh`; 在目标虚拟机依次安装 `r2`、记录 PID/配置哈希、安装 `r3`；备份配置后移除 `r3`、安装 `r2`、恢复配置，再安装 `r3`
+- `raw_excerpt`: Actions `34243314340` 对提交 `d287b21457156d55a8850b0aeec4f3929597db25` 构建成功。`r2 → r3` 时进程 PID 从 `2614` 变为 `3483`；回滚恢复后再次升级时 PID 从 `4033` 变为 `4160`。核心配置 SHA-256 始终为 `7743882baabc56f768df4dda131a74c9c22e79048087ab06caee265dc32f8e87`，同步状态 SHA-256 始终为 `f6f6b71114a17035edd30b06282c121d35711abbfe44bf8741e13bc6955f1e4d`，ubus 在两次升级后均返回 `version=321`。apk-tools 3 拒绝不存在的 `--allow-downgrade` 选项，因此回滚采用备份、移除、安装旧包、恢复和启动流程。修改后的同步配置在卸载时被保留；此前默认同步配置会被移除。
+- `linked_workitem`: M1, M5, P
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -237,6 +250,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `repro_steps`: 使用 E-007 的官方镜像、APK 和命令复现首次安装、启停、冷启动及卸载重装。
 - `remediation`: 正式发布前补签名信任、版本升级/降级、长期运行和真实网络流量验收。
 
+#### F-007
+
+- `title`: 核心 APK 升级会切换运行进程并保持配置状态
+- `severity`: n/a_re
+- `category`: validation
+- `status`: validated
+- `evidence_ids`: E-007, E-008
+- `location`: `package/doorfast/Makefile`, ImmortalWrt apk `post-upgrade`
+- `impact`: 从 `r3` 开始，目标系统升级后无需管理员另行重启即可运行新二进制；主配置和同步版本跨升级保持不变。apk-tools 3 的旧版本恢复需要移除重装和显式备份恢复，不能宣传为原地降级。
+- `confidence`: high
+- `repro_steps`: 按 E-008 在目标虚拟机执行 `r2 → r3`，比较升级前后 PID、配置哈希和 ubus 版本；再执行备份恢复式回滚。
+- `remediation`: 正式发布前签署两个包，并在未来配置结构变化时为每个迁移边界增加目标机测试。
+
 ### Path P-001
 
 - `title`: 选举结束后的同步维护调用路径
@@ -254,6 +280,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
   8. x86_64 目标 APK 在官方 25.12.1 虚拟机由 procd 运行，空闲时仍可响应 ubus 并支持重启和卸载重装。evidence: E-007 — finding: F-006
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未接入 UDP 和真实设备；严格 JSON 成员顺序仍需用真实抓包验证。
 
+### Path P-002
+
+- `title`: 目标 APK 升级与回滚恢复路径
+- `path_type`: callflow
+- `start`: 已运行 `doorfast-0.1.0-r2`
+- `goal`: 切换到新二进制，或在失败时恢复旧包和同步状态
+- `steps`:
+  1. 安装 `r3` 后，APK `post-upgrade` 在真实系统且 `PKG_UPGRADE=1` 时重启 procd 服务。evidence: E-008 — finding: F-007
+  2. 新进程重新加载原主配置和同步版本，并恢复只读 ubus。evidence: E-007, E-008 — finding: F-006, F-007
+  3. 需要回滚时先备份两份配置，移除当前包并安装旧包，再恢复配置和启动服务。evidence: E-008 — finding: F-007
+  4. ubus 返回备份的非零同步版本，随后可再次升级并自动切换进程。evidence: E-008 — finding: F-007
+- `residual_risks`: 正式包签名尚未验证；未来配置模式变化仍需专用迁移器；`/tmp` 备份不跨系统重启。
+
 ## 6. Timeline 与遗留问题
 
 | 时间 | 事件 |
@@ -266,5 +305,6 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 | 2026-09-08 | 登记首批敏感同步字段适配器，并增加脱敏运行时状态查询 |
 | 2026-09-08 | 增加只读 ubus 状态方法、独立 LuCI 状态页及双 APK 构建清单 |
 | 2026-09-08 | 修复空闲抓包阻塞 ubus，并在官方 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装生命周期冒烟 |
+| 2026-09-08 | 为核心 APK 增加升级后自动重启，并完成 `r2 → r3` 升级和备份恢复式回滚验收 |
 
-当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动和卸载重装验收；正式签名、升级/降级、长期运行与真实流量仍未完成。公共头认证字段和真实设备接受性仍是进入网络发送前的主要关口；本阶段不证明完整主机模式。
+当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级和备份恢复式回滚验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。公共头认证字段和真实设备接受性仍是进入网络发送前的主要关口；本阶段不证明完整主机模式。
