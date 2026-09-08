@@ -43,12 +43,16 @@ Doorfast does not alter that decision.
 config gvs 'main'
   option enabled '0'
   option gvs_interface 'br-door'
+  option gvs_local_address 'IS:2-1-101-1'
   option uplink_interface 'br-lan'
   option passive_only '1'
   option capture_promiscuous '0'
 ```
 
-The names above are examples, not defaults. Validation checks only that the
+The names and address above are examples, not defaults. `gvs_local_address` is
+required when enabled and uses `IS:building-unit-room-machine`; it is encoded
+as the six-byte indoor logical address and incoming calls are matched against
+its first five bytes, as observed in the reference client. Validation checks only that the
 chosen interfaces exist and are administratively usable; it never discovers an
 interface and silently adopts it. A separate endpoint allowlist contains
 administrator-approved GVS device aliases and addresses.

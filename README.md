@@ -9,10 +9,15 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的原生门禁网络观察与集�
 
 ## 当前能力
 
-- 构建 x86_64 ImmortalWrt APK；目标为 25.12.1。
+最终目标和阶段验收见[完整主机模式与 APK 项目规划](docs/doorfast-host-mode-roadmap.md)。
+当前主程序已具备只读常驻服务入口；独立上线、主动信令和媒体尚需按规划实现。
+
+- 已有 x86_64 ImmortalWrt 25.12.1 APK 构建配方与 CI；当前代码的目标安装运行仍需阶段验证。
 - 读取并校验 Doorfast 的基础配置模型。
-- 已有基础代码可对管理员明确选择的接口进行受限 SIP 捕获；GVS 是已确认的主线设计，接口名称不会预设为 `eth0` 或 `wlan0`。
-- GVS 帧解析与会话归一化将在匿名化夹具就绪后实现；当前基础代码仍只含历史 SIP 解析。
+- 可通过 `--config` 对管理员明确选择的物理口、VLAN、bridge 或 bond 持续捕获 GVS 控制流量；接口名称不会预设为 `eth0` 或 `wlan0`。
+- 实时服务与离线回放共用 GVS 接收事务处理器，可观察来电、摘机交换、进入通话、时间同步、挂断、振铃抢占和空闲超时。
+- 运行中捕获失效会结束当前会话并进行 5 次有限退避重开；连续失败后退出并由 procd 按策略处理。
+- 已实现 GVS 公共头解析、逻辑身份过滤及结束原因统计，并有合成和混合回放测试。
 - 生成经管理员审批才可使用的发现候选项。
 - 对自动化策略生成可审计的“允许 / 拒绝 / 延迟”决定。
 
@@ -25,14 +30,17 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的原生门禁网络观察与集�
 config gvs 'main'
 	option enabled '0'
 	option gvs_interface 'br-door'
+	option gvs_local_address 'IS:2-1-101-1'
 	option uplink_interface 'br-lan'
 	option passive_only '1'
 	option capture_promiscuous '0'
 ```
 
-只有在填写 `gvs_interface`、保持 `passive_only '1'` 并将 `enabled` 改为 `1` 后，
-GVS 被动处理才可启用。Doorfast 不会修改网络、路由或防火墙；本阶段也不会发送 GVS
-控制报文。
+当前常驻服务要求填写 `gvs_interface`、`gvs_local_address`、保持 `passive_only '1'` 并将
+`enabled` 改为 `1`。`gvs_local_address` 使用
+`IS:楼栋-单元-房间-分机` 格式，例如 `IS:2-1-101-1`；它仅用于本机入站帧筛选。
+Doorfast 不会修改网络、路由或防火墙；本阶段也不会发送 GVS 控制报文。
+修改 `/etc/config/doorfast` 后执行 `/etc/init.d/doorfast reload` 会停止旧实例并按新配置启动。
 
 ## 不会做的事
 
@@ -42,6 +50,9 @@ GVS 被动处理才可启用。Doorfast 不会修改网络、路由或防火墙�
 - 不采集或提交真实住址、住户号码、密码、令牌、视频或完整原始 GVS 报文。
 
 ## 构建与测试
+
+离线检查命令为 `./build/doorfast --inspect-pcap capture.pcap IS:2-1-101-1`，其中地址应替换为测试环境配置。
+目前只输出解析和会话统计；它尚不代表完整来电流程或主机模式互操作验证。
 
 在具备 libpcap 开发文件的主机上执行：
 
