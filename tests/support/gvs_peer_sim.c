@@ -38,6 +38,23 @@ static int df_gvs_sim_header_fields(
     return DF_OK;
 }
 
+static bool df_gvs_peer_sim_target_valid(const struct df_gvs_peer_sim *sim,
+                                         const uint8_t target[6]) {
+    uint8_t peers[DF_GVS_INDOOR_PEER_COUNT][6];
+    size_t index;
+
+    if (sim == NULL || target == NULL ||
+        df_gvs_identity_indoor_peers(sim->local, peers) != DF_OK) {
+        return false;
+    }
+    for (index = 0; index < DF_GVS_INDOOR_PEER_COUNT; ++index) {
+        if (memcmp(peers[index], target, 6) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int df_gvs_peer_sim_enqueue_control(
     struct df_gvs_peer_sim *sim, const uint8_t destination[6],
     const uint8_t source[6], uint8_t family, uint8_t opcode,
@@ -53,6 +70,24 @@ static int df_gvs_peer_sim_enqueue_control(
             data, sizeof(data), &length, destination, source, family, opcode,
             payload, payload_length, df_gvs_sim_header_fields, NULL) != DF_OK) {
         return DF_ERR_INVALID;
+    }
+    index = (sim->frame_head + sim->frame_count) %
+            DF_GVS_SIM_FRAME_CAPACITY;
+    memcpy(sim->frames[index].data, data, length);
+    sim->frames[index].length = length;
+    sim->frame_count++;
+    return DF_OK;
+}
+
+static int df_gvs_peer_sim_enqueue_frame(struct df_gvs_peer_sim *sim,
+                                         const uint8_t *data,
+                                         size_t length) {
+    size_t index;
+
+    if (sim == NULL || data == NULL || length == 0U ||
+        length > DF_GVS_SYNC_MAX_PACKET_SIZE ||
+        sim->frame_count >= DF_GVS_SIM_FRAME_CAPACITY) {
+        return DF_ERR_IO;
     }
     index = (sim->frame_head + sim->frame_count) %
             DF_GVS_SIM_FRAME_CAPACITY;
@@ -92,6 +127,7 @@ int df_gvs_peer_sim_create(struct df_gvs_peer_sim **sim,
     created->door[4] = local[4];
     created->door[5] = 0x00;
     created->now_ms = now_ms;
+    created->peer_version = 7U;
     *sim = created;
     return DF_OK;
 }
@@ -103,21 +139,82 @@ void df_gvs_peer_sim_destroy(struct df_gvs_peer_sim *sim) {
 int df_gvs_peer_sim_emit(const struct df_gvs_presence_action *action,
                          void *context) {
     struct df_gvs_peer_sim *sim = context;
+    struct df_gvs_peer_sim next;
+    uint8_t payload[2];
+    bool version_reply;
+    bool sync_reply;
 
     if (sim == NULL || action == NULL ||
         action->type < DF_GVS_PRESENCE_PEER_PROBE ||
-        action->type > DF_GVS_PRESENCE_PERIODIC_SYNC) {
+        action->type > DF_GVS_PRESENCE_PERIODIC_SYNC ||
+        !df_gvs_peer_sim_target_valid(sim, action->target)) {
         return DF_ERR_INVALID;
     }
-    sim->action_counts[action->type]++;
+    version_reply = sim->scenario == DF_GVS_SIM_LOWER_PEER &&
+                    action->type == DF_GVS_PRESENCE_SYNC_VERSION_ASK &&
+                    !sim->sync_reply_sent &&
+                    memcmp(action->target, sim->lower_peer, 6) == 0;
+    sync_reply = sim->scenario == DF_GVS_SIM_MAINTAINER_LOSS &&
+                 action->type == DF_GVS_PRESENCE_SYNC_ASK_ACTION &&
+                 !sim->sync_reply_sent &&
+                 memcmp(action->target, sim->lower_peer, 6) == 0;
+    if (!version_reply && !sync_reply) {
+        sim->action_counts[action->type]++;
+        return DF_OK;
+    }
+    if (sync_reply && sim->now_ms > UINT64_MAX - 60000U) {
+        return DF_ERR_INVALID;
+    }
+    next = *sim;
+    payload[0] = (uint8_t)(next.peer_version & 0xffU);
+    payload[1] = (uint8_t)(next.peer_version >> 8U);
+    if (df_gvs_peer_sim_enqueue_control(
+            &next, next.local, next.lower_peer, 0x91,
+            version_reply ? 0x82 : 0x81, payload, sizeof(payload)) != DF_OK) {
+        return DF_ERR_IO;
+    }
+    next.sync_reply_sent = true;
+    if (sync_reply) {
+        next.periodic_due_ms = next.now_ms + 60000U;
+    }
+    next.action_counts[action->type]++;
+    *sim = next;
     return DF_OK;
 }
 
 int df_gvs_peer_sim_advance(struct df_gvs_peer_sim *sim, uint64_t now_ms) {
+    struct df_gvs_peer_sim next;
+    struct df_gvs_sync_store remote_store;
+    struct df_gvs_presence_action action = {
+        .type = DF_GVS_PRESENCE_PERIODIC_SYNC,
+    };
+    uint8_t data[DF_GVS_SYNC_MAX_PACKET_SIZE];
+    size_t length;
+
     if (sim == NULL || now_ms < sim->now_ms) {
         return DF_ERR_INVALID;
     }
-    sim->now_ms = now_ms;
+    next = *sim;
+    next.now_ms = now_ms;
+    if (next.scenario == DF_GVS_SIM_MAINTAINER_LOSS &&
+        next.sync_reply_sent && !next.periodic_sent &&
+        now_ms >= next.periodic_due_ms) {
+        df_gvs_sync_store_init(&remote_store);
+        if (df_gvs_sync_store_register(&remote_store, "sim_state", "present") !=
+            DF_OK) {
+            return DF_ERR_INVALID;
+        }
+        memcpy(action.target, next.local, sizeof(action.target));
+        if (df_gvs_sync_periodic_serialize(
+                &remote_store, 0, &action, next.lower_peer,
+                next.peer_version, data, sizeof(data), &length,
+                df_gvs_sim_header_fields, NULL) != DF_OK ||
+            df_gvs_peer_sim_enqueue_frame(&next, data, length) != DF_OK) {
+            return DF_ERR_IO;
+        }
+        next.periodic_sent = true;
+    }
+    *sim = next;
     return DF_OK;
 }
 

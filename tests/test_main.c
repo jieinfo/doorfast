@@ -20,6 +20,9 @@ void test_gvs_observer_batch_preemption(void);
 void test_gvs_replay_preemption_deadline(void);
 void test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue(void);
 void test_gvs_peer_sim_builds_synthetic_call_frame(void);
+void test_gvs_peer_sim_elects_maintainer_without_peers(void);
+void test_gvs_peer_sim_follows_lower_peer_sync_replies(void);
+void test_gvs_peer_sim_takes_over_after_two_missed_periods(void);
 
 int df_test_failure_count = 0;
 
@@ -66,7 +69,7 @@ void test_discovery_requires_approval(void);
 void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 58;
+    return 61;
 }
 
 int main(void) {
@@ -75,9 +78,12 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(58, test_suite_count());
+    TEST_ASSERT_INT_EQ(61, test_suite_count());
     test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue();
     test_gvs_peer_sim_builds_synthetic_call_frame();
+    test_gvs_peer_sim_elects_maintainer_without_peers();
+    test_gvs_peer_sim_follows_lower_peer_sync_replies();
+    test_gvs_peer_sim_takes_over_after_two_missed_periods();
     test_gvs_presence_receives_sync_replies();
     test_gvs_sync_updates_version_and_registered_values();
     test_gvs_sync_serializes_periodic_chunks_and_json_escaping();
