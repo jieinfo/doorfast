@@ -44,7 +44,7 @@ flowchart LR
 - 一个可选的同户 `0x61` 对端身份及其同步版本；
 - 一个模拟门口机 `0x32` 来源身份；
 - 当前单调毫秒时间；
-- 固定容量帧队列和固定容量轨迹队列；
+- 固定容量帧队列和各动作类型的计数器；
 - 对端是否在线、是否回复同步询问、是否发送周期数据等场景开关。
 
 公开接口固定为：
@@ -70,9 +70,14 @@ int df_gvs_peer_sim_next_frame(struct df_gvs_peer_sim *sim,
                                const uint8_t **frame, size_t *length);
 int df_gvs_peer_sim_make_call(struct df_gvs_peer_sim *sim,
                               const uint8_t destination[6]);
+size_t df_gvs_peer_sim_action_count(
+    const struct df_gvs_peer_sim *sim,
+    enum df_gvs_presence_action_type type);
 ```
 
 `df_gvs_peer_sim_emit()` 可直接作为 `df_gvs_runtime_sync_tick()` 的动作回调。它只记录动作并按场景把回复序列化进队列，不递归调用 Doorfast。`df_gvs_peer_sim_advance()` 只校验并更新模拟器的单调时间；调用方再推进 Doorfast 计时，通过 `df_gvs_peer_sim_next_frame()` 按 FIFO 顺序取出回复并交给公开接收入口。创建时只分配一个固定容量状态对象，运行期间不扩展队列；销毁函数负责释放它。
+
+现有证据尚未确认 `0x07` 候选探测的入站回复操作码，生产运行时也没有对应解析入口。模拟器因此只记录 `PEER_PROBE` 动作，不构造猜测的在线回复，也不直接调用 `df_gvs_presence_observe_peer()` 伪造网络结果。参与 `91/*` 同步选举的模拟对端不会自动增加 `online_peers`；命令行轨迹将其标记为 `peer_presence_evidence_gap`。
 
 固定容量达到上限、时间倒退、未知动作、序列化失败或无效身份均返回错误，并保持调用前状态。模拟器不动态增长队列。
 
@@ -86,7 +91,7 @@ build/gvs-peer-sim --scenario lower-peer
 build/gvs-peer-sim --scenario maintainer-loss
 ```
 
-工具使用公开测试身份 `IS:2-1-101-2`，不接受接口名、IP 地址、密钥或任意报文输入。每行输出一个 JSON 对象，至少包含 `time_ms`、`event`、`phase`、`role`、`version` 和 `online_peers`。来电结果增加 `destination_scope`、`accepted_call` 和 `session_state`。输出不包含两个公共头测试字段或完整原始帧。
+工具使用公开测试身份 `IS:2-1-101-2`，不接受接口名、IP 地址、密钥或任意报文输入。命令行工具在每个固定场景里按预定里程碑查询 Doorfast 公开状态并输出 JSON Lines；模拟器库不维护第二份 Doorfast 状态或独立轨迹队列。每行至少包含 `time_ms`、`event`、`phase`、`role`、`version` 和 `online_peers`。同步对端参与选举但缺少已确认 `0x07` 回复时增加 `peer_presence_evidence_gap:true`。来电结果增加 `destination_scope`、`accepted_call` 和 `session_state`。输出不包含两个公共头测试字段或完整原始帧。
 
 命令参数错误返回退出码 2，模拟或协议错误返回退出码 1，场景完成返回 0。输出顺序必须稳定，以便 CI 直接比较。
 
@@ -124,10 +129,11 @@ Doorfast 先接受同户对端的周期同步并成为跟随者。模拟器随�
 2. `91/81` 的跟随者转换。
 3. `91/82` 的版本、分机号和阶段门控。
 4. 一轮缺失不接管、两轮缺失接管。
-5. 本机完整地址与同户其他分机来电被接受，其他住户被拒绝。
-6. 截断、长度不一致、错误魔数和错误操作码。
-7. 时间倒退、队列满和响应生成失败保持状态不变。
-8. 固定测试字段不会出现在 JSON Lines 输出。
+5. 探测动作被计数，但同步参与者不会在缺少 `0x07` 证据时增加 `online_peers`。
+6. 本机完整地址与同户其他分机来电被接受，其他住户被拒绝。
+7. 截断、长度不一致、错误魔数和错误操作码。
+8. 时间倒退、队列满和响应生成失败保持状态不变。
+9. 固定测试字段不会出现在 JSON Lines 输出。
 
 新增 `tests/test_gvs_peer_sim_cli.sh` 验证三个命令行场景的退出码、关键状态序列、稳定输出及非法参数。现有 `make -B test doorfast`、CLI、包清单、LuCI 和 Python 回归必须继续通过。模拟器不进入 `package/doorfast/Makefile`，APK 清单测试要明确拒绝安装 `gvs-peer-sim`。
 
