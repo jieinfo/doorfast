@@ -15,18 +15,22 @@ SIM_SOURCES := tools/gvs-peer-sim.c tests/support/gvs_peer_sim.c \
 	src/gvs_observer.c src/gvs_presence.c src/gvs_priority.c \
 	src/gvs_receive.c src/gvs_runtime_sync.c src/gvs_serialize.c \
 	src/gvs_session.c src/gvs_sync.c src/gvs_sync_adapters.c
+UDP_INJECT_SOURCES := tools/gvs-peer-udp-inject.c \
+	$(filter-out tools/gvs-peer-sim.c,$(SIM_SOURCES))
 
 TEST_SOURCES += tests/test_gvs_priority.c src/gvs_priority.c
 TEST_SOURCES += tests/test_gvs_peer_sim.c tests/support/gvs_peer_sim.c
 DAEMON_SOURCES += src/gvs_priority.c
 
-.PHONY: test doorfast peer-sim clean
+.PHONY: test doorfast peer-sim peer-udp-inject clean
 
 test: build/doorfast-tests
 
 doorfast: build/doorfast
 
 peer-sim: build/gvs-peer-sim
+
+peer-udp-inject: build/gvs-peer-udp-inject
 
 build/doorfast-tests: $(TEST_SOURCES) tests/test.h src/doorfast.h src/gvs_priority.h
 
@@ -43,6 +47,9 @@ build/doorfast: $(DAEMON_SOURCES) | build
 
 build/gvs-peer-sim: $(SIM_SOURCES) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(SIM_SOURCES) -o $@
+
+build/gvs-peer-udp-inject: $(UDP_INJECT_SOURCES) | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(UDP_INJECT_SOURCES) -o $@
 
 clean:
 	rm -rf build

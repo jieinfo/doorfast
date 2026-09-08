@@ -11,6 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libpcap-dev
       - run: make test
+      - run: python3 -m unittest tests/test_gvs_peer_udp.py
       - run: sh tests/test_main_cli.sh
       - run: sh tests/test_package_manifest.sh
 
@@ -57,7 +58,7 @@ jobs:
           test -n "$luci_list"
           grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
           grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"
-          ! grep -Fq 'gvs-peer-sim' "$doorfast_list" "$luci_list"
+          ! grep -Fq 'gvs-peer-' "$doorfast_list" "$luci_list"
       - uses: actions/upload-artifact@v4
         with:
           name: doorfast-apk
