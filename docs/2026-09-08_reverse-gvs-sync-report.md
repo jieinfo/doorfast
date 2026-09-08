@@ -61,11 +61,13 @@ Doorfast 生成的规范化 JSON 为：
 cd /Users/shenwenjie/Documents/PVE/doorfast/.worktrees/feature-transparent-foundation
 make -B test doorfast
 sh tests/test_main_cli.sh
+sh tests/test_gvs_peer_sim_cli.sh
 sh tests/test_package_manifest.sh
-python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
+node tests/test_luci_status.js
+python3 -B -m unittest discover -s tests -p 'test_*.py'
 ```
 
-另使用 AddressSanitizer 和 UndefinedBehaviorSanitizer 运行同一套 52 项 C 测试。本地编译、内存回放、命令行测试、APK 软件包清单测试和 Python 协议模型测试均纳入收尾验证。
+另使用 AddressSanitizer 和 UndefinedBehaviorSanitizer 运行同一套 63 项 C 测试。本地编译、内存回放、确定性场景命令行测试、APK 软件包清单测试、LuCI JavaScript 和 Python 协议模型测试均纳入收尾验证。
 
 ## 5. Evidence → Finding → Path
 
@@ -170,6 +172,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `linked_workitem`: M1, M5, P
 - `supersedes`: none
 
+#### E-009
+
+- `title`: 离线 GVS 对端模拟器贯通生产选举、接管与来电路由入口
+- `observed_at`: 2026-09-09
+- `source_type`: command
+- `source_ref`: `tests/support/gvs_peer_sim.c`, `tools/gvs-peer-sim.c`, `tests/test_gvs_peer_sim.c`, `tests/test_gvs_peer_sim_cli.sh`
+- `content_hash`: `gvs_peer_sim.c=8a2eccc1b20a1c39431726b3790d166cc3302686b1e414798c44d9408781a21d; gvs-peer-sim.c=c35fa55be90890af8a30fb700a2bbe6642e8f2337bf047445f3622a83f691e4d; test_gvs_peer_sim.c=cf398d45c2494d3ddf58c8c392f5fa8a66f6fab4d2c23677b07005d534f0c52b; test_gvs_peer_sim_cli.sh=dd8612b81b06af156e1ac5bf919b7b47bbfe3d69de65a4d18a297f5112bf2ef8`
+- `artifact_path`: `tests/support/gvs_peer_sim.c`, `tools/gvs-peer-sim.c`, `tests/test_gvs_peer_sim.c`, `tests/test_gvs_peer_sim_cli.sh`
+- `repro_command`: `make -B test doorfast peer-sim && sh tests/test_gvs_peer_sim_cli.sh && sh tests/test_package_manifest.sh`
+- `raw_excerpt`: 无对端场景在 7500 ms 成为维护者，并产生 9 次同步询问和 9 次版本询问；低分机号对端使本机保持跟随者；维护者场景在一个有效周期后第一次漏周期仍跟随，第二次漏周期接管。同户目标来电进入 `ringing`，其他住户保持 `idle`。同步对端始终为 `online_peers=0`，明确保留候选在线回复的证据缺口。重复运行 JSON Lines 逐字一致，且不输出固定公共头字段。
+- `linked_workitem`: M2
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -263,6 +278,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `repro_steps`: 按 E-008 在目标虚拟机执行 `r2 → r3`，比较升级前后 PID、配置哈希和 ubus 版本；再执行备份恢复式回滚。
 - `remediation`: 正式发布前签署两个包，并在未来配置结构变化时为每个迁移边界增加目标机测试。
 
+#### F-008
+
+- `title`: 本地协议对端可以确定性验证选举、失联接管和同户来电选择
+- `severity`: n/a_re
+- `category`: validation
+- `status`: validated
+- `evidence_ids`: E-001, E-009
+- `location`: `tests/support/gvs_peer_sim.c`, `tools/gvs-peer-sim.c`, `src/gvs_runtime_sync.c`, `src/gvs_receive.c`
+- `impact`: Doorfast 的身份候选、同步状态机、完整 42 字节帧校验和会话入口可以在不联网的情况下端到端回归；这缩小了进入隔离 UDP 测试前的代码不确定性，但不证明真实门口机接受 Doorfast。
+- `confidence`: high
+- `repro_steps`: 运行 E-009 命令，比较两次 `no-peer` 输出，并检查三个内置场景的角色、漏周期和目标范围记录。
+- `remediation`: 下一阶段补充 `0x07` 入站回复证据、隔离虚拟网卡传输测试和真实设备接受性验证。
+
 ### Path P-001
 
 - `title`: 选举结束后的同步维护调用路径
@@ -293,6 +321,20 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
   4. ubus 返回备份的非零同步版本，随后可再次升级并自动切换进程。evidence: E-008 — finding: F-007
 - `residual_risks`: 正式包签名尚未验证；未来配置模式变化仍需专用迁移器；`/tmp` 备份不跨系统重启。
 
+### Path P-003
+
+- `title`: 配置身份到离线对端选举与来电会话的验证路径
+- `path_type`: callflow
+- `start`: 配置的六字节室内机逻辑身份
+- `goal`: 通过生产接口观察同步角色和门口机来电会话状态
+- `steps`:
+  1. 配置身份启动生产在线维护状态机并生成同户候选。evidence: E-001, E-009 — finding: F-008
+  2. 结构化探测、同步询问、版本询问和周期动作进入固定容量模拟器回调。evidence: E-009 — finding: F-008
+  3. 已验证格式的合成 `91/81`、`91/82`、`91/03` 帧通过 `df_gvs_runtime_sync_receive()` 返回，`03/01` 来电通过 `df_gvs_receive_datagram()` 返回。evidence: E-009 — finding: F-008
+  4. 公开同步状态快照和会话状态生成脱敏 JSON Lines，并以固定逻辑时间验证选举与接管。evidence: E-009 — finding: F-008
+  5. 因缺少已确认的 `0x07` 回复语义，模拟同步参与者不增加在线候选数，输出保持 `online_peers=0`。evidence: E-009 — finding: F-008
+- `residual_risks`: 真实公共头兼容性、`0x07` 候选在线回复、真实 UDP 交付和门口机接受性均未验证；离线模拟不等同于完整主机模式。
+
 ## 6. Timeline 与遗留问题
 
 | 时间 | 事件 |
@@ -306,5 +348,6 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 | 2026-09-08 | 增加只读 ubus 状态方法、独立 LuCI 状态页及双 APK 构建清单 |
 | 2026-09-08 | 修复空闲抓包阻塞 ubus，并在官方 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装生命周期冒烟 |
 | 2026-09-08 | 为核心 APK 增加升级后自动重启，并完成 `r2 → r3` 升级和备份恢复式回滚验收 |
+| 2026-09-09 | 完成固定容量离线 GVS 对端模拟器、三种选举/接管场景及同户来电路由回归 |
 
-当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级和备份恢复式回滚验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。公共头认证字段和真实设备接受性仍是进入网络发送前的主要关口；本阶段不证明完整主机模式。
+当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管和来电目标选择，但没有猜测 `0x07` 候选在线回复，也没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级和备份恢复式回滚验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性、UDP 交付和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
