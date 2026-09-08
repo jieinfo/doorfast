@@ -153,7 +153,7 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `content_hash`: `immortalwrt-25.12.1-x86-64-generic-ext4-combined.qcow2.gz=234f14e4e29282f887327fdd23695126fa41fef88829d792f95565d60b60fbc6; capture.c=367fd022c6e2e01ad048200ece067924e9559a3d82e97d5943b5f164e4f37581; runtime_service.c=dde36acd83e0e3e5430f5a93389d98ffcc6e1aa7c8dae56c5722fd81841a219e; doorfast-0.1.0-r1.apk=47fca4cd2961bf4b906bcfbe917d7cb92aacf084c5cc3f13c1967907b3b0376b; luci-app-doorfast-0.1.0-r1.apk=4a131ce902750d7333aa7144557e0b4c4ea85e64cc1f26e561472a82966b2430`
 - `artifact_path`: `build/ci-34218272315/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64/bin/packages/x86_64/base/`
 - `repro_command`: `install-apks.sh ARTIFACT_DIRECTORY && smoke-test.sh`; `reboot` 后再次运行 `smoke-test.sh`；`apk del luci-app-doorfast doorfast` 后重新安装并运行 `smoke-test.sh`
-- `raw_excerpt`: QEMU 11.1.1 TCG 上的 ImmortalWrt 25.12.1 `r37978-cd0a06bfd3fd`、`x86_64`、musl 环境成功安装两个 APK 及 `libpcap1` 等依赖。目标二进制动态链接到 x86_64 musl、libpcap、libubus、libubox、libblobmsg-json 和 libjson-c。空闲抓包时 `ubus -t 2 call doorfast status '{}'` 可返回；procd 停止后进程和 ubus 对象立即消失；启动及整机重启后单实例自动恢复。LuCI JavaScript 资源返回 HTTP 200，管理路径要求登录。卸载移除二进制和运行态同步文件，保留用户修改过且 SHA-256 不变的核心 UCI 配置；重装后同步文件重新生成。Actions `34218272315` 对提交 `ad2e80ed6a65629efc3c470f8273c7cd117b6025` 构建成功。开发包签名未加入干净系统信任库，测试时使用 `--allow-untrusted`；正式发布签名尚未验收。
+- `raw_excerpt`: QEMU 11.1.1 TCG 上的 ImmortalWrt 25.12.1 `r37978-cd0a06bfd3fd`、`x86_64`、musl 环境成功安装两个 APK 及 `libpcap1` 等依赖。目标二进制动态链接到 x86_64 musl、libpcap、libubus、libubox、libblobmsg-json 和 libjson-c。空闲抓包时 `ubus -t 2 call doorfast status '{}'` 可返回；向 `br-lan` 注入一条目标身份匹配、严格 42 字节公共头的合成 UDP/8300 来电帧后记录 `event=IncomingCall generation=1`，证明目标机捕获、提取、解析和会话入口贯通。procd 停止后进程和 ubus 对象立即消失；启动及整机重启后单实例自动恢复。LuCI JavaScript 资源返回 HTTP 200，管理路径要求登录。卸载移除二进制和运行态同步文件，保留用户修改过且 SHA-256 不变的核心 UCI 配置；重装后同步文件重新生成。Actions `34218272315` 对提交 `ad2e80ed6a65629efc3c470f8273c7cd117b6025` 构建成功。开发包签名未加入干净系统信任库，测试时使用 `--allow-untrusted`；正式发布签名尚未验收。
 - `linked_workitem`: M1, M5, P
 - `supersedes`: none
 
@@ -232,7 +232,7 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `status`: validated
 - `evidence_ids`: E-006, E-007
 - `location`: `src/capture.c`, `src/runtime_service.c`, `package/doorfast`, `package/luci-app-doorfast`
-- `impact`: Doorfast 核心和只读状态页可以在官方 ImmortalWrt 25.12.1 x86_64 环境安装并由 procd 持续运行；空闲抓包不会再阻塞 ubus。该结论仅覆盖被动平台生命周期，不证明真实 GVS 报文接收、主动上线或完整主机模式。
+- `impact`: Doorfast 核心和只读状态页可以在官方 ImmortalWrt 25.12.1 x86_64 环境安装并由 procd 持续运行；空闲抓包不会再阻塞 ubus，合成 GVS 来电帧可从目标网卡进入会话状态机。该结论仅覆盖被动平台生命周期和合成接收，不证明真实门口机互操作、主动上线或完整主机模式。
 - `confidence`: high
 - `repro_steps`: 使用 E-007 的官方镜像、APK 和命令复现首次安装、启停、冷启动及卸载重装。
 - `remediation`: 正式发布前补签名信任、版本升级/降级、长期运行和真实网络流量验收。
