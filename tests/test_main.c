@@ -9,6 +9,7 @@ void test_gvs_sync_receives_periodic_data_and_arbitrates_maintainer(void);
 void test_gvs_sync_state_round_trips_uci_atomically(void);
 void test_gvs_runtime_sync_routes_only_sync_frames(void);
 void test_gvs_runtime_sync_exposes_redacted_status_snapshot(void);
+void test_gvs_runtime_sync_names_only_valid_public_states(void);
 void test_gvs_sync_adapters_require_explicit_nonempty_sensitive_values(void);
 void test_gvs_priority_valid_matrix_and_unknown_categories(void);
 void test_gvs_session_preemption_transaction(void);
@@ -60,7 +61,7 @@ void test_discovery_requires_approval(void);
 void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 52;
+    return 53;
 }
 
 int main(void) {
@@ -69,7 +70,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(52, test_suite_count());
+    TEST_ASSERT_INT_EQ(53, test_suite_count());
     test_gvs_presence_receives_sync_replies();
     test_gvs_sync_updates_version_and_registered_values();
     test_gvs_sync_serializes_periodic_chunks_and_json_escaping();
@@ -79,6 +80,7 @@ int main(void) {
     test_gvs_sync_state_round_trips_uci_atomically();
     test_gvs_runtime_sync_routes_only_sync_frames();
     test_gvs_runtime_sync_exposes_redacted_status_snapshot();
+    test_gvs_runtime_sync_names_only_valid_public_states();
     test_gvs_sync_adapters_require_explicit_nonempty_sensitive_values();
     test_config_validation();
     test_gvs_config_requires_explicit_passive_interface();

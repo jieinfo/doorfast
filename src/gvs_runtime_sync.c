@@ -150,25 +150,24 @@ int df_gvs_runtime_sync_status(
     return DF_OK;
 }
 
-static const char *df_gvs_runtime_sync_phase_name(
-    enum df_gvs_presence_phase phase) {
+const char *df_gvs_runtime_sync_phase_name(enum df_gvs_presence_phase phase) {
     switch (phase) {
     case DF_GVS_PRESENCE_DOWN: return "down";
     case DF_GVS_PRESENCE_WAIT_SYNC: return "wait_sync";
     case DF_GVS_PRESENCE_SYNC_ASK: return "sync_ask";
     case DF_GVS_PRESENCE_SYNC_CHOOSE: return "sync_choose";
     case DF_GVS_PRESENCE_PERIODIC: return "periodic";
-    default: return "unknown";
+    default: return NULL;
     }
 }
 
-static const char *df_gvs_runtime_sync_role_name(enum df_gvs_sync_role role) {
+const char *df_gvs_runtime_sync_role_name(enum df_gvs_sync_role role) {
     switch (role) {
     case DF_GVS_SYNC_ROLE_DOWN: return "down";
     case DF_GVS_SYNC_ROLE_STARTING: return "starting";
     case DF_GVS_SYNC_ROLE_MAINTAINER: return "maintainer";
     case DF_GVS_SYNC_ROLE_FOLLOWER: return "follower";
-    default: return "unknown";
+    default: return NULL;
     }
 }
 
@@ -179,6 +178,8 @@ static const char *df_gvs_runtime_sync_bool(bool value) {
 int df_gvs_runtime_sync_status_json(const struct df_gvs_runtime_sync *sync,
                                     char *output, size_t capacity) {
     struct df_gvs_runtime_sync_status status;
+    const char *phase_name;
+    const char *role_name;
     int length;
 
     if (output == NULL || capacity == 0U) {
@@ -188,6 +189,11 @@ int df_gvs_runtime_sync_status_json(const struct df_gvs_runtime_sync *sync,
     if (df_gvs_runtime_sync_status(sync, &status) != DF_OK) {
         return DF_ERR_INVALID;
     }
+    phase_name = df_gvs_runtime_sync_phase_name(status.phase);
+    role_name = df_gvs_runtime_sync_role_name(status.role);
+    if (phase_name == NULL || role_name == NULL) {
+        return DF_ERR_INVALID;
+    }
     length = snprintf(
         output, capacity,
         "{\"phase\":\"%s\",\"role\":\"%s\",\"sync_version\":%u,"
@@ -195,8 +201,7 @@ int df_gvs_runtime_sync_status_json(const struct df_gvs_runtime_sync *sync,
         "\"adapters\":{\"registered\":%zu,\"enabled\":%zu},"
         "\"last_receive\":{\"opcode\":%u,\"handled\":%s,"
         "\"accepted\":%s,\"rejected\":%s,\"resend_local\":%s}}",
-        df_gvs_runtime_sync_phase_name(status.phase),
-        df_gvs_runtime_sync_role_name(status.role),
+        phase_name, role_name,
         (unsigned)status.sync_version, status.periodic_misses,
         status.online_peers, status.registered_adapters,
         status.enabled_adapters, (unsigned)status.last_receive.opcode,

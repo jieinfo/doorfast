@@ -59,6 +59,9 @@ int df_gvs_runtime_sync_receive(
 int df_gvs_runtime_sync_status(
     const struct df_gvs_runtime_sync *sync,
     struct df_gvs_runtime_sync_status *status);
+const char *df_gvs_runtime_sync_phase_name(
+    enum df_gvs_presence_phase phase);
+const char *df_gvs_runtime_sync_role_name(enum df_gvs_sync_role role);
 int df_gvs_runtime_sync_status_json(const struct df_gvs_runtime_sync *sync,
                                     char *output, size_t capacity);
 

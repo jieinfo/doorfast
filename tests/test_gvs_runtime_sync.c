@@ -147,3 +147,33 @@ void test_gvs_runtime_sync_exposes_redacted_status_snapshot(void) {
                                                        sizeof(small)));
     TEST_ASSERT_INT_EQ(0, small[0]);
 }
+
+void test_gvs_runtime_sync_names_only_valid_public_states(void) {
+    TEST_ASSERT_INT_EQ(
+        0, strcmp("down",
+                  df_gvs_runtime_sync_phase_name(DF_GVS_PRESENCE_DOWN)));
+    TEST_ASSERT_INT_EQ(
+        0, strcmp("wait_sync", df_gvs_runtime_sync_phase_name(
+                                   DF_GVS_PRESENCE_WAIT_SYNC)));
+    TEST_ASSERT_INT_EQ(
+        0, strcmp("sync_ask", df_gvs_runtime_sync_phase_name(
+                                  DF_GVS_PRESENCE_SYNC_ASK)));
+    TEST_ASSERT_INT_EQ(
+        0, strcmp("sync_choose", df_gvs_runtime_sync_phase_name(
+                                     DF_GVS_PRESENCE_SYNC_CHOOSE)));
+    TEST_ASSERT_INT_EQ(
+        0, strcmp("periodic",
+                  df_gvs_runtime_sync_phase_name(DF_GVS_PRESENCE_PERIODIC)));
+    TEST_ASSERT_INT_EQ(
+        0, strcmp("maintainer", df_gvs_runtime_sync_role_name(
+                                    DF_GVS_SYNC_ROLE_MAINTAINER)));
+    TEST_ASSERT_INT_EQ(
+        0, strcmp("follower", df_gvs_runtime_sync_role_name(
+                                  DF_GVS_SYNC_ROLE_FOLLOWER)));
+    TEST_ASSERT_INT_EQ(
+        1, df_gvs_runtime_sync_phase_name(
+               (enum df_gvs_presence_phase)99) == NULL);
+    TEST_ASSERT_INT_EQ(
+        1,
+        df_gvs_runtime_sync_role_name((enum df_gvs_sync_role)99) == NULL);
+}
