@@ -2,6 +2,7 @@
 
 #include "gvs_frame.h"
 #include "gvs_peer_sim.h"
+#include "gvs_receive.h"
 #include "gvs_runtime_sync.h"
 #include "test.h"
 
@@ -157,5 +158,114 @@ void test_gvs_peer_sim_takes_over_after_two_missed_periods(void) {
     TEST_ASSERT_INT_EQ(3, (int)df_gvs_peer_sim_action_count(
                               sim, DF_GVS_PRESENCE_PERIODIC_SYNC));
     TEST_ASSERT_INT_EQ(0, (int)status.online_peers);
+    df_gvs_peer_sim_destroy(sim);
+}
+
+static int sim_receive_call(struct df_gvs_peer_sim *sim,
+                            const uint8_t destination[6],
+                            const uint8_t local[6],
+                            struct df_gvs_session *session,
+                            struct df_gvs_receive_result *result) {
+    const uint8_t *frame;
+    size_t length;
+    struct df_gvs_deadline deadline = {0};
+
+    if (df_gvs_peer_sim_make_call(sim, destination) != DF_OK ||
+        df_gvs_peer_sim_next_frame(sim, &frame, &length) != DF_OK) {
+        return DF_ERR_IO;
+    }
+    return df_gvs_receive_datagram(frame, length, local, session, &deadline,
+                                   100, result);
+}
+
+void test_gvs_peer_sim_routes_calls_by_apartment_scope(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 2};
+    const uint8_t same_apartment_other_extension[6] = {
+        0x61, 2, 1, 1, 1, 4,
+    };
+    const uint8_t other_apartment[6] = {0x61, 2, 1, 1, 2, 2};
+    struct df_gvs_peer_sim *sim = NULL;
+    struct df_gvs_session session = {0};
+    struct df_gvs_receive_result result;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_peer_sim_create(
+                                  &sim, DF_GVS_SIM_NO_PEER, local, 0));
+    TEST_ASSERT_INT_EQ(DF_OK,
+                       sim_receive_call(sim, local, local, &session, &result));
+    TEST_ASSERT_INT_EQ(1, result.accepted_call);
+    TEST_ASSERT_INT_EQ(1, (int)result.transition.count);
+    TEST_ASSERT_INT_EQ(DF_EVENT_INCOMING_CALL,
+                       result.transition.events[0].type);
+    TEST_ASSERT_INT_EQ(DF_GVS_RINGING, session.state);
+
+    memset(&session, 0, sizeof(session));
+    TEST_ASSERT_INT_EQ(
+        DF_OK, sim_receive_call(sim, same_apartment_other_extension, local,
+                                &session, &result));
+    TEST_ASSERT_INT_EQ(1, result.accepted_call);
+    TEST_ASSERT_INT_EQ(1, (int)result.transition.count);
+    TEST_ASSERT_INT_EQ(DF_EVENT_INCOMING_CALL,
+                       result.transition.events[0].type);
+    TEST_ASSERT_INT_EQ(DF_GVS_RINGING, session.state);
+
+    memset(&session, 0, sizeof(session));
+    TEST_ASSERT_INT_EQ(
+        DF_OK, sim_receive_call(sim, other_apartment, local, &session, &result));
+    TEST_ASSERT_INT_EQ(0, result.accepted_call);
+    TEST_ASSERT_INT_EQ(0, (int)result.transition.count);
+    TEST_ASSERT_INT_EQ(DF_GVS_IDLE, session.state);
+    df_gvs_peer_sim_destroy(sim);
+}
+
+void test_gvs_peer_sim_rejects_malformed_and_non_call_frames(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 2};
+    struct df_gvs_peer_sim *sim = NULL;
+    const uint8_t *frame;
+    size_t length;
+    uint8_t packet[DF_GVS_SYNC_MAX_PACKET_SIZE];
+    struct df_gvs_session session;
+    struct df_gvs_deadline deadline;
+    struct df_gvs_receive_result result;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_peer_sim_create(
+                                  &sim, DF_GVS_SIM_NO_PEER, local, 0));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_peer_sim_make_call(sim, local));
+    TEST_ASSERT_INT_EQ(DF_OK,
+                       df_gvs_peer_sim_next_frame(sim, &frame, &length));
+    memcpy(packet, frame, length);
+
+    memset(&session, 0, sizeof(session));
+    memset(&deadline, 0, sizeof(deadline));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_receive_datagram(packet, 41, local, &session,
+                                               &deadline, 100, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_IDLE, session.state);
+
+    packet[0] = 'X';
+    memset(&session, 0, sizeof(session));
+    memset(&deadline, 0, sizeof(deadline));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_receive_datagram(packet, length, local, &session,
+                                               &deadline, 100, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_IDLE, session.state);
+    packet[0] = 'G';
+
+    packet[40] = 1;
+    memset(&session, 0, sizeof(session));
+    memset(&deadline, 0, sizeof(deadline));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_receive_datagram(packet, length, local, &session,
+                                               &deadline, 100, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_IDLE, session.state);
+    packet[40] = 0;
+
+    packet[39] = 0x50;
+    memset(&session, 0, sizeof(session));
+    memset(&deadline, 0, sizeof(deadline));
+    TEST_ASSERT_INT_EQ(DF_OK,
+                       df_gvs_receive_datagram(packet, length, local, &session,
+                                               &deadline, 100, &result));
+    TEST_ASSERT_INT_EQ(0, result.accepted_call);
+    TEST_ASSERT_INT_EQ(DF_GVS_IDLE, session.state);
     df_gvs_peer_sim_destroy(sim);
 }
