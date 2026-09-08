@@ -51,7 +51,7 @@ int df_gvs_frame_parse(const uint8_t *data, size_t length,
     frame->opcode = data[DF_GVS_OPCODE_OFFSET];
     frame->payload_length = (uint16_t)(data[DF_GVS_PAYLOAD_LENGTH_OFFSET] |
                                        ((uint16_t)data[DF_GVS_PAYLOAD_LENGTH_OFFSET + 1] << 8));
-    if (length != DF_GVS_PAYLOAD_OFFSET + frame->payload_length) {
+    if (length != (size_t)DF_GVS_PAYLOAD_OFFSET + (size_t)frame->payload_length) {
         return DF_ERR_INVALID;
     }
     frame->payload = data + DF_GVS_PAYLOAD_OFFSET;
