@@ -9,8 +9,10 @@
 把同一次构建产生的两个 APK 上传到路由器，然后在其所在目录执行：
 
 ```sh
-apk add ./doorfast-0.1.0-r1.apk ./luci-app-doorfast-0.1.0-r1.apk
+apk add ./doorfast-0.1.0-r2.apk ./luci-app-doorfast-0.1.0-r1.apk
 ```
+
+正式发布包应使用项目发布密钥签名。GitHub Actions 生成的开发测试包使用临时构建密钥，未把该密钥加入测试机信任库时，只能在隔离测试环境用 `apk add --allow-untrusted` 安装；不要把这一选项用于正式发布流程。
 
 核心包默认不启动。先查看 `/etc/config/doorfast`，按本机情况填写接口和六字节逻辑地址，再启用服务：
 
@@ -88,4 +90,4 @@ Doorfast 即使暂时连不上 ubus，也会继续执行被动观察，并每 5 
 apk del luci-app-doorfast doorfast
 ```
 
-卸载前如需保留配置，请先备份 `/etc/config/doorfast` 和 `/etc/config/doorfast-sync`。本阶段尚未完成升级、降级及配置迁移的目标系统验收。
+卸载会保留用户修改过的 `/etc/config/doorfast`，但运行态 `/etc/config/doorfast-sync` 会被移除；如需保留同步版本，请在卸载前备份两者。ImmortalWrt 25.12.1 x86_64 虚拟机已验证卸载、重装和核心配置保留，版本升级、降级及配置迁移仍待单独验收。

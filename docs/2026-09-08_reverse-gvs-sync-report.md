@@ -144,6 +144,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `linked_workitem`: M5, P
 - `supersedes`: none
 
+#### E-007
+
+- `title`: 官方 ImmortalWrt 25.12.1 x86_64 虚拟机完成 APK 运行验收
+- `observed_at`: 2026-09-08
+- `source_type`: command
+- `source_ref`: `src/capture.c`, `src/runtime_service.c`, `package/doorfast`, `package/luci-app-doorfast`
+- `content_hash`: `immortalwrt-25.12.1-x86-64-generic-ext4-combined.qcow2.gz=234f14e4e29282f887327fdd23695126fa41fef88829d792f95565d60b60fbc6; capture.c=367fd022c6e2e01ad048200ece067924e9559a3d82e97d5943b5f164e4f37581; runtime_service.c=dde36acd83e0e3e5430f5a93389d98ffcc6e1aa7c8dae56c5722fd81841a219e; doorfast-0.1.0-r1.apk=47fca4cd2961bf4b906bcfbe917d7cb92aacf084c5cc3f13c1967907b3b0376b; luci-app-doorfast-0.1.0-r1.apk=4a131ce902750d7333aa7144557e0b4c4ea85e64cc1f26e561472a82966b2430`
+- `artifact_path`: `build/ci-34218272315/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64/bin/packages/x86_64/base/`
+- `repro_command`: `install-apks.sh ARTIFACT_DIRECTORY && smoke-test.sh`; `reboot` 后再次运行 `smoke-test.sh`；`apk del luci-app-doorfast doorfast` 后重新安装并运行 `smoke-test.sh`
+- `raw_excerpt`: QEMU 11.1.1 TCG 上的 ImmortalWrt 25.12.1 `r37978-cd0a06bfd3fd`、`x86_64`、musl 环境成功安装两个 APK 及 `libpcap1` 等依赖。目标二进制动态链接到 x86_64 musl、libpcap、libubus、libubox、libblobmsg-json 和 libjson-c。空闲抓包时 `ubus -t 2 call doorfast status '{}'` 可返回；procd 停止后进程和 ubus 对象立即消失；启动及整机重启后单实例自动恢复。LuCI JavaScript 资源返回 HTTP 200，管理路径要求登录。卸载移除二进制和运行态同步文件，保留用户修改过且 SHA-256 不变的核心 UCI 配置；重装后同步文件重新生成。Actions `34218272315` 对提交 `ad2e80ed6a65629efc3c470f8273c7cd117b6025` 构建成功。开发包签名未加入干净系统信任库，测试时使用 `--allow-untrusted`；正式发布签名尚未验收。
+- `linked_workitem`: M1, M5, P
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -211,6 +224,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `repro_steps`: 运行 E-006 的主机测试与包清单验证；目标系统安装验收另行记录。
 - `remediation`: n/a
 
+#### F-006
+
+- `title`: 被动服务 APK 已通过目标系统生命周期冒烟
+- `severity`: n/a_re
+- `category`: validation
+- `status`: validated
+- `evidence_ids`: E-006, E-007
+- `location`: `src/capture.c`, `src/runtime_service.c`, `package/doorfast`, `package/luci-app-doorfast`
+- `impact`: Doorfast 核心和只读状态页可以在官方 ImmortalWrt 25.12.1 x86_64 环境安装并由 procd 持续运行；空闲抓包不会再阻塞 ubus。该结论仅覆盖被动平台生命周期，不证明真实 GVS 报文接收、主动上线或完整主机模式。
+- `confidence`: high
+- `repro_steps`: 使用 E-007 的官方镜像、APK 和命令复现首次安装、启停、冷启动及卸载重装。
+- `remediation`: 正式发布前补签名信任、版本升级/降级、长期运行和真实网络流量验收。
+
 ### Path P-001
 
 - `title`: 选举结束后的同步维护调用路径
@@ -225,6 +251,7 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
   5. 运行时记录同步决策，版本变化后原子保存独立 UCI 状态。evidence: E-004 — finding: F-003
   6. 状态快照将在线维护结果映射为脱敏 JSON，供后续本地管理层读取。evidence: E-005 — finding: F-004
   7. 目标构建将快照映射为只读 ubus 响应，LuCI 通过最小 ACL 周期读取并呈现。evidence: E-005, E-006 — finding: F-005
+  8. x86_64 目标 APK 在官方 25.12.1 虚拟机由 procd 运行，空闲时仍可响应 ubus 并支持重启和卸载重装。evidence: E-007 — finding: F-006
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未接入 UDP 和真实设备；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ## 6. Timeline 与遗留问题
@@ -238,5 +265,6 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 | 2026-09-08 | 接入被动抓包循环，并增加独立 UCI 版本状态与掉线恢复 |
 | 2026-09-08 | 登记首批敏感同步字段适配器，并增加脱敏运行时状态查询 |
 | 2026-09-08 | 增加只读 ubus 状态方法、独立 LuCI 状态页及双 APK 构建清单 |
+| 2026-09-08 | 修复空闲抓包阻塞 ubus，并在官方 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装生命周期冒烟 |
 
-当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。只读状态入口已经完成主机测试和软件包级验证，但尚未在 ImmortalWrt 虚拟机完成安装运行验收。公共头认证字段和真实设备接受性仍是进入网络发送前的主要关口；本阶段不证明完整主机模式。
+当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动和卸载重装验收；正式签名、升级/降级、长期运行与真实流量仍未完成。公共头认证字段和真实设备接受性仍是进入网络发送前的主要关口；本阶段不证明完整主机模式。
