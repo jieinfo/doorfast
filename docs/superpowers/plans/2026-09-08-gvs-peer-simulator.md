@@ -338,7 +338,6 @@ Do not push yet.
 - Create: `tools/gvs-peer-sim.c`
 - Create: `tests/test_gvs_peer_sim_cli.sh`
 - Modify: `Makefile`
-- Modify: `tests/test_package_manifest.sh`
 
 **Interfaces:**
 - Consumes: Task 1 simulator API, Task 2 deterministic stepping pattern, runtime status naming functions, and Task 3 call routing.
@@ -374,15 +373,9 @@ if build/gvs-peer-sim --scenario unknown >/dev/null 2>&1; then exit 1; else
 fi
 ```
 
-Add a package-manifest assertion that neither package recipe references the simulator:
-
-```sh
-! grep -R -q 'gvs-peer-sim\|gvs_peer_sim' package/doorfast package/luci-app-doorfast scripts/prepare-sdk-package.sh
-```
-
 - [ ] **Step 2: Run the CLI test to verify RED**
 
-Run:
+Run the behavior test and existing package contract test:
 
 ```sh
 sh tests/test_gvs_peer_sim_cli.sh
@@ -441,12 +434,12 @@ sh tests/test_gvs_peer_sim_cli.sh
 sh tests/test_package_manifest.sh
 ```
 
-Expected: both scripts exit 0; repeated no-peer output is byte-identical; package recipes contain no simulator reference.
+Expected: both scripts exit 0 and repeated no-peer output is byte-identical. APK exclusion is verified from the generated package file list after the single final target build, not by grepping source text.
 
 - [ ] **Step 6: Commit the CLI locally**
 
 ```sh
-git add Makefile tools/gvs-peer-sim.c tests/test_gvs_peer_sim_cli.sh tests/test_package_manifest.sh
+git add Makefile tools/gvs-peer-sim.c tests/test_gvs_peer_sim_cli.sh
 git commit -m "test: add deterministic GVS simulator scenarios"
 ```
 
