@@ -9,7 +9,7 @@
 把同一次构建产生的两个 APK 上传到路由器，然后在其所在目录执行：
 
 ```sh
-apk add ./doorfast-0.1.0-r2.apk ./luci-app-doorfast-0.1.0-r1.apk
+apk add ./doorfast-0.1.0-r3.apk ./luci-app-doorfast-0.1.0-r1.apk
 ```
 
 正式发布包应使用项目发布密钥签名。GitHub Actions 生成的开发测试包使用临时构建密钥，未把该密钥加入测试机信任库时，只能在隔离测试环境用 `apk add --allow-untrusted` 安装；不要把这一选项用于正式发布流程。

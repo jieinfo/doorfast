@@ -43,6 +43,10 @@ grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
 grep -F "config state 'sync'" package/doorfast/files/doorfast-sync.config
 grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
+grep -q 'define Package/doorfast/postinst' package/doorfast/Makefile
+grep -Fq '[ -z "$${IPKG_INSTROOT}" ]' package/doorfast/Makefile
+grep -Fq '[ "$${PKG_UPGRADE}" = "1" ]' package/doorfast/Makefile
+grep -q '/etc/init.d/doorfast restart' package/doorfast/Makefile
 
 reload_trace=''
 trigger_name=''
