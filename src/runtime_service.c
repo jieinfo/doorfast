@@ -14,6 +14,7 @@
 #include "gvs_receive.h"
 #include "gvs_runtime_sync.h"
 #include "gvs_sync_state.h"
+#include "runtime_ubus.h"
 
 static volatile sig_atomic_t df_runtime_stopping = 0;
 
@@ -89,13 +90,48 @@ static int df_runtime_capture_open(const struct df_runtime_config *runtime,
     return DF_OK;
 }
 
-static void df_runtime_wait_ms(unsigned delay_ms) {
+struct df_runtime_wait_context {
+    struct df_runtime_ubus *ubus;
+    bool ubus_started;
+};
+
+int df_runtime_pump_delay(unsigned delay_ms, unsigned max_slice_ms,
+                          df_runtime_delay_slice_fn run_slice,
+                          void *context) {
+    unsigned remaining = delay_ms;
+
+    if (delay_ms == 0U || max_slice_ms == 0U || run_slice == NULL) {
+        return DF_ERR_INVALID;
+    }
+    while (remaining > 0U) {
+        unsigned slice = remaining < max_slice_ms ? remaining : max_slice_ms;
+
+        if (run_slice(slice, context) != DF_OK) {
+            return DF_ERR_IO;
+        }
+        remaining -= slice;
+    }
+    return DF_OK;
+}
+
+static int df_runtime_wait_and_pump(unsigned delay_ms, void *context) {
+    struct df_runtime_wait_context *wait = context;
     struct timespec duration = {
         .tv_sec = (time_t)(delay_ms / 1000U),
         .tv_nsec = (long)(delay_ms % 1000U) * 1000000L,
     };
 
     (void)nanosleep(&duration, NULL);
+    if (wait != NULL && wait->ubus_started &&
+        df_runtime_ubus_process(wait->ubus, df_monotonic_ms()) != DF_OK) {
+        (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
+    }
+    return DF_OK;
+}
+
+static int df_runtime_status_provider(
+    struct df_gvs_runtime_sync_status *status, void *context) {
+    return df_gvs_runtime_sync_status(context, status);
 }
 
 int df_runtime_service_run(const struct df_runtime_config *runtime) {
@@ -104,6 +140,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_deadline deadline = {0};
     struct df_capture_retry retry = {0};
     struct df_gvs_runtime_sync sync = {0};
+    struct df_runtime_ubus ubus = {0};
+    struct df_runtime_wait_context wait_context = {
+        .ubus = &ubus,
+    };
     uint8_t identity[6];
     uint16_t persisted_version;
     uint64_t started_ms;
@@ -123,13 +163,23 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     }
     started_ms = df_monotonic_ms();
     if (df_gvs_runtime_sync_start(&sync, identity, persisted_version,
-                                  started_ms) != DF_OK ||
-        df_runtime_capture_open(runtime, &capture) != DF_OK) {
+                                  started_ms) != DF_OK) {
         return DF_ERR_IO;
+    }
+    if (df_runtime_capture_open(runtime, &capture) != DF_OK) {
+        df_gvs_runtime_sync_stop(&sync);
+        return DF_ERR_IO;
+    }
+    if (df_runtime_ubus_start(&ubus, df_runtime_status_provider, &sync,
+                              started_ms) == DF_OK) {
+        wait_context.ubus_started = true;
+    } else {
+        (void)fputs("doorfast: event=ubus_start_failed\n", stderr);
     }
     df_runtime_stopping = 0;
     if (signal(SIGINT, df_runtime_stop) == SIG_ERR ||
         signal(SIGTERM, df_runtime_stop) == SIG_ERR) {
+        df_runtime_ubus_stop(&ubus);
         df_capture_close(capture);
         return DF_ERR_IO;
     }
@@ -154,6 +204,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         if (df_gvs_deadline_tick(&deadline, &session, now_ms, &timed_out) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
+        }
+        if (wait_context.ubus_started &&
+            df_runtime_ubus_process(&ubus, now_ms) != DF_OK) {
+            (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
         }
         if (timed_out) {
             (void)printf("doorfast: event=session_timeout generation=%llu\n",
@@ -184,7 +238,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 }
                 (void)printf("doorfast: capture_retry=%u delay_ms=%u interface=%s\n",
                              retry.attempts, delay_ms, runtime->config.gvs_interface);
-                df_runtime_wait_ms(delay_ms);
+                if (df_runtime_pump_delay(delay_ms, 250U,
+                                          df_runtime_wait_and_pump,
+                                          &wait_context) != DF_OK) {
+                    status = DF_ERR_IO;
+                    goto done;
+                }
                 if (df_runtime_stopping) {
                     break;
                 }
@@ -253,6 +312,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     status = DF_OK;
 
 done:
+    df_runtime_ubus_stop(&ubus);
     df_gvs_runtime_sync_stop(&sync);
     df_capture_close(capture);
     (void)fputs("doorfast: stopped\n", stdout);
