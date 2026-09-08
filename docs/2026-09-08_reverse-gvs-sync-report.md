@@ -51,7 +51,7 @@ Doorfast 生成的规范化 JSON 为：
 
 `gvs_runtime_sync` 已接入抓包循环：完整公共头中的 `0x91` 功能族由同步路由器处理，其他帧继续进入原通话接收器。当前动作回调只输出 `mode=passive` 日志；`resend_local` 也只记录决策。抓包中断时同步计时停止，恢复后保留版本和项目登记表重新进入上线阶段。
 
-`gvs_sync_adapters` 登记首批两个从 MiniOS 静态确认的字段：`sync_mini1_secretkey` 和 `sync_mini2_secretkey`。它们均标记为敏感、默认禁用；未显式提供非空值时不会进入 `gvs_sync_store`，因此不会进入周期 JSON。状态接口只返回登记数和启用数，不返回键名和值。`df_gvs_runtime_sync_status` 提供结构化快照，`df_gvs_runtime_sync_status_json` 生成固定脱敏 JSON；当前是进程内只读接口，下一阶段再由 ubus 包装给 LuCI。
+`gvs_sync_adapters` 登记首批两个从 MiniOS 静态确认的字段：`sync_mini1_secretkey` 和 `sync_mini2_secretkey`。它们均标记为敏感、默认禁用；未显式提供非空值时不会进入 `gvs_sync_store`，因此不会进入周期 JSON。状态接口只返回登记数和启用数，不返回键名和值。`df_gvs_runtime_sync_status` 提供结构化快照，目标构建通过只读 `doorfast.status` ubus 方法提供类型稳定的脱敏结果；独立 `luci-app-doorfast` 每 5 秒读取一次，并区分首次不可用与已有结果陈旧。ACL 只允许读取该方法，不包含配置或控制权限。
 
 版本保存在 UCI 兼容的 `/etc/config/doorfast-sync`，其路径由主 UCI 配置的 `sync_state_path` 指定并限制为 `/etc/config/doorfast-*`。保存使用权限 `0600` 的同目录临时文件、`fsync` 和原子重命名；主配置不会被守护进程重写。
 
@@ -131,6 +131,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `linked_workitem`: M2, M5
 - `supersedes`: none
 
+#### E-006
+
+- `title`: 只读 ubus 与 LuCI 状态边界通过主机测试和软件包清单验证
+- `observed_at`: 2026-09-08
+- `source_type`: command
+- `source_ref`: `src/runtime_ubus.c`, `package/luci-app-doorfast`, `tests/test_runtime_ubus.c`, `tests/test_luci_status.js`
+- `content_hash`: `runtime_ubus.c=de427722320235edd1db9a5385f44ceb120533821d586523b798e7d78e812520; runtime_service.c=19f2037339689b5fa9f8539cc3eed121403ee8cb4da2322f0c460d4b2c53ccc7; status_model.js=67add309df3af86bcb3a2bb7e0d18b5fd659b29ee2ea4d11aa0b8a329cdebdbf; status.js=46c2278316918696539326670f5d54a99c328afca1920134a1243907e42a2b2f; acl.json=ece9d8b785b78d66278b3ca6113f661158f775407e5e8ed19169a80cc9846f3b; test_runtime_ubus.c=8f80472c0048ad6cb1a4cad22da9f61e3daeb8cd3d3ca0e5caed5a0bcdcb6fd7; test_luci_status.js=628d46cbd9ee716d07024e4ccf5beb4064be281a969361d157c4de944c7de8f7; doorfast-0.1.0-r1.apk=da56d8649b9d0a7be17541c78b825586c4f766223c2a5c25212d78b67878bfe6; luci-app-doorfast-0.1.0-r1.apk=4a131ce902750d7333aa7144557e0b4c4ea85e64cc1f26e561472a82966b2430`
+- `artifact_path`: `build/ci-34214119274/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64/bin/packages/x86_64/base/`
+- `repro_command`: `make -B test doorfast && sh tests/test_main_cli.sh && sh tests/test_package_manifest.sh && node tests/test_luci_status.js`
+- `raw_excerpt`: 本机 56 项 C 测试、ASan/UBSan、CLI、包清单、LuCI JavaScript 和 8 项协议模型通过；GitHub Actions `34214119274` 在提交 `2be7a56d96bad62f5c4bc395b63dd891557dc697` 成功生成两个 ADB 格式 APK。Doorfast 提供只读 `status` 方法；LuCI 只展示脱敏状态并每 5 秒刷新；ACL 不含写入、服务或命令权限。目标系统安装运行尚未验收。
+- `linked_workitem`: M5, P
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -185,6 +198,19 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 - `repro_steps`: 运行 E-005 命令并检查 `test_gvs_runtime_sync_exposes_redacted_status_snapshot`。
 - `remediation`: n/a
 
+#### F-005
+
+- `title`: 脱敏同步状态已具有只读本地管理入口
+- `severity`: n/a_re
+- `category`: design
+- `status`: validated
+- `evidence_ids`: E-005, E-006
+- `location`: `src/runtime_ubus.c`, `package/luci-app-doorfast`
+- `impact`: 本地管理员可以观察在线维护阶段和角色，且界面不会暴露同步键值或获得门禁控制能力。
+- `confidence`: high
+- `repro_steps`: 运行 E-006 的主机测试与包清单验证；目标系统安装验收另行记录。
+- `remediation`: n/a
+
 ### Path P-001
 
 - `title`: 选举结束后的同步维护调用路径
@@ -198,6 +224,7 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
   4. 非维护者收到有效周期帧后重置 60 秒截止；连续缺失两个周期后接管。evidence: E-001, E-003 — finding: F-002
   5. 运行时记录同步决策，版本变化后原子保存独立 UCI 状态。evidence: E-004 — finding: F-003
   6. 状态快照将在线维护结果映射为脱敏 JSON，供后续本地管理层读取。evidence: E-005 — finding: F-004
+  7. 目标构建将快照映射为只读 ubus 响应，LuCI 通过最小 ACL 周期读取并呈现。evidence: E-005, E-006 — finding: F-005
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未接入 UDP 和真实设备；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ## 6. Timeline 与遗留问题
@@ -210,5 +237,6 @@ python3 -B -m unittest discover -s tests -p 'test_gvs_preemption_model.py'
 | 2026-09-08 | 完成常规、边界、Sanitizer、CLI、包清单和协议模型回归 |
 | 2026-09-08 | 接入被动抓包循环，并增加独立 UCI 版本状态与掉线恢复 |
 | 2026-09-08 | 登记首批敏感同步字段适配器，并增加脱敏运行时状态查询 |
+| 2026-09-08 | 增加只读 ubus 状态方法、独立 LuCI 状态页及双 APK 构建清单 |
 
-当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。状态查询仍是进程内接口，尚未提供 ubus 对象或 LuCI 页面。公共头认证字段和真实设备接受性仍是进入网络发送前的主要关口。
+当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。只读状态入口已经完成主机测试和软件包级验证，但尚未在 ImmortalWrt 虚拟机完成安装运行验收。公共头认证字段和真实设备接受性仍是进入网络发送前的主要关口；本阶段不证明完整主机模式。
