@@ -6,7 +6,7 @@
 #include "test.h"
 
 static size_t make_frame(uint8_t *packet, uint8_t family, uint8_t opcode,
-                         uint8_t status) {
+                         const uint8_t *payload, size_t payload_length) {
     static const uint8_t prefix[] = {'G', 'V', 'S', 'G', 'V', 'S',
                                      0xA5, 0xA5, 0xA5, 0xA5};
     static const uint8_t destination[] = {0x32, 0, 0, 0, 0, 2};
@@ -18,35 +18,111 @@ static size_t make_frame(uint8_t *packet, uint8_t family, uint8_t opcode,
     memset(packet + 22, 0, 16);
     packet[38] = family;
     packet[39] = opcode;
-    packet[40] = status;
-    return 41;
+    packet[40] = (uint8_t)payload_length;
+    packet[41] = (uint8_t)(payload_length >> 8);
+    if (payload_length > 0) {
+        memcpy(packet + 42, payload, payload_length);
+    }
+    return 42 + payload_length;
 }
 
 void test_gvs_frame_validation_and_event_mapping(void) {
-    uint8_t packet[41] = {0};
+    uint8_t packet[43] = {0};
     struct df_gvs_frame frame = {0};
     struct df_event event = {0};
 
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_gvs_frame_parse(packet, sizeof(packet) - 1, &frame, &event));
 
-    (void)make_frame(packet, 0x03, 0x04, 0);
+    (void)make_frame(packet, 0x03, 0x04, NULL, 0);
     packet[6] = 0;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_gvs_frame_parse(packet, sizeof(packet), &frame, &event));
 
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(
-                                   packet, make_frame(packet, 0x03, 0x04, 0), &frame, &event));
+                                   packet, make_frame(packet, 0x03, 0x04, NULL, 0), &frame, &event));
     TEST_ASSERT_INT_EQ(DF_EVENT_PREVIEW_STARTED, event.type);
+    TEST_ASSERT_INT_EQ(0, frame.payload_length);
     TEST_ASSERT_INT_EQ(0, memcmp(frame.destination,
                                  (const uint8_t[]){0x32, 0, 0, 0, 0, 2}, 6));
 
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(
-                                   packet, make_frame(packet, 0x77, 0x01, 0), &frame, &event));
+                                   packet, make_frame(packet, 0x77, 0x01, NULL, 0), &frame, &event));
+    TEST_ASSERT_INT_EQ(DF_EVENT_UNKNOWN, event.type);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(
+                                   packet, make_frame(packet, 0x03, 0x50, NULL, 0), &frame, &event));
     TEST_ASSERT_INT_EQ(DF_EVENT_UNKNOWN, event.type);
 }
 
+void test_gvs_frame_rejects_truncated_or_inconsistent_payload(void) {
+    uint8_t packet[43] = {0};
+    const uint8_t payload[] = {0x42};
+    struct df_gvs_frame frame = {0};
+    struct df_event event = {0};
+
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, 41, &frame, &event));
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(
+                                   packet, make_frame(packet, 0x03, 0x04, payload,
+                                                      sizeof(payload)),
+                                   &frame, &event));
+    TEST_ASSERT_INT_EQ(1, frame.payload_length);
+
+    packet[41] = 2;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, sizeof(packet), &frame, &event));
+}
+
+void test_gvs_frame_reads_payload_length_as_little_endian(void) {
+    uint8_t packet[44] = {0};
+    const uint8_t payload[] = {0x10, 0x20};
+    struct df_gvs_frame frame = {0};
+    struct df_event event = {0};
+
+    (void)make_frame(packet, 0x03, 0x04, payload, sizeof(payload));
+    packet[40] = 2;
+    packet[41] = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(packet, sizeof(packet), &frame, &event));
+    TEST_ASSERT_INT_EQ(2, frame.payload_length);
+}
+
+void test_gvs_frame_exposes_payload_from_synthetic_control_frame(void) {
+    uint8_t packet[49] = {0};
+    const uint8_t expected_payload[] = {1, 2, 3, 4, 5, 6, 7};
+    struct df_gvs_frame frame = {0};
+    struct df_event event = {0};
+
+    (void)make_frame(packet, 0x03, 0x81, expected_payload, sizeof(expected_payload));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(packet, sizeof(packet), &frame, &event));
+    TEST_ASSERT_INT_EQ(7, frame.payload_length);
+    TEST_ASSERT_INT_EQ(0, memcmp(frame.destination,
+                                 (const uint8_t[]){0x32, 0, 0, 0, 0, 2}, 6));
+    TEST_ASSERT_INT_EQ(0, memcmp(frame.source,
+                                 (const uint8_t[]){0x61, 0, 0, 0, 0, 1}, 6));
+    TEST_ASSERT_INT_EQ(0x03, frame.family);
+    TEST_ASSERT_INT_EQ(0x81, frame.opcode);
+    TEST_ASSERT_INT_EQ(DF_EVENT_UNKNOWN, event.type);
+    TEST_ASSERT_INT_EQ(1, frame.payload != NULL);
+    if (frame.payload != NULL) {
+        TEST_ASSERT_INT_EQ(0, memcmp(frame.payload, expected_payload, sizeof(expected_payload)));
+    }
+}
+
 void test_gvs_event_names(void) {
+    uint8_t packet[49] = {0};
+    const uint8_t reply[] = {0x00, 0x20, 0x6f, 0x00, 0x20, 0x6e, 0x1e};
+    struct df_gvs_frame frame = {0};
+    struct df_event event = {0};
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(
+        packet, make_frame(packet, 0x03, 0x83, reply, sizeof(reply)), &frame, &event));
+    TEST_ASSERT_INT_EQ(DF_EVENT_PICK_REPLY_OBSERVED, event.type);
+    TEST_ASSERT_INT_EQ(0, strcmp("PickReplyObserved", df_event_type_name(event.type)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_frame_parse(
+        packet, make_frame(packet, 0x03, 0x83, NULL, 0), &frame, &event));
+    TEST_ASSERT_INT_EQ(DF_EVENT_UNKNOWN, event.type);
     TEST_ASSERT_INT_EQ(0, strcmp("StationObserved",
                                  df_event_type_name(DF_EVENT_STATION_OBSERVED)));
     TEST_ASSERT_INT_EQ(0, strcmp("PreviewStarted",

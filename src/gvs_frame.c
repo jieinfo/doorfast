@@ -9,21 +9,24 @@ enum {
     DF_GVS_OPAQUE_OFFSET = 22,
     DF_GVS_OPAQUE_SIZE = 16,
     DF_GVS_FAMILY_OFFSET = DF_GVS_OPAQUE_OFFSET + DF_GVS_OPAQUE_SIZE,
-    DF_GVS_MINIMUM_LENGTH = DF_GVS_FAMILY_OFFSET + 3,
+    DF_GVS_OPCODE_OFFSET = DF_GVS_FAMILY_OFFSET + 1,
+    DF_GVS_PAYLOAD_LENGTH_OFFSET = DF_GVS_OPCODE_OFFSET + 1,
+    DF_GVS_PAYLOAD_OFFSET = DF_GVS_PAYLOAD_LENGTH_OFFSET + 2,
+    DF_GVS_MINIMUM_LENGTH = DF_GVS_PAYLOAD_OFFSET,
 };
 
 static const uint8_t df_gvs_header[] = {'G', 'V', 'S', 'G', 'V', 'S',
                                         0xA5, 0xA5, 0xA5, 0xA5};
 
 static enum df_event_type df_gvs_event_type(uint8_t family, uint8_t opcode) {
+    if (family == 0x03 && opcode == 0x01) {
+        return DF_EVENT_INCOMING_CALL;
+    }
     if (family == 0x03 && opcode == 0x04) {
         return DF_EVENT_PREVIEW_STARTED;
     }
     if (family == 0x03 && opcode == 0x86) {
         return DF_EVENT_STATION_OBSERVED;
-    }
-    if (family == 0x03 && opcode == 0x50) {
-        return DF_EVENT_SESSION_ESTABLISHED;
     }
     if (family == 0x04 && opcode == 0x89) {
         return DF_EVENT_UNLOCK_RESULT_OBSERVED;
@@ -45,8 +48,17 @@ int df_gvs_frame_parse(const uint8_t *data, size_t length,
     memcpy(frame->destination, data + DF_GVS_DESTINATION_OFFSET, sizeof(frame->destination));
     memcpy(frame->source, data + DF_GVS_SOURCE_OFFSET, sizeof(frame->source));
     frame->family = data[DF_GVS_FAMILY_OFFSET];
-    frame->opcode = data[DF_GVS_FAMILY_OFFSET + 1];
-    frame->status = data[DF_GVS_FAMILY_OFFSET + 2];
+    frame->opcode = data[DF_GVS_OPCODE_OFFSET];
+    frame->payload_length = (uint16_t)(data[DF_GVS_PAYLOAD_LENGTH_OFFSET] |
+                                       ((uint16_t)data[DF_GVS_PAYLOAD_LENGTH_OFFSET + 1] << 8));
+    if (length != DF_GVS_PAYLOAD_OFFSET + frame->payload_length) {
+        return DF_ERR_INVALID;
+    }
+    frame->payload = data + DF_GVS_PAYLOAD_OFFSET;
     event->type = df_gvs_event_type(frame->family, frame->opcode);
+    if (frame->family == 0x03 && frame->opcode == 0x83 &&
+        frame->payload_length == 7) {
+        event->type = DF_EVENT_PICK_REPLY_OBSERVED;
+    }
     return DF_OK;
 }

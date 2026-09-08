@@ -1,4 +1,5 @@
 #include "config.h"
+#include "gvs_identity.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,14 +10,21 @@ static bool df_delay_is_valid(int delay_seconds) {
 }
 
 int df_config_validate(const struct df_config *config) {
-    if (config == NULL || !config->enabled) {
+    uint8_t identity[6];
+
+    if (config == NULL) {
+        return DF_ERR_INVALID;
+    }
+    if (!config->enabled) {
         return DF_OK;
     }
     if (config->brand == NULL || strcmp(config->brand, "gvs") != 0) {
         return DF_ERR_INVALID;
     }
     if (config->gvs_interface == NULL || config->gvs_interface[0] == '\0' ||
-        !config->passive_only) {
+        config->gvs_local_address == NULL || config->gvs_local_address[0] == '\0' ||
+        !config->passive_only ||
+        df_gvs_identity_parse(config->gvs_local_address, identity) != DF_OK) {
         return DF_ERR_INVALID;
     }
     if (!df_delay_is_valid(config->unlock_delay_seconds) ||

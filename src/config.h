@@ -13,6 +13,7 @@ struct df_config {
     bool capture_auto;
     bool capture_promiscuous;
     const char *gvs_interface;
+    const char *gvs_local_address;
     const char *uplink_interface;
     bool passive_only;
     int unlock_delay_seconds;

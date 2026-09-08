@@ -12,7 +12,8 @@ struct df_gvs_frame {
     uint8_t source[6];
     uint8_t family;
     uint8_t opcode;
-    uint8_t status;
+    uint16_t payload_length;
+    const uint8_t *payload;
 };
 
 int df_gvs_frame_parse(const uint8_t *data, size_t length,

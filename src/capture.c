@@ -34,8 +34,35 @@ int df_capture_open(const char *device, bool promiscuous, struct df_capture **ca
         free(opened);
         return DF_ERR_IO;
     }
+    if (pcap_datalink(opened->handle) != DLT_EN10MB) {
+        pcap_close(opened->handle);
+        free(opened);
+        return DF_ERR_INVALID;
+    }
     *capture = opened;
     return DF_OK;
+}
+
+int df_capture_next(struct df_capture *capture, const uint8_t **packet, size_t *length) {
+    struct pcap_pkthdr *header = NULL;
+    const uint8_t *captured = NULL;
+    int result;
+
+    if (capture == NULL || capture->handle == NULL || packet == NULL || length == NULL) {
+        return DF_CAPTURE_ERROR;
+    }
+    *packet = NULL;
+    *length = 0;
+    result = pcap_next_ex(capture->handle, &header, &captured);
+    if (result == 0) {
+        return DF_CAPTURE_TIMEOUT;
+    }
+    if (result != 1 || header == NULL || captured == NULL) {
+        return DF_CAPTURE_ERROR;
+    }
+    *packet = captured;
+    *length = header->caplen;
+    return DF_CAPTURE_PACKET;
 }
 
 int df_capture_set_filter(struct df_capture *capture, const char *bpf) {

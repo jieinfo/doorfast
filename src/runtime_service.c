@@ -1,0 +1,178 @@
+#include "runtime_service.h"
+
+#include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+#include "capture.h"
+#include "capture_retry.h"
+#include "event.h"
+#include "gvs_deadline.h"
+#include "gvs_identity.h"
+#include "gvs_packet.h"
+#include "gvs_receive.h"
+
+static volatile sig_atomic_t df_runtime_stopping = 0;
+
+static void df_runtime_stop(int signal_number) {
+    (void)signal_number;
+    df_runtime_stopping = 1;
+}
+
+static uint64_t df_monotonic_ms(void) {
+    struct timespec now = {0};
+
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0) {
+        return 0;
+    }
+    return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
+}
+
+static void df_log_transition(const struct df_gvs_transition_event *event) {
+    (void)printf("doorfast: event=%s generation=%llu\n",
+                 df_event_type_name(event->type),
+                 (unsigned long long)event->generation);
+}
+
+static int df_runtime_capture_open(const struct df_runtime_config *runtime,
+                                   struct df_capture **capture) {
+    int status = df_capture_open(runtime->config.gvs_interface,
+                                 runtime->config.capture_promiscuous, capture);
+
+    if (status != DF_OK) {
+        return status;
+    }
+    if (df_capture_set_filter(*capture, df_capture_default_filter()) != DF_OK) {
+        df_capture_close(*capture);
+        *capture = NULL;
+        return DF_ERR_IO;
+    }
+    return DF_OK;
+}
+
+static void df_runtime_wait_ms(unsigned delay_ms) {
+    struct timespec duration = {
+        .tv_sec = (time_t)(delay_ms / 1000U),
+        .tv_nsec = (long)(delay_ms % 1000U) * 1000000L,
+    };
+
+    (void)nanosleep(&duration, NULL);
+}
+
+int df_runtime_service_run(const struct df_runtime_config *runtime) {
+    struct df_capture *capture = NULL;
+    struct df_gvs_session session = {0};
+    struct df_gvs_deadline deadline = {0};
+    struct df_capture_retry retry = {0};
+    uint8_t identity[6];
+    int status;
+
+    if (runtime == NULL || df_config_validate(&runtime->config) != DF_OK ||
+        !runtime->config.enabled ||
+        df_gvs_identity_parse(runtime->config.gvs_local_address, identity) != DF_OK) {
+        return DF_ERR_INVALID;
+    }
+    if (df_runtime_capture_open(runtime, &capture) != DF_OK) {
+        return DF_ERR_IO;
+    }
+    df_runtime_stopping = 0;
+    if (signal(SIGINT, df_runtime_stop) == SIG_ERR ||
+        signal(SIGTERM, df_runtime_stop) == SIG_ERR) {
+        df_capture_close(capture);
+        return DF_ERR_IO;
+    }
+    (void)setvbuf(stdout, NULL, _IOLBF, 0);
+    (void)printf("doorfast: observing interface=%s mode=passive\n",
+                 runtime->config.gvs_interface);
+    while (!df_runtime_stopping) {
+        const uint8_t *packet = NULL;
+        const uint8_t *payload = NULL;
+        size_t packet_length = 0;
+        size_t payload_length = 0;
+        uint64_t now_ms;
+        bool timed_out = false;
+        int captured = df_capture_next(capture, &packet, &packet_length);
+
+        now_ms = df_monotonic_ms();
+        if (df_gvs_deadline_tick(&deadline, &session, now_ms, &timed_out) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
+        if (timed_out) {
+            (void)printf("doorfast: event=session_timeout generation=%llu\n",
+                         (unsigned long long)session.generation);
+        }
+
+        if (captured == DF_CAPTURE_TIMEOUT) {
+            continue;
+        }
+        if (captured == DF_CAPTURE_ERROR) {
+            bool ended = false;
+
+            (void)df_gvs_session_abort(&session, &ended);
+            df_gvs_deadline_cancel(&deadline);
+            if (ended) {
+                (void)printf("doorfast: event=network_lost generation=%llu\n",
+                             (unsigned long long)session.generation);
+            }
+            df_capture_close(capture);
+            capture = NULL;
+            while (!df_runtime_stopping) {
+                unsigned delay_ms;
+
+                if (df_capture_retry_next(&retry, &delay_ms) != DF_OK) {
+                    status = DF_ERR_IO;
+                    goto done;
+                }
+                (void)printf("doorfast: capture_retry=%u delay_ms=%u interface=%s\n",
+                             retry.attempts, delay_ms, runtime->config.gvs_interface);
+                df_runtime_wait_ms(delay_ms);
+                if (df_runtime_stopping) {
+                    break;
+                }
+                if (df_runtime_capture_open(runtime, &capture) == DF_OK) {
+                    df_capture_retry_reset(&retry);
+                    (void)printf("doorfast: capture_recovered interface=%s\n",
+                                 runtime->config.gvs_interface);
+                    break;
+                }
+            }
+            if (df_runtime_stopping) {
+                status = DF_OK;
+                goto done;
+            }
+            continue;
+        }
+        if (df_gvs_extract_control_payload(packet, packet_length,
+                                           &payload, &payload_length) == 1) {
+            struct df_gvs_receive_result result;
+            if (df_gvs_receive_datagram(payload, payload_length, identity,
+                                        &session, &deadline, now_ms,
+                                        &result) == DF_OK) {
+                unsigned i;
+                for (i = 0; i < result.transition.count; ++i) {
+                    df_log_transition(&result.transition.events[i]);
+                }
+                if (result.talking_transition) {
+                    (void)printf("doorfast: event=session_established generation=%llu\n",
+                                 (unsigned long long)session.generation);
+                }
+                if (result.observed_hangup) {
+                    (void)printf("doorfast: event=hangup generation=%llu\n",
+                                 (unsigned long long)session.generation);
+                }
+                if (result.timed_out_transition) {
+                    (void)printf("doorfast: event=session_timeout generation=%llu\n",
+                                 (unsigned long long)session.generation);
+                }
+            }
+        }
+    }
+    status = DF_OK;
+
+done:
+    df_capture_close(capture);
+    (void)fputs("doorfast: stopped\n", stdout);
+    return status;
+}

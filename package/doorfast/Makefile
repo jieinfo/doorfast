@@ -11,7 +11,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/doorfast
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=Dnake Doorfast transparent integration daemon
+  TITLE:=Doorfast GVS integration daemon
   DEPENDS:=+libpcap +libuci +libjson-c +libopenssl
 endef
 

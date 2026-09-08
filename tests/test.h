@@ -3,14 +3,14 @@
 
 #include <stdio.h>
 
-static int df_test_failure_count = 0;
+extern int df_test_failure_count;
 
 #define TEST_ASSERT_INT_EQ(expected, actual) \
     do { \
         int expected_value = (expected); \
         int actual_value = (actual); \
         if (expected_value != actual_value) { \
-            fprintf(stderr, "%s:%d expected %d got %d\\n", \
+            fprintf(stderr, "%s:%d expected %d got %d\n", \
                     __FILE__, __LINE__, expected_value, actual_value); \
             df_test_failure_count++; \
         } \

@@ -16,5 +16,17 @@ grep -q 'config_get_bool enabled main enabled 0' package/doorfast/files/doorfast
 grep -F "config gvs 'main'" package/doorfast/files/doorfast.config
 grep -F "option enabled '0'" package/doorfast/files/doorfast.config
 grep -F "option gvs_interface ''" package/doorfast/files/doorfast.config
+grep -F "option gvs_local_address ''" package/doorfast/files/doorfast.config
 grep -F "option uplink_interface ''" package/doorfast/files/doorfast.config
 grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
+
+reload_trace=''
+trigger_name=''
+stop() { reload_trace="${reload_trace}stop "; }
+start() { reload_trace="${reload_trace}start"; }
+procd_add_reload_trigger() { trigger_name="$1"; }
+. package/doorfast/files/doorfast.init
+reload_service
+test "$reload_trace" = 'stop start'
+service_triggers
+test "$trigger_name" = 'doorfast'
