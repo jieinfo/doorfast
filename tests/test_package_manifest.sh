@@ -14,6 +14,13 @@ test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/sta
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
+grep -q '+libubus +libubox +libblobmsg-json' package/doorfast/Makefile
+grep -q -- '-DDF_WITH_UBUS' package/doorfast/Makefile
+grep -q -- '-lubus -lubox -lblobmsg_json' package/doorfast/Makefile
+grep -q 'package/luci-app-doorfast' scripts/prepare-sdk-package.sh
+grep -q 'feeds install.*luci-base' .github/workflows/build-apk.yml
+grep -q 'package/luci-app-doorfast/compile' .github/workflows/build-apk.yml
+grep -q 'luci-app-doorfast-\*.apk' .github/workflows/build-apk.yml
 ! grep -R -E -q 'wget -O-|auth|auto_update|opkg|\.ipk' package/doorfast scripts
 python3 -m json.tool package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.json >/dev/null
 python3 -m json.tool package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json >/dev/null

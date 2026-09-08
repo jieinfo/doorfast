@@ -41,13 +41,16 @@ jobs:
           (
             cd "$sdk_dir"
             ./scripts/feeds update -a
-            ./scripts/feeds install libpcap libuci libjson-c libopenssl
+            ./scripts/feeds install libpcap libuci libjson-c libopenssl luci-base
           )
           ./scripts/prepare-sdk-package.sh "$sdk_dir"
           make -C "$sdk_dir" defconfig
           make -C "$sdk_dir" package/doorfast/compile V=s -j"$(nproc)"
+          make -C "$sdk_dir" package/luci-app-doorfast/compile V=s -j"$(nproc)"
       - uses: actions/upload-artifact@v4
         with:
           name: doorfast-apk
-          path: "**/bin/packages/x86_64/base/doorfast-*.apk"
+          path: |
+            **/bin/packages/x86_64/base/doorfast-*.apk
+            **/bin/packages/x86_64/base/luci-app-doorfast-*.apk
           if-no-files-found: error

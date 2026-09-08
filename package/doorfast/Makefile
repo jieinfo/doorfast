@@ -12,7 +12,7 @@ define Package/doorfast
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Doorfast GVS integration daemon
-  DEPENDS:=+libpcap +libuci +libjson-c +libopenssl
+  DEPENDS:=+libpcap +libuci +libjson-c +libopenssl +libubus +libubox +libblobmsg-json
 endef
 
 define Build/Prepare
@@ -22,8 +22,8 @@ define Build/Prepare
 endef
 
 define Build/Compile
-	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -std=c17 -Wall -Wextra -Werror -pedantic \
-		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -o $(PKG_BUILD_DIR)/doorfast
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -std=c17 -Wall -Wextra -Werror -pedantic \
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
 endef
 
 define Package/doorfast/install
