@@ -1,0 +1,10 @@
+{
+  "luci-app-doorfast": {
+    "description": "Read Doorfast runtime status",
+    "read": {
+      "ubus": {
+        "doorfast": ["status"]
+      }
+    }
+  }
+}

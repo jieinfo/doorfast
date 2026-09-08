@@ -6,8 +6,20 @@ test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-sync.config
 test -f scripts/prepare-sdk-package.sh
+test -f package/luci-app-doorfast/Makefile
+test -f package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.json
+test -f package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
+grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
+grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
 ! grep -R -E -q 'wget -O-|auth|auto_update|opkg|\.ipk' package/doorfast scripts
+python3 -m json.tool package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.json >/dev/null
+python3 -m json.tool package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json >/dev/null
+! grep -R -E -q 'service|set|delete|add|exec|command' package/luci-app-doorfast/root/usr/share/rpcd/acl.d
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
 grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/workflows/build-apk.yml
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'doorfast-\*.apk' .github/workflows/build-apk.yml
