@@ -16,6 +16,8 @@
 #include "gvs_sync_state.h"
 #include "runtime_ubus.h"
 
+#define DF_RUNTIME_IDLE_POLL_MS 50U
+
 static volatile sig_atomic_t df_runtime_stopping = 0;
 
 static void df_runtime_stop(int signal_number) {
@@ -215,6 +217,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
 
         if (captured == DF_CAPTURE_TIMEOUT) {
+            if (df_runtime_pump_delay(DF_RUNTIME_IDLE_POLL_MS,
+                                      DF_RUNTIME_IDLE_POLL_MS,
+                                      df_runtime_wait_and_pump,
+                                      &wait_context) != DF_OK) {
+                status = DF_ERR_IO;
+                goto done;
+            }
             continue;
         }
         if (captured == DF_CAPTURE_ERROR) {

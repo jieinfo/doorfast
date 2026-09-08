@@ -27,7 +27,8 @@ int df_capture_open(const char *device, bool promiscuous, struct df_capture **ca
     if (opened->handle == NULL || pcap_set_snaplen(opened->handle, 2048) != 0 ||
         pcap_set_timeout(opened->handle, 1000) != 0 ||
         pcap_set_promisc(opened->handle, promiscuous ? 1 : 0) != 0 ||
-        pcap_activate(opened->handle) < 0) {
+        pcap_activate(opened->handle) < 0 ||
+        pcap_setnonblock(opened->handle, 1, error_buffer) != 0) {
         if (opened->handle != NULL) {
             pcap_close(opened->handle);
         }

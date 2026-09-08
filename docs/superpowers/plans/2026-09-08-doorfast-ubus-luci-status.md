@@ -664,7 +664,7 @@ On an owned ImmortalWrt 25.12.1 x86_64 instance:
 apk add ./doorfast-0.1.0-r1.apk ./luci-app-doorfast-0.1.0-r1.apk
 uci set doorfast.main.enabled='1'
 uci set doorfast.main.gvs_interface='br-lan'
-uci set doorfast.main.gvs_local_address='610101010102'
+uci set doorfast.main.gvs_local_address='IS:2-1-101-1'
 uci commit doorfast
 /etc/init.d/doorfast restart
 ubus call doorfast status '{}'

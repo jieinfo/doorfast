@@ -17,12 +17,12 @@ apk add ./doorfast-0.1.0-r1.apk ./luci-app-doorfast-0.1.0-r1.apk
 ```sh
 uci set doorfast.main.enabled='1'
 uci set doorfast.main.gvs_interface='br-lan'
-uci set doorfast.main.gvs_local_address='610101010102'
+uci set doorfast.main.gvs_local_address='IS:2-1-101-1'
 uci commit doorfast
 /etc/init.d/doorfast restart
 ```
 
-`br-lan` 和示例地址仅用于说明格式，必须换成用户自己系统中的接口及本户合法地址。Doorfast 不限定 `eth0` 或 `wlan0`。
+`br-lan` 和示例地址仅用于说明格式，必须换成用户自己系统中的接口及本户合法地址。逻辑地址格式为 `IS:楼栋-单元-房间-分机`；Doorfast 不限定 `eth0` 或 `wlan0`。
 
 ## 查看运行状态
 
