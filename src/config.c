@@ -23,6 +23,11 @@ int df_config_validate(const struct df_config *config) {
     }
     if (config->gvs_interface == NULL || config->gvs_interface[0] == '\0' ||
         config->gvs_local_address == NULL || config->gvs_local_address[0] == '\0' ||
+        config->sync_state_path == NULL ||
+        strncmp(config->sync_state_path, "/etc/config/doorfast-",
+                sizeof("/etc/config/doorfast-") - 1U) != 0 ||
+        config->sync_state_path[sizeof("/etc/config/doorfast-") - 1U] == '\0' ||
+        strstr(config->sync_state_path, "..") != NULL ||
         !config->passive_only ||
         df_gvs_identity_parse(config->gvs_local_address, identity) != DF_OK) {
         return DF_ERR_INVALID;

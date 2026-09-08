@@ -28,7 +28,7 @@ static int df_run_config(const char *path) {
     }
     result = df_runtime_service_run(&runtime);
     if (result != DF_OK) {
-        (void)fprintf(stderr, "doorfast: passive capture service failed on interface: %s\n",
+        (void)fprintf(stderr, "doorfast: runtime service failed on interface: %s\n",
                       runtime.config.gvs_interface);
         return 2;
     }

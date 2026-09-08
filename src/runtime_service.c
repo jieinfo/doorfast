@@ -12,6 +12,8 @@
 #include "gvs_identity.h"
 #include "gvs_packet.h"
 #include "gvs_receive.h"
+#include "gvs_runtime_sync.h"
+#include "gvs_sync_state.h"
 
 static volatile sig_atomic_t df_runtime_stopping = 0;
 
@@ -33,6 +35,42 @@ static void df_log_transition(const struct df_gvs_transition_event *event) {
     (void)printf("doorfast: event=%s generation=%llu\n",
                  df_event_type_name(event->type),
                  (unsigned long long)event->generation);
+}
+
+static const char *df_sync_action_name(enum df_gvs_presence_action_type type) {
+    switch (type) {
+    case DF_GVS_PRESENCE_PEER_PROBE: return "peer_probe";
+    case DF_GVS_PRESENCE_PEER_ONLINE: return "peer_online";
+    case DF_GVS_PRESENCE_PEER_OFFLINE: return "peer_offline";
+    case DF_GVS_PRESENCE_SYNC_ASK_ACTION: return "sync_ask";
+    case DF_GVS_PRESENCE_SYNC_VERSION_ASK: return "version_ask";
+    case DF_GVS_PRESENCE_PERIODIC_SYNC: return "periodic_sync";
+    default: return "unknown";
+    }
+}
+
+static int df_runtime_sync_action(
+    const struct df_gvs_presence_action *action, void *context) {
+    (void)context;
+    if (action == NULL) {
+        return DF_ERR_INVALID;
+    }
+    (void)printf("doorfast: event=sync_action action=%s round=%u mode=passive\n",
+                 df_sync_action_name(action->type), action->round);
+    return DF_OK;
+}
+
+static void df_runtime_sync_log(
+    const struct df_gvs_runtime_sync *sync,
+    const struct df_gvs_runtime_sync_result *result) {
+    (void)printf(
+        "doorfast: event=sync_observed opcode=%u accepted=%u rejected=%u "
+        "version=%u maintainer=%u resend=%u mode=passive\n",
+        (unsigned)result->opcode, result->accepted ? 1U : 0U,
+        result->rejected ? 1U : 0U,
+        (unsigned)sync->presence.sync_version,
+        sync->presence.sync_maintainer ? 1U : 0U,
+        result->resend_local ? 1U : 0U);
 }
 
 static int df_runtime_capture_open(const struct df_runtime_config *runtime,
@@ -65,7 +103,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_session session = {0};
     struct df_gvs_deadline deadline = {0};
     struct df_capture_retry retry = {0};
+    struct df_gvs_runtime_sync sync = {0};
     uint8_t identity[6];
+    uint16_t persisted_version;
+    uint64_t started_ms;
     int status;
 
     if (runtime == NULL || df_config_validate(&runtime->config) != DF_OK ||
@@ -73,7 +114,17 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_gvs_identity_parse(runtime->config.gvs_local_address, identity) != DF_OK) {
         return DF_ERR_INVALID;
     }
-    if (df_runtime_capture_open(runtime, &capture) != DF_OK) {
+    if (df_gvs_sync_state_load(runtime->config.sync_state_path,
+                               &persisted_version) != DF_OK) {
+        (void)fprintf(stderr,
+                      "doorfast: invalid or unreadable sync state: %s\n",
+                      runtime->config.sync_state_path);
+        return DF_ERR_IO;
+    }
+    started_ms = df_monotonic_ms();
+    if (df_gvs_runtime_sync_start(&sync, identity, persisted_version,
+                                  started_ms) != DF_OK ||
+        df_runtime_capture_open(runtime, &capture) != DF_OK) {
         return DF_ERR_IO;
     }
     df_runtime_stopping = 0;
@@ -95,6 +146,11 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         int captured = df_capture_next(capture, &packet, &packet_length);
 
         now_ms = df_monotonic_ms();
+        if (df_gvs_runtime_sync_tick(&sync, now_ms, df_runtime_sync_action,
+                                     NULL) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
         if (df_gvs_deadline_tick(&deadline, &session, now_ms, &timed_out) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
@@ -118,6 +174,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             }
             df_capture_close(capture);
             capture = NULL;
+            df_gvs_runtime_sync_stop(&sync);
             while (!df_runtime_stopping) {
                 unsigned delay_ms;
 
@@ -132,6 +189,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     break;
                 }
                 if (df_runtime_capture_open(runtime, &capture) == DF_OK) {
+                    if (df_gvs_runtime_sync_restart(&sync,
+                                                    df_monotonic_ms()) != DF_OK) {
+                        df_capture_close(capture);
+                        capture = NULL;
+                        status = DF_ERR_IO;
+                        goto done;
+                    }
                     df_capture_retry_reset(&retry);
                     (void)printf("doorfast: capture_recovered interface=%s\n",
                                  runtime->config.gvs_interface);
@@ -146,7 +210,24 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (df_gvs_extract_control_payload(packet, packet_length,
                                            &payload, &payload_length) == 1) {
+            struct df_gvs_runtime_sync_result sync_result;
             struct df_gvs_receive_result result;
+            if (df_gvs_runtime_sync_receive(&sync, payload, payload_length,
+                                            now_ms, &sync_result) != DF_OK) {
+                status = DF_ERR_IO;
+                goto done;
+            }
+            if (sync_result.handled) {
+                df_runtime_sync_log(&sync, &sync_result);
+                if (sync_result.version_changed &&
+                    df_gvs_sync_state_save(runtime->config.sync_state_path,
+                                           sync.presence.sync_version) != DF_OK) {
+                    (void)fprintf(stderr,
+                                  "doorfast: event=sync_state_save_failed path=%s\n",
+                                  runtime->config.sync_state_path);
+                }
+                continue;
+            }
             if (df_gvs_receive_datagram(payload, payload_length, identity,
                                         &session, &deadline, now_ms,
                                         &result) == DF_OK) {
@@ -172,6 +253,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     status = DF_OK;
 
 done:
+    df_gvs_runtime_sync_stop(&sync);
     df_capture_close(capture);
     (void)fputs("doorfast: stopped\n", stdout);
     return status;

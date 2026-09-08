@@ -4,6 +4,7 @@ set -eu
 test -f package/doorfast/Makefile
 test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast.config
+test -f package/doorfast/files/doorfast-sync.config
 test -f scripts/prepare-sdk-package.sh
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 ! grep -R -E -q 'wget -O-|auth|auto_update|opkg|\.ipk' package/doorfast scripts
@@ -18,7 +19,11 @@ grep -F "option enabled '0'" package/doorfast/files/doorfast.config
 grep -F "option gvs_interface ''" package/doorfast/files/doorfast.config
 grep -F "option gvs_local_address ''" package/doorfast/files/doorfast.config
 grep -F "option uplink_interface ''" package/doorfast/files/doorfast.config
+grep -F "option sync_state_path '/etc/config/doorfast-sync'" package/doorfast/files/doorfast.config
 grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
+grep -F "config state 'sync'" package/doorfast/files/doorfast-sync.config
+grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
+grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 
 reload_trace=''
 trigger_name=''

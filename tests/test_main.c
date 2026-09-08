@@ -1,5 +1,15 @@
 #include "test.h"
 void test_gvs_pick_exchange(void);
+void test_gvs_presence_receives_sync_replies(void);
+void test_gvs_sync_updates_version_and_registered_values(void);
+void test_gvs_sync_serializes_periodic_chunks_and_json_escaping(void);
+void test_gvs_sync_serializes_normal_update_and_rejects_oversize(void);
+void test_gvs_presence_takes_over_after_two_missed_periods(void);
+void test_gvs_sync_receives_periodic_data_and_arbitrates_maintainer(void);
+void test_gvs_sync_state_round_trips_uci_atomically(void);
+void test_gvs_runtime_sync_routes_only_sync_frames(void);
+void test_gvs_runtime_sync_exposes_redacted_status_snapshot(void);
+void test_gvs_sync_adapters_require_explicit_nonempty_sensitive_values(void);
 void test_gvs_priority_valid_matrix_and_unknown_categories(void);
 void test_gvs_session_preemption_transaction(void);
 void test_gvs_observer_batch_preemption(void);
@@ -21,6 +31,14 @@ void test_gvs_frame_reads_payload_length_as_little_endian(void);
 void test_gvs_frame_exposes_payload_from_synthetic_control_frame(void);
 void test_gvs_event_names(void);
 void test_gvs_identity_parses_and_filters_the_first_five_address_bytes(void);
+void test_gvs_identity_derives_network_addresses_and_indoor_peers(void);
+void test_gvs_presence_runs_probes_and_sync_phases_without_network_io(void);
+void test_gvs_presence_tracks_online_timeout_and_maintainer_role(void);
+void test_gvs_presence_restarts_cleanly_after_network_recovery(void);
+void test_gvs_presence_does_not_advance_when_action_delivery_fails(void);
+void test_gvs_serialize_builds_complete_peer_probe_frame(void);
+void test_gvs_serialize_builds_sync_ask_and_version_ask(void);
+void test_gvs_serialize_rejects_missing_header_fields_and_unsupported_actions(void);
 void test_gvs_observer_only_starts_a_session_for_the_configured_identity(void);
 void test_gvs_replay_reads_an_offline_control_packet_without_transmitting(void);
 void test_gvs_session_tracks_passive_lifecycle(void);
@@ -42,7 +60,7 @@ void test_discovery_requires_approval(void);
 void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 34;
+    return 52;
 }
 
 int main(void) {
@@ -51,7 +69,17 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(34, test_suite_count());
+    TEST_ASSERT_INT_EQ(52, test_suite_count());
+    test_gvs_presence_receives_sync_replies();
+    test_gvs_sync_updates_version_and_registered_values();
+    test_gvs_sync_serializes_periodic_chunks_and_json_escaping();
+    test_gvs_sync_serializes_normal_update_and_rejects_oversize();
+    test_gvs_presence_takes_over_after_two_missed_periods();
+    test_gvs_sync_receives_periodic_data_and_arbitrates_maintainer();
+    test_gvs_sync_state_round_trips_uci_atomically();
+    test_gvs_runtime_sync_routes_only_sync_frames();
+    test_gvs_runtime_sync_exposes_redacted_status_snapshot();
+    test_gvs_sync_adapters_require_explicit_nonempty_sensitive_values();
     test_config_validation();
     test_gvs_config_requires_explicit_passive_interface();
     test_config_redaction();
@@ -66,6 +94,14 @@ int main(void) {
     test_gvs_frame_exposes_payload_from_synthetic_control_frame();
     test_gvs_event_names();
     test_gvs_identity_parses_and_filters_the_first_five_address_bytes();
+    test_gvs_identity_derives_network_addresses_and_indoor_peers();
+    test_gvs_presence_runs_probes_and_sync_phases_without_network_io();
+    test_gvs_presence_tracks_online_timeout_and_maintainer_role();
+    test_gvs_presence_restarts_cleanly_after_network_recovery();
+    test_gvs_presence_does_not_advance_when_action_delivery_fails();
+    test_gvs_serialize_builds_complete_peer_probe_frame();
+    test_gvs_serialize_builds_sync_ask_and_version_ask();
+    test_gvs_serialize_rejects_missing_header_fields_and_unsupported_actions();
     test_gvs_observer_only_starts_a_session_for_the_configured_identity();
     test_gvs_replay_reads_an_offline_control_packet_without_transmitting();
     test_gvs_session_tracks_passive_lifecycle();

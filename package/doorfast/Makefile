@@ -33,6 +33,7 @@ define Package/doorfast/install
 	$(INSTALL_BIN) ./files/doorfast.init $(1)/etc/init.d/doorfast
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/doorfast.config $(1)/etc/config/doorfast
+	$(INSTALL_CONF) ./files/doorfast-sync.config $(1)/etc/config/doorfast-sync
 endef
 
 $(eval $(call BuildPackage,doorfast))

@@ -19,7 +19,8 @@ enum df_runtime_option {
     DF_SEEN_CAPTURE_AUTO = 1U << 7,
     DF_SEEN_UNLOCK_DELAY = 1U << 8,
     DF_SEEN_HANGUP_DELAY = 1U << 9,
-    DF_SEEN_CALL_ELEV = 1U << 10
+    DF_SEEN_CALL_ELEV = 1U << 10,
+    DF_SEEN_SYNC_STATE_PATH = 1U << 11
 };
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
@@ -30,6 +31,9 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.gvs_interface = runtime->gvs_interface;
     runtime->config.gvs_local_address = runtime->gvs_local_address;
     runtime->config.uplink_interface = runtime->uplink_interface;
+    runtime->config.sync_state_path = runtime->sync_state_path;
+    (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
+                   "%s", "/etc/config/doorfast-sync");
     runtime->config.passive_only = true;
     runtime->config.unlock_delay_seconds = -1;
     runtime->config.hangup_delay_seconds = -1;
@@ -176,6 +180,12 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         option = DF_SEEN_UPLINK_INTERFACE;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_copy_option(runtime->uplink_interface, sizeof(runtime->uplink_interface), value);
+    }
+    if (strcmp(name, "sync_state_path") == 0) {
+        option = DF_SEEN_SYNC_STATE_PATH;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->sync_state_path,
+                              sizeof(runtime->sync_state_path), value);
     }
     if (strcmp(name, "passive_only") == 0) {
         option = DF_SEEN_PASSIVE_ONLY;

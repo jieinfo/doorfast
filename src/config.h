@@ -15,6 +15,7 @@ struct df_config {
     const char *gvs_interface;
     const char *gvs_local_address;
     const char *uplink_interface;
+    const char *sync_state_path;
     bool passive_only;
     int unlock_delay_seconds;
     int hangup_delay_seconds;

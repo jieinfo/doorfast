@@ -9,6 +9,7 @@ void test_config_validation(void) {
         .brand = "gvs",
         .gvs_interface = "br-door",
         .gvs_local_address = "IS:2-1-101-1",
+        .sync_state_path = "/etc/config/doorfast-sync",
         .passive_only = true,
     };
     struct df_config invalid_brand = {
@@ -16,6 +17,7 @@ void test_config_validation(void) {
         .brand = "other",
         .gvs_interface = "br-door",
         .gvs_local_address = "IS:2-1-101-1",
+        .sync_state_path = "/etc/config/doorfast-sync",
         .passive_only = true,
     };
     struct df_config invalid_capture = {
@@ -39,22 +41,26 @@ void test_gvs_config_requires_explicit_passive_interface(void) {
         .gvs_interface = "vlan-door.42",
         .gvs_local_address = "IS:2-1-101-1",
         .uplink_interface = "bond-home",
+        .sync_state_path = "/etc/config/doorfast-sync",
         .passive_only = true,
     };
     struct df_config missing_interface = valid;
     struct df_config missing_address = valid;
     struct df_config malformed_address = valid;
     struct df_config active_request = valid;
+    struct df_config missing_state_path = valid;
 
     missing_interface.gvs_interface = "";
     missing_address.gvs_local_address = "";
     malformed_address.gvs_local_address = "IS:2-1-200-0";
     active_request.passive_only = false;
+    missing_state_path.sync_state_path = NULL;
     TEST_ASSERT_INT_EQ(DF_OK, df_config_validate(&valid));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&missing_interface));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&missing_address));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&malformed_address));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&active_request));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&missing_state_path));
 }
 
 void test_config_redaction(void) {
