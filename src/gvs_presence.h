@@ -35,6 +35,12 @@ struct df_gvs_presence_action {
     unsigned round;
 };
 
+struct df_gvs_peer_reply {
+    uint8_t target[6];
+    uint8_t request_data[2];
+    bool peer_observed;
+};
+
 struct df_gvs_presence_peer {
     uint8_t address[6];
     bool online;
@@ -69,6 +75,10 @@ int df_gvs_presence_receive_peer(struct df_gvs_presence *presence,
                                  const uint8_t *data, size_t length,
                                  uint64_t now_ms,
                                  df_gvs_presence_emit_fn emit, void *context);
+int df_gvs_presence_receive_peer_request(
+    struct df_gvs_presence *presence, const uint8_t *data, size_t length,
+    uint64_t now_ms, struct df_gvs_peer_reply *reply,
+    df_gvs_presence_emit_fn emit, void *context);
 void df_gvs_presence_set_sync_maintainer(struct df_gvs_presence *presence,
                                          bool maintainer);
 

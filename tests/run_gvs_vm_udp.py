@@ -49,15 +49,24 @@ def main():
     observed = status()
     if observed['sync']['role'] != 'follower' or observed['sync']['last_opcode'] != 129:
         raise RuntimeError(f"Unexpected sync result: {observed}")
+    probe_log_command = ('logread | grep '
+                         '"doorfast: event=peer_probe accepted=1 '
+                         'reply_pending=1 peer_observed=1 mode=passive" '
+                         '|| true')
+    probe_logs_before = remote(probe_log_command)
+    subprocess.run(['build/gvs-peer-udp-inject', '--scenario',
+                    'peer-probe'], check=True)
+    wait_for(lambda: remote(probe_log_command) != probe_logs_before, timeout=5)
+    wait_for(lambda: status()['sync']['online_peers'] == 1)
     peer_log_command = ('logread | grep '
-                        '"doorfast: event=sync_action action=peer_online" '
+                        '"doorfast: event=peer_reply accepted=1 mode=passive" '
                         '|| true')
     peer_logs_before = remote(peer_log_command)
     subprocess.run(['build/gvs-peer-udp-inject', '--scenario',
                     'peer-online'], check=True)
-    wait_for(lambda: status()['sync']['online_peers'] == 1)
-    if remote(peer_log_command) == peer_logs_before:
-        raise RuntimeError("Peer reply did not emit peer_online observation")
+    wait_for(lambda: remote(peer_log_command) != peer_logs_before, timeout=5)
+    if status()['sync']['online_peers'] != 1:
+        raise RuntimeError("Peer reply did not preserve online observation")
     subprocess.run(['build/gvs-peer-udp-inject', '--scenario',
                     'periodic-sync'], check=True)
     wait_for(lambda: status()['sync']['last_opcode'] == 3)
@@ -101,7 +110,8 @@ def main():
         print(json.dumps(takeover))
     else:
         print(json.dumps(updated))
-    print('PASS: VM observed a 07/81 peer reply, received Period and Normal '
+    print('PASS: VM accepted a 07/01 peer probe as reply_pending without '
+          'sending, observed a 07/81 peer reply, received Period and Normal '
           'sync, persisted version 8, and emitted a new IncomingCall' +
           ('; two missed periods triggered takeover' if wait_for_takeover
            else ''))

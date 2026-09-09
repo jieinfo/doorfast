@@ -28,6 +28,7 @@ int df_gvs_peer_sim_next_frame(struct df_gvs_peer_sim *sim,
 int df_gvs_peer_sim_make_call(struct df_gvs_peer_sim *sim,
                               const uint8_t destination[6]);
 int df_gvs_peer_sim_make_peer_online(struct df_gvs_peer_sim *sim);
+int df_gvs_peer_sim_make_peer_probe(struct df_gvs_peer_sim *sim);
 int df_gvs_peer_sim_make_periodic_sync(struct df_gvs_peer_sim *sim);
 int df_gvs_peer_sim_make_normal_update(struct df_gvs_peer_sim *sim);
 size_t df_gvs_peer_sim_action_count(

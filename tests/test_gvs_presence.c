@@ -176,6 +176,69 @@ void test_gvs_presence_receives_peer_online_replies(void) {
     }
 }
 
+void test_gvs_presence_receives_peer_probe_and_prepares_reply(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 2};
+    const uint8_t candidate[6] = {0x61, 2, 1, 1, 1, 1};
+    uint8_t request[45] = {'G','V','S','G','V','S',0xa5,0xa5,0xa5,0xa5};
+    struct df_gvs_presence presence, before;
+    struct df_gvs_peer_reply reply;
+    struct action_log log = {0};
+
+    memcpy(request + 10, local, 6);
+    memcpy(request + 16, candidate, 6);
+    request[38] = 0x07;
+    request[39] = 0x01;
+    request[40] = 2;
+    request[42] = 0x12;
+    request[43] = 0x34;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_presence_start(&presence, local, 0));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_presence_receive_peer_request(
+        &presence, request, 44, 10, &reply, collect_action, &log));
+    TEST_ASSERT_INT_EQ(0, memcmp(candidate, reply.target, 6));
+    TEST_ASSERT_INT_EQ(0x12, reply.request_data[0]);
+    TEST_ASSERT_INT_EQ(0x34, reply.request_data[1]);
+    TEST_ASSERT_INT_EQ(1, reply.peer_observed);
+    TEST_ASSERT_INT_EQ(1, presence.peers[0].online);
+    TEST_ASSERT_INT_EQ(60, (int)presence.peers[0].seconds_remaining);
+    TEST_ASSERT_INT_EQ(1, (int)action_count(&log, DF_GVS_PRESENCE_PEER_ONLINE));
+
+    before = presence;
+    for (unsigned kind = 0; kind < 6; kind++) {
+        uint8_t bad[45];
+        size_t length = 44;
+        memset(&reply, 0x5a, sizeof(reply));
+        memcpy(bad, request, sizeof(bad));
+        if (kind == 0) length = 43;
+        if (kind == 1) { length = 45; bad[40] = 3; }
+        if (kind == 2) bad[10] ^= 1;
+        if (kind == 3) bad[38] = 0x91;
+        if (kind == 4) bad[39] = 0x81;
+        if (kind == 5) bad[40] = 1;
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+            df_gvs_presence_receive_peer_request(
+                &presence, bad, length, 10, &reply, collect_action, &log));
+        TEST_ASSERT_INT_EQ(0, memcmp(&before, &presence, sizeof(before)));
+        TEST_ASSERT_INT_EQ(0, memcmp(&reply,
+            &(const struct df_gvs_peer_reply){0}, sizeof(reply)));
+    }
+
+    memcpy(request + 16, (const uint8_t[]){0x32, 2, 1, 0, 1, 0}, 6);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_presence_receive_peer_request(
+        &presence, request, 44, 11, &reply, collect_action, &log));
+    TEST_ASSERT_INT_EQ(0, reply.peer_observed);
+    TEST_ASSERT_INT_EQ(0x32, reply.target[0]);
+    TEST_ASSERT_INT_EQ(1, (int)action_count(&log, DF_GVS_PRESENCE_PEER_ONLINE));
+
+    memcpy(request + 16, candidate, 6);
+    before = presence;
+    memset(&reply, 0x5a, sizeof(reply));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_gvs_presence_receive_peer_request(
+        &presence, request, 44, 12, &reply, reject_action, NULL));
+    TEST_ASSERT_INT_EQ(0, memcmp(&before, &presence, sizeof(before)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&reply,
+        &(const struct df_gvs_peer_reply){0}, sizeof(reply)));
+}
+
 void test_gvs_presence_tracks_online_timeout_and_maintainer_role(void) {
     uint8_t identity[6] = {0};
     struct df_gvs_presence presence = {0};

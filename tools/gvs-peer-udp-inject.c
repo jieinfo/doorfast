@@ -30,6 +30,12 @@ static int make_frame(const char *scenario, struct df_gvs_peer_sim **sim,
             df_gvs_peer_sim_make_peer_online(*sim) != DF_OK) {
             return DF_ERR_IO;
         }
+    } else if (strcmp(scenario, "peer-probe") == 0) {
+        if (df_gvs_peer_sim_create(sim, DF_GVS_SIM_NO_PEER, local, 0) !=
+                DF_OK ||
+            df_gvs_peer_sim_make_peer_probe(*sim) != DF_OK) {
+            return DF_ERR_IO;
+        }
     } else if (strcmp(scenario, "call-local") == 0) {
         if (df_gvs_peer_sim_create(sim, DF_GVS_SIM_NO_PEER, local, 0) !=
                 DF_OK ||
@@ -83,7 +89,8 @@ int main(int argc, char **argv) {
     if (argc != 3 || strcmp(argv[1], "--scenario") != 0) {
         fprintf(stderr,
                 "usage: %s --scenario "
-                "sync-reply|peer-online|periodic-sync|normal-update|call-local\n",
+                "sync-reply|peer-online|peer-probe|periodic-sync|"
+                "normal-update|call-local\n",
                 argv[0]);
         return 2;
     }

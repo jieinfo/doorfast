@@ -250,6 +250,17 @@ int df_gvs_peer_sim_make_peer_online(struct df_gvs_peer_sim *sim) {
         payload, sizeof(payload));
 }
 
+int df_gvs_peer_sim_make_peer_probe(struct df_gvs_peer_sim *sim) {
+    static const uint8_t payload[2] = {0x12, 0x34};
+
+    if (sim == NULL) {
+        return DF_ERR_INVALID;
+    }
+    return df_gvs_peer_sim_enqueue_control(
+        sim, sim->local, sim->lower_peer, 0x07, 0x01,
+        payload, sizeof(payload));
+}
+
 int df_gvs_peer_sim_make_call(struct df_gvs_peer_sim *sim,
                               const uint8_t destination[6]) {
     if (sim == NULL || destination == NULL) {

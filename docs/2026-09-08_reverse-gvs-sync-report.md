@@ -211,6 +211,32 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `linked_workitem`: M2
 - `supersedes`: none
 
+#### E-012
+
+- `title`: 旧 APK 的 `07/01` 处理顺序与 `07/81` 载荷来源完成静态确认
+- `observed_at`: 2026-09-09
+- `source_type`: file
+- `source_ref`: Moorgen APK `ManagerBusiness.smali:682-732`、`GVS_Protocol c.smali:2214-2385`
+- `content_hash`: `moorgen_apk=6793c5777bea2c4f56f30c79c19d37d9089976eaaaa61c6da0ef6724a9a8487f`
+- `artifact_path`: `docs/gvs-peer-online-reply.md`
+- `repro_command`: `sed -n '660,742p' /absolute/path/to/decoded/smali_classes3/com/gvs/vdp/talkback_is/manager/ManagerBusiness.smali && sed -n '2214,2385p' /absolute/path/to/decoded/smali_classes3/com/gvs/general/protocol/c.smali`
+- `raw_excerpt`: `COM_PING_ASK` 分支先以请求源地址、目标 IP/端口、请求数据和空 MAC 参数调用回复方法，再尝试以源地址刷新候选在线状态。空 MAC 分支把请求数据前两字节写入 `07/81` 的 6 字节载荷，其余四字节写零。
+- `linked_workitem`: M2
+- `supersedes`: none
+
+#### E-013
+
+- `title`: Doorfast 离线接收 `07/01` 并生成待处理 `07/81` 回复
+- `observed_at`: 2026-09-09
+- `source_type`: command
+- `source_ref`: `src/gvs_presence.c`, `src/gvs_serialize.c`, `src/runtime_service.c`, `tests/test_gvs_presence.c`, `tests/test_gvs_serialize.c`
+- `content_hash`: `gvs_presence.c=41f4e889df33ebdd13f9045b995bab2b626fe9c50baf4ef7abcefb0101f0eb10; gvs_serialize.c=17eb4dc8c895faf64b6926ab72e7afb136adb21fa71d62975d3c21c639fd9531; runtime_service.c=df38250f986358635f9e0b93a75751317b4204e0283fdffb13afd0bc64e042f3; test_gvs_presence.c=45baceb2f01a55a22243129261b0698dc80c8d547c5f3f0eab02f9bbdeb33954; test_gvs_serialize.c=95cdbdc5aff2b31542c48ccddaf4890e691b3b86f6d691b5144299d3ec27b7cc`
+- `artifact_path`: `src/gvs_presence.c`, `src/gvs_serialize.c`, `src/runtime_service.c`, `tests/test_gvs_presence.c`, `tests/test_gvs_serialize.c`
+- `repro_command`: `make clean && make test && make clean && make CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -Isrc -Itests -Itests/support -I/opt/homebrew/Cellar/libpcap/1.10.6/include -fsanitize=address,undefined -fno-omit-frame-pointer' test`
+- `raw_excerpt`: 66 项 C 测试通过；有效 `07/01` 生成目标为请求源的待回复对象，已知候选刷新 60 秒在线期限，未知来源不进入候选状态；序列化结果为 48 字节 `07/81`，载荷为请求前两字节加四个零。截断、多余数据、错误目标/功能码/操作码/长度及事件交付失败均被拒绝且不修改状态。生产运行时仅记录 `reply_pending=1`，没有发送调用。
+- `linked_workitem`: M2
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -315,7 +341,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `impact`: Doorfast 的身份候选、同步状态机、完整 42 字节帧校验和会话入口可以在不联网的情况下端到端回归；这缩小了进入隔离 UDP 测试前的代码不确定性，但不证明真实门口机接受 Doorfast。
 - `confidence`: high
 - `repro_steps`: 运行 E-009 命令，比较两次 `no-peer` 输出，并检查三个内置场景的角色、漏周期和目标范围记录。
-- `remediation`: 下一阶段补充 `0x07` 入站回复证据和真实设备接受性验证。
+- `remediation`: `0x07` 请求/回复离线语义已经补齐；下一阶段验证目标 APK 的请求入口，并继续保留真实设备接受性缺口。
 
 #### F-009
 
@@ -341,7 +367,20 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `impact`: Doorfast 已能从实际 x86_64 抓包入口识别同户候选的 `07/81` 应答、刷新 60 秒期限并通过 ubus 暴露在线数量；候选消失后会自动回到离线。
 - `confidence`: high
 - `repro_steps`: 运行 E-011 命令，观察固定应答后 `online_peers=1`、60 秒后为 0，并核对 `peer_reply accepted=1` 与 `peer_offline` 日志。
-- `remediation`: 下一阶段静态还原并离线实现 `07/01` 请求处理与 `07/81` 应答生成；真实设备发送前仍需合法公共头提供器和隔离实机兼容性证据。
+- `remediation`: `07/01` 请求处理与 `07/81` 应答生成已经离线完成；真实设备发送前仍需合法公共头提供器、受控发送事务和隔离实机兼容性证据。
+
+#### F-011
+
+- `title`: `07/01` 请求可以按旧业务顺序形成可序列化的 `07/81` 待回复动作
+- `severity`: n/a_re
+- `category`: reverse_algo
+- `status`: validated
+- `evidence_ids`: E-012, E-013
+- `location`: `ManagerBusiness.messageDeal`, `GVS_Protocol`, `src/gvs_presence.c`, `src/gvs_serialize.c`, `src/runtime_service.c`
+- `impact`: Doorfast 已具备离线可验证的探测应答业务语义，同时保持生产网络零发送；这补齐了主动在线维护前的请求解析与回复构造层，但尚未证明真实设备会接受该回复。
+- `confidence`: high
+- `repro_steps`: 运行 E-012 的静态定位命令核对旧调用顺序，再运行 E-013 的常规和 Sanitizer 测试。
+- `remediation`: 下一阶段在隔离 x86_64 虚拟机验证 `07/01` 抓包入口和 `reply_pending` 日志；之后单独设计受控发送事务与公共头兼容性验收。
 
 ### Path P-001
 
@@ -360,6 +399,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   8. x86_64 目标 APK 在官方 25.12.1 虚拟机由 procd 运行，空闲时仍可响应 ubus 并支持重启和卸载重装。evidence: E-007 — finding: F-006
   9. 隔离回环 UDP 注入验证 `Period` 刷新、`Normal` 版本持久化和两个缺失周期接管。evidence: E-010 — finding: F-009
   10. `07/81` 候选应答从目标抓包入口刷新在线期限，60 秒后自动离线。evidence: E-011 — finding: F-010
+  11. `07/01` 请求经完整帧校验后形成 `07/81` 待回复对象；已知候选同时刷新在线状态，生产运行时不发送。evidence: E-012, E-013 — finding: F-011
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未获得真实设备接受证据；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ### Path P-002
@@ -386,9 +426,9 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   2. 结构化探测、同步询问、版本询问和周期动作进入固定容量模拟器回调。evidence: E-009 — finding: F-008
   3. 已验证格式的合成 `91/81`、`91/82`、`91/03` 帧通过 `df_gvs_runtime_sync_receive()` 返回，`03/01` 来电通过 `df_gvs_receive_datagram()` 返回。evidence: E-009 — finding: F-008
   4. 公开同步状态快照和会话状态生成脱敏 JSON Lines，并以固定逻辑时间验证选举与接管。evidence: E-009 — finding: F-008
-  5. 因缺少已确认的 `0x07` 回复语义，模拟同步参与者不增加在线候选数，输出保持 `online_peers=0`。evidence: E-009 — finding: F-008
+  5. `07/01` 请求经过公共头、目标地址和长度校验后生成 `07/81` 待回复动作，已知候选刷新在线期限；运行时保持零发送。evidence: E-012, E-013 — finding: F-011
   6. 固定测试帧通过回环转发进入 x86_64 APK，验证同步角色、版本状态和来电事件。evidence: E-010 — finding: F-009
-- `residual_risks`: 真实公共头兼容性、`0x07` 候选在线回复和门口机接受性均未验证；隔离 UDP 验证不等同于完整主机模式。
+- `residual_risks`: 真实公共头兼容性、主动发送事务和门口机接受性均未验证；隔离 UDP 验证不等同于完整主机模式。
 
 ## 6. Timeline 与遗留问题
 
@@ -405,5 +445,6 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 | 2026-09-08 | 为核心 APK 增加升级后自动重启，并完成 `r2 → r3` 升级和备份恢复式回滚验收 |
 | 2026-09-09 | 完成固定容量离线 GVS 对端模拟器、三种选举/接管场景及同户来电路由回归 |
 | 2026-09-09 | 确认 `07/81` 候选在线语义，并在 x86_64 `r4` APK 验证在线刷新与 60 秒离线 |
+| 2026-09-09 | 静态确认 `07/01` 回复顺序与载荷来源，完成离线待回复生成及 66 项 C 测试 |
 
-当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
+当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护、`07/01` 待回复生成和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；`07/01` 目标 APK 验收、正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。

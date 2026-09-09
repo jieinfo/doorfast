@@ -97,6 +97,40 @@ void test_gvs_serialize_builds_sync_ask_and_version_ask(void) {
     TEST_ASSERT_INT_EQ(0, packet[41]);
 }
 
+void test_gvs_serialize_builds_peer_reply_from_request_data(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 2};
+    const uint8_t target[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t expected_payload[6] = {0x12, 0x34, 0, 0, 0, 0};
+    const struct df_gvs_peer_reply reply = {
+        .target = {0x61, 2, 1, 1, 1, 1},
+        .request_data = {0x12, 0x34},
+        .peer_observed = true,
+    };
+    uint8_t packet[64] = {0};
+    size_t length = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_peer_reply_serialize(
+        &reply, local, packet, sizeof(packet), &length,
+        fixed_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(48, (int)length);
+    TEST_ASSERT_INT_EQ(0, memcmp(target, packet + 10, 6));
+    TEST_ASSERT_INT_EQ(0, memcmp(local, packet + 16, 6));
+    TEST_ASSERT_INT_EQ(0x07, packet[38]);
+    TEST_ASSERT_INT_EQ(0x81, packet[39]);
+    TEST_ASSERT_INT_EQ(6, packet[40]);
+    TEST_ASSERT_INT_EQ(0, memcmp(expected_payload, packet + 42, 6));
+
+    length = 99;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_peer_reply_serialize(
+        &reply, local, packet, 47, &length, fixed_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(0, (int)length);
+    length = 99;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_peer_reply_serialize(
+        &reply, local, packet, sizeof(packet), &length,
+        reject_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(0, (int)length);
+}
+
 void test_gvs_serialize_rejects_missing_header_fields_and_unsupported_actions(void) {
     const uint8_t local[6] = {0x61, 0x02, 0x01, 0x01, 0x01, 0x01};
     struct df_gvs_presence_action action = {

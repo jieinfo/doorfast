@@ -235,6 +235,49 @@ int df_gvs_presence_receive_peer(struct df_gvs_presence *presence,
     return status;
 }
 
+int df_gvs_presence_receive_peer_request(
+    struct df_gvs_presence *presence, const uint8_t *data, size_t length,
+    uint64_t now_ms, struct df_gvs_peer_reply *reply,
+    df_gvs_presence_emit_fn emit, void *context) {
+    struct df_gvs_frame frame;
+    struct df_event event;
+    struct df_gvs_peer_reply next_reply = {0};
+    size_t index;
+
+    if (reply != NULL) {
+        memset(reply, 0, sizeof(*reply));
+    }
+    if (presence == NULL || reply == NULL || emit == NULL ||
+        presence->phase == DF_GVS_PRESENCE_DOWN ||
+        now_ms < presence->last_now_ms ||
+        df_gvs_frame_parse(data, length, &frame, &event) != DF_OK ||
+        frame.family != 0x07 || frame.opcode != 0x01 ||
+        frame.payload_length != 2 ||
+        memcmp(frame.destination, presence->identity, 6) != 0) {
+        return DF_ERR_INVALID;
+    }
+
+    /* The legacy handler prepares 07/81 before attempting to refresh a known
+     * candidate. Preserve that distinction: an unknown source still receives
+     * a pending reply, but cannot become an observed indoor peer. */
+    memcpy(next_reply.target, frame.source, sizeof(next_reply.target));
+    memcpy(next_reply.request_data, frame.payload,
+           sizeof(next_reply.request_data));
+    for (index = 0; index < DF_GVS_INDOOR_PEER_COUNT; index++) {
+        if (memcmp(presence->peers[index].address, frame.source, 6) == 0) {
+            if (df_gvs_presence_observe_peer(presence, frame.source, emit,
+                                             context) != DF_OK) {
+                return DF_ERR_IO;
+            }
+            next_reply.peer_observed = true;
+            break;
+        }
+    }
+    presence->last_now_ms = now_ms;
+    *reply = next_reply;
+    return DF_OK;
+}
+
 void df_gvs_presence_set_sync_maintainer(struct df_gvs_presence *presence,
                                          bool maintainer) {
     if (presence != NULL && presence->phase != DF_GVS_PRESENCE_DOWN) {

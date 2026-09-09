@@ -52,6 +52,14 @@ class GvsPeerUdpInjectorTest(unittest.TestCase):
         self.assertEqual(bytes((0x07, 0x81)), packet[38:40])
         self.assertEqual(bytes((0, 1, 0, 0, 0, 0)), packet[42:48])
 
+    def test_peer_probe_is_fixed_07_01_from_lower_indoor_peer(self):
+        packet = self.receive_scenario("peer-probe")
+        self.assertEqual(44, len(packet))
+        self.assertEqual(bytes((0x61, 2, 1, 1, 1, 2)), packet[10:16])
+        self.assertEqual(bytes((0x61, 2, 1, 1, 1, 1)), packet[16:22])
+        self.assertEqual(bytes((0x07, 0x01)), packet[38:40])
+        self.assertEqual(bytes((0x12, 0x34)), packet[42:44])
+
     def test_periodic_sync_carries_fixed_period_json(self):
         packet = self.receive_scenario("periodic-sync")
         self.assertEqual(bytes((0x61, 2, 1, 1, 1, 2)), packet[10:16])

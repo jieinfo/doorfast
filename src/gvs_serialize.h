@@ -25,5 +25,9 @@ int df_gvs_presence_action_serialize(
     uint16_t sync_version, uint8_t *output, size_t capacity,
     size_t *output_length, df_gvs_header_fields_fn provide_fields,
     void *fields_context);
+int df_gvs_peer_reply_serialize(
+    const struct df_gvs_peer_reply *reply, const uint8_t source[6],
+    uint8_t *output, size_t capacity, size_t *output_length,
+    df_gvs_header_fields_fn provide_fields, void *fields_context);
 
 #endif

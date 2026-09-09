@@ -92,3 +92,21 @@ int df_gvs_presence_action_serialize(
         payload_length == 0U ? NULL : payload, payload_length, provide_fields,
         fields_context);
 }
+
+int df_gvs_peer_reply_serialize(
+    const struct df_gvs_peer_reply *reply, const uint8_t source[6],
+    uint8_t *output, size_t capacity, size_t *output_length,
+    df_gvs_header_fields_fn provide_fields, void *fields_context) {
+    uint8_t payload[6] = {0};
+
+    if (output_length != NULL) {
+        *output_length = 0;
+    }
+    if (reply == NULL || source == NULL || output_length == NULL) {
+        return DF_ERR_INVALID;
+    }
+    memcpy(payload, reply->request_data, sizeof(reply->request_data));
+    return df_gvs_control_serialize(
+        output, capacity, output_length, reply->target, source, 0x07, 0x81,
+        payload, sizeof(payload), provide_fields, fields_context);
+}
