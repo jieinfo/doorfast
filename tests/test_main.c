@@ -1,6 +1,7 @@
 #include "test.h"
 void test_gvs_pick_exchange(void);
 void test_gvs_presence_receives_sync_replies(void);
+void test_gvs_presence_receives_peer_online_replies(void);
 void test_gvs_sync_updates_version_and_registered_values(void);
 void test_gvs_sync_serializes_periodic_chunks_and_json_escaping(void);
 void test_gvs_sync_serializes_normal_update_and_rejects_oversize(void);
@@ -71,7 +72,7 @@ void test_discovery_requires_approval(void);
 void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 63;
+    return 64;
 }
 
 int main(void) {
@@ -80,7 +81,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(63, test_suite_count());
+    TEST_ASSERT_INT_EQ(64, test_suite_count());
     test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue();
     test_gvs_peer_sim_builds_synthetic_call_frame();
     test_gvs_peer_sim_elects_maintainer_without_peers();
@@ -89,6 +90,7 @@ int main(void) {
     test_gvs_peer_sim_routes_calls_by_apartment_scope();
     test_gvs_peer_sim_rejects_malformed_and_non_call_frames();
     test_gvs_presence_receives_sync_replies();
+    test_gvs_presence_receives_peer_online_replies();
     test_gvs_sync_updates_version_and_registered_values();
     test_gvs_sync_serializes_periodic_chunks_and_json_escaping();
     test_gvs_sync_serializes_normal_update_and_rejects_oversize();

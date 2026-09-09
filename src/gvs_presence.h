@@ -65,6 +65,10 @@ int df_gvs_presence_tick(struct df_gvs_presence *presence, uint64_t now_ms,
 int df_gvs_presence_observe_peer(struct df_gvs_presence *presence,
                                  const uint8_t peer[6],
                                  df_gvs_presence_emit_fn emit, void *context);
+int df_gvs_presence_receive_peer(struct df_gvs_presence *presence,
+                                 const uint8_t *data, size_t length,
+                                 uint64_t now_ms,
+                                 df_gvs_presence_emit_fn emit, void *context);
 void df_gvs_presence_set_sync_maintainer(struct df_gvs_presence *presence,
                                          bool maintainer);
 

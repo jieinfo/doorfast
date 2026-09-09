@@ -146,6 +146,21 @@ void test_gvs_runtime_sync_exposes_redacted_status_snapshot(void) {
                        df_gvs_runtime_sync_status_json(&sync, small,
                                                        sizeof(small)));
     TEST_ASSERT_INT_EQ(0, small[0]);
+
+    const uint8_t ping_reply[6] = {0, 1, 0, 0, 0, 0};
+    unsigned observations = 0;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_control_serialize(
+        packet, sizeof(packet), &packet_length, local, remote, 7, 0x81,
+        ping_reply, sizeof(ping_reply), runtime_sync_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_presence_receive_peer(
+        &sync.presence, packet, packet_length, 1,
+        runtime_sync_count_action, &observations));
+    TEST_ASSERT_INT_EQ(1, (int)observations);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_runtime_sync_status(&sync, &status));
+    TEST_ASSERT_INT_EQ(1, (int)status.online_peers);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_runtime_sync_status_json(
+                                  &sync, json, sizeof(json)));
+    TEST_ASSERT_INT_EQ(1, strstr(json, "\"online_peers\":1") != NULL);
 }
 
 void test_gvs_runtime_sync_names_only_valid_public_states(void) {

@@ -278,6 +278,15 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (df_gvs_extract_control_payload(packet, packet_length,
                                            &payload, &payload_length) == 1) {
+            if (payload_length >= 40U && payload[38] == 0x07 &&
+                payload[39] == 0x81) {
+                int peer_status = df_gvs_presence_receive_peer(
+                    &sync.presence, payload, payload_length, now_ms,
+                    df_runtime_sync_action, NULL);
+                (void)printf("doorfast: event=peer_reply accepted=%u mode=passive\n",
+                             peer_status == DF_OK ? 1U : 0U);
+                continue;
+            }
             struct df_gvs_runtime_sync_result sync_result;
             struct df_gvs_receive_result result;
             if (df_gvs_runtime_sync_receive(&sync, payload, payload_length,

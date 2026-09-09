@@ -212,6 +212,29 @@ int df_gvs_presence_observe_peer(struct df_gvs_presence *presence,
     return DF_ERR_INVALID;
 }
 
+int df_gvs_presence_receive_peer(struct df_gvs_presence *presence,
+                                 const uint8_t *data, size_t length,
+                                 uint64_t now_ms,
+                                 df_gvs_presence_emit_fn emit, void *context) {
+    struct df_gvs_frame frame;
+    struct df_event event;
+    int status;
+
+    /* The six reply bytes are opaque; the source identifies the candidate.
+     * Structural acceptance records observation, not authenticated identity.
+     * As with sync receive, the caller advances timers before reception. */
+    if (presence == NULL || now_ms < presence->last_now_ms ||
+        df_gvs_frame_parse(data, length, &frame, &event) != DF_OK ||
+        frame.family != 0x07 || frame.opcode != 0x81 ||
+        frame.payload_length != 6 ||
+        memcmp(frame.destination, presence->identity, 6) != 0) {
+        return DF_ERR_INVALID;
+    }
+    status = df_gvs_presence_observe_peer(presence, frame.source, emit, context);
+    if (status == DF_OK) presence->last_now_ms = now_ms;
+    return status;
+}
+
 void df_gvs_presence_set_sync_maintainer(struct df_gvs_presence *presence,
                                          bool maintainer) {
     if (presence != NULL && presence->phase != DF_GVS_PRESENCE_DOWN) {

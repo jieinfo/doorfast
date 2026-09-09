@@ -49,6 +49,15 @@ def main():
     observed = status()
     if observed['sync']['role'] != 'follower' or observed['sync']['last_opcode'] != 129:
         raise RuntimeError(f"Unexpected sync result: {observed}")
+    peer_log_command = ('logread | grep '
+                        '"doorfast: event=sync_action action=peer_online" '
+                        '|| true')
+    peer_logs_before = remote(peer_log_command)
+    subprocess.run(['build/gvs-peer-udp-inject', '--scenario',
+                    'peer-online'], check=True)
+    wait_for(lambda: status()['sync']['online_peers'] == 1)
+    if remote(peer_log_command) == peer_logs_before:
+        raise RuntimeError("Peer reply did not emit peer_online observation")
     subprocess.run(['build/gvs-peer-udp-inject', '--scenario',
                     'periodic-sync'], check=True)
     wait_for(lambda: status()['sync']['last_opcode'] == 3)
@@ -80,6 +89,8 @@ def main():
                      'follower' and current['sync']['periodic_misses'] == 1
                      else None),
             timeout=65, interval=1)
+        if status()['sync']['online_peers'] != 0:
+            raise RuntimeError("Peer remained online after its 60-second deadline")
         takeover = wait_for(
             lambda: (current if (current := status())['sync']['role'] ==
                      'maintainer' else None),
@@ -90,8 +101,8 @@ def main():
         print(json.dumps(takeover))
     else:
         print(json.dumps(updated))
-    print('PASS: VM received Period and Normal sync, persisted version 8, '
-          'and emitted a new IncomingCall' +
+    print('PASS: VM observed a 07/81 peer reply, received Period and Normal '
+          'sync, persisted version 8, and emitted a new IncomingCall' +
           ('; two missed periods triggered takeover' if wait_for_takeover
            else ''))
 
