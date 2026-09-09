@@ -1,6 +1,6 @@
 # GVS 离线发送事务
 
-Doorfast `r7` 将 `07/81` 待回复队列接入单事务发送状态机。运行时使用即时成功的模拟发送器，只验证出队、尝试关联、终态和日志；它不创建 UDP 套接字，也不向门禁网络发送报文。
+Doorfast `r7` 将 `07/81` 待回复队列接入单事务发送状态机；`r8` 在模拟成功前增加完整内存构帧和回读校验。运行时只验证出队、尝试关联、帧结构、终态和日志；它不创建 UDP 发送套接字，也不向门禁网络发送报文。
 
 ## 事务流程
 
@@ -36,14 +36,15 @@ stateDiagram-v2
 
 ## 模拟发送边界
 
-生产守护进程在下一次事件循环从 FIFO 队列取出回复对象，并调用只返回模拟成功的发送器。每个事件记录为：
+生产守护进程在下一次事件循环从 FIFO 队列取出回复对象。`r8` 先构造并回读校验 48 字节内存帧，再把该结果作为模拟发送结果交给事务状态机。每个成功对象记录为：
 
 ```text
+doorfast: event=peer_reply_frame prepared=1 length=48 attempt=1 header=placeholder mode=memory
 doorfast: event=peer_reply_tx state=sending attempt=1 timed_out=0 mode=simulated
 doorfast: event=peer_reply_tx state=success attempt=1 timed_out=0 mode=simulated
 ```
 
-日志不包含目标地址、请求数据或公共头字段。`tests/test_gvs_send_transaction.c` 使用脚本化模拟结果覆盖即时成功、异步失败后成功、三次失败、三次无响应、重试期限、最终超时、跨对象迟到完成、双时钟一致性和接近时钟上限的终态；`tests/run_gvs_vm_udp.py` 则准备在 `r7` APK 中验证固定 `07/01` 经实际抓包入口进入模拟事务。
+日志不包含目标地址、请求数据或公共头字段。`tests/test_gvs_send_transaction.c` 使用脚本化模拟结果覆盖即时成功、异步失败后成功、三次失败、三次无响应、重试期限、最终超时、跨对象迟到完成、双时钟一致性和接近时钟上限的终态；`r7` 已在目标虚拟机验证固定 `07/01` 经实际抓包入口进入模拟事务，`r8` 验收将进一步检查每个探针均生成新的 48 字节内存帧记录。
 
 ## 本地复现
 
@@ -57,4 +58,4 @@ sh tests/test_main_cli.sh
 node tests/test_luci_status.js
 ```
 
-本阶段没有证明真实门口机接受 `07/81`。下一阶段应给事务状态机接入受控的帧构造适配层，继续以内存传输记录完整 42 字节输出，再验证公共头字段来源与兼容性。
+本阶段没有证明真实门口机接受 `07/81`。`r8` 已接入受控内存构帧适配层；下一阶段应定义可替换的合法公共头提供器边界，并验证字段来源与兼容性。
