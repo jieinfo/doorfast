@@ -10,6 +10,7 @@
 #include "event.h"
 #include "gvs_deadline.h"
 #include "gvs_identity.h"
+#include "gvs_memory_sender.h"
 #include "gvs_packet.h"
 #include "gvs_receive.h"
 #include "gvs_reply_queue.h"
@@ -78,16 +79,6 @@ static void df_runtime_sync_log(
         result->resend_local ? 1U : 0U);
 }
 
-static enum df_gvs_send_attempt_result df_runtime_simulated_send(
-    const struct df_gvs_reply_queue_entry *entry, unsigned attempt,
-    uint64_t completion_id, void *context) {
-    (void)attempt;
-    (void)completion_id;
-    (void)context;
-    return entry == NULL ? DF_GVS_SEND_ATTEMPT_FAILURE
-                         : DF_GVS_SEND_ATTEMPT_SUCCESS;
-}
-
 static const char *df_runtime_send_event_name(
     enum df_gvs_send_event_type type) {
     switch (type) {
@@ -111,6 +102,17 @@ static void df_runtime_send_log(const struct df_gvs_send_trace *trace) {
             trace->events[index].attempt,
             trace->events[index].timed_out ? 1U : 0U);
     }
+}
+
+static void df_runtime_memory_frame_log(
+    const struct df_gvs_memory_frame_record *record) {
+    if (record == NULL || !record->valid) {
+        return;
+    }
+    (void)printf(
+        "doorfast: event=peer_reply_frame prepared=1 length=%zu attempt=%u "
+        "header=placeholder mode=memory\n",
+        record->length, record->attempt);
 }
 
 static int df_runtime_capture_open(const struct df_runtime_config *runtime,
@@ -180,6 +182,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_capture_retry retry = {0};
     struct df_gvs_reply_queue reply_queue = {0};
     struct df_gvs_send_transaction send_transaction = {0};
+    struct df_gvs_memory_sender memory_sender = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
@@ -188,6 +191,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     uint8_t identity[6];
     uint16_t persisted_version;
     uint64_t started_ms;
+    uint64_t logged_frame_generation = 0;
     int status;
 
     if (runtime == NULL || df_config_validate(&runtime->config) != DF_OK ||
@@ -205,6 +209,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     started_ms = df_monotonic_ms();
     if (df_gvs_reply_queue_init(&reply_queue, started_ms) != DF_OK ||
         df_gvs_send_transaction_init(&send_transaction, started_ms) != DF_OK ||
+        df_gvs_memory_sender_init(
+            &memory_sender, identity, df_gvs_placeholder_header_fields,
+            NULL) != DF_OK ||
         df_gvs_runtime_sync_start(&sync, identity, persisted_version,
                                   started_ms) != DF_OK) {
         return DF_ERR_IO;
@@ -254,9 +261,14 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (df_gvs_send_transaction_step(
                 &send_transaction, &reply_queue, now_ms,
-                df_runtime_simulated_send, NULL, &send_trace) != DF_OK) {
+                df_gvs_memory_send_attempt, &memory_sender,
+                &send_trace) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
+        }
+        if (memory_sender.record.generation != logged_frame_generation) {
+            df_runtime_memory_frame_log(&memory_sender.record);
+            logged_frame_generation = memory_sender.record.generation;
         }
         df_runtime_send_log(&send_trace);
         if (df_gvs_runtime_sync_tick(&sync, now_ms, df_runtime_sync_action,

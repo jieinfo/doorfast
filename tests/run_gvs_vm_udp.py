@@ -61,11 +61,19 @@ def main():
     sent_log_command = ('logread | grep '
                         '"doorfast: event=peer_reply_tx state=success '
                         'attempt=1 timed_out=0 mode=simulated" || true')
+    frame_log_command = ('logread | grep '
+                         '"doorfast: event=peer_reply_frame prepared=1 '
+                         'length=48 attempt=1 header=placeholder mode=memory" '
+                         '|| true')
     wait_for(lambda: remote(sent_log_command), timeout=5)
+    wait_for(lambda: remote(frame_log_command), timeout=5)
     sent_logs_before = remote(sent_log_command)
+    frame_logs_before = remote(frame_log_command)
     subprocess.run(['build/gvs-peer-udp-inject', '--scenario',
                     'peer-probe'], check=True)
     wait_for(lambda: remote(sent_log_command) != sent_logs_before,
+             timeout=5)
+    wait_for(lambda: remote(frame_log_command) != frame_logs_before,
              timeout=5)
     peer_log_command = ('logread | grep '
                         '"doorfast: event=peer_reply accepted=1 mode=passive" '
@@ -119,8 +127,9 @@ def main():
         print(json.dumps(takeover))
     else:
         print(json.dumps(updated))
-    print('PASS: VM accepted two 07/01 peer probes and completed simulated '
-          'reply transactions, observed a 07/81 peer reply, received Period '
+    print('PASS: VM accepted two 07/01 peer probes, prepared two in-memory '
+          '48-byte 07/81 frames, completed simulated reply transactions, '
+          'observed a 07/81 peer reply, received Period '
           'and Normal sync, persisted version 8, and emitted a new IncomingCall' +
           ('; two missed periods triggered takeover' if wait_for_takeover
            else ''))
