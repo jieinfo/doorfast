@@ -198,6 +198,19 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `linked_workitem`: M1, M2
 - `supersedes`: none
 
+#### E-011
+
+- `title`: `07/81` 候选在线语义完成静态与 x86_64 运行双重验证
+- `observed_at`: 2026-09-09
+- `source_type`: file, network
+- `source_ref`: Moorgen APK `ManagerBusiness`/`IndoorDeviceBusiness`/`GVS_Protocol` smali，Doorfast `src/gvs_presence.c`、`src/runtime_service.c`、`tests/run_gvs_vm_udp.py`，ImmortalWrt 25.12.1 x86_64 虚拟机
+- `content_hash`: `moorgen_apk=6793c5777bea2c4f56f30c79c19d37d9089976eaaaa61c6da0ef6724a9a8487f; doorfast-0.1.0-r4.apk=518ed2bb05121250112b84b5214af47ab663db64feb7442308c65da2bb2517d4; gvs_presence.c=cf8ea2c23d8d5bdeb984dadc8b0f2023c2fbbe0ce522a7045424e6c83e86eb53; runtime_service.c=f276eca315cb765fd73258b5aef9cbb87db095e46dcd52f5aaac5d211a5b27d8`
+- `artifact_path`: `docs/gvs-peer-online-reply.md`, `src/gvs_presence.c`, `src/runtime_service.c`, `tests/run_gvs_vm_udp.py`
+- `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /absolute/path/to/vm/ssh.sh --wait-for-takeover`
+- `raw_excerpt`: 旧 APK 将功能码 7 注册到 ManagerBusiness；`0x81` 分支以源逻辑地址刷新候选设备，倒计时重置为 60 秒，线程每秒递减并在 30 秒倍数探测。Doorfast `r4` 在隔离虚拟机收到固定 48 字节 `07/81` 后状态为 `online_peers=1`，60 秒后为 0；随后同步版本保持 8，第一次周期缺失仍为 follower，第二次转为 maintainer，本户来电记录 `IncomingCall`。
+- `linked_workitem`: M2
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -317,6 +330,19 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `repro_steps`: 使用 E-010 的固定回环转发和命令执行完整虚拟机验证，检查 follower 第一次缺失、maintainer 第二次接管、UCI 版本 8 及新增 `periodic_sync` 日志。
 - `remediation`: 保持生产服务被动，直到合法公共头字段和真实设备接受性具备独立证据。
 
+#### F-010
+
+- `title`: 候选室内机在线应答可驱动 Doorfast 的在线维护状态
+- `severity`: n/a_re
+- `category`: reverse_algo
+- `status`: validated
+- `evidence_ids`: E-001, E-011
+- `location`: `ManagerBusiness.messageDeal`, `IndoorDeviceBusiness`, `src/gvs_presence.c`, `src/runtime_service.c`
+- `impact`: Doorfast 已能从实际 x86_64 抓包入口识别同户候选的 `07/81` 应答、刷新 60 秒期限并通过 ubus 暴露在线数量；候选消失后会自动回到离线。
+- `confidence`: high
+- `repro_steps`: 运行 E-011 命令，观察固定应答后 `online_peers=1`、60 秒后为 0，并核对 `peer_reply accepted=1` 与 `peer_offline` 日志。
+- `remediation`: 下一阶段静态还原并离线实现 `07/01` 请求处理与 `07/81` 应答生成；真实设备发送前仍需合法公共头提供器和隔离实机兼容性证据。
+
 ### Path P-001
 
 - `title`: 选举结束后的同步维护调用路径
@@ -333,6 +359,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   7. 目标构建将快照映射为只读 ubus 响应，LuCI 通过最小 ACL 周期读取并呈现。evidence: E-005, E-006 — finding: F-005
   8. x86_64 目标 APK 在官方 25.12.1 虚拟机由 procd 运行，空闲时仍可响应 ubus 并支持重启和卸载重装。evidence: E-007 — finding: F-006
   9. 隔离回环 UDP 注入验证 `Period` 刷新、`Normal` 版本持久化和两个缺失周期接管。evidence: E-010 — finding: F-009
+  10. `07/81` 候选应答从目标抓包入口刷新在线期限，60 秒后自动离线。evidence: E-011 — finding: F-010
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未获得真实设备接受证据；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ### Path P-002
@@ -377,5 +404,6 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 | 2026-09-08 | 修复空闲抓包阻塞 ubus，并在官方 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装生命周期冒烟 |
 | 2026-09-08 | 为核心 APK 增加升级后自动重启，并完成 `r2 → r3` 升级和备份恢复式回滚验收 |
 | 2026-09-09 | 完成固定容量离线 GVS 对端模拟器、三种选举/接管场景及同户来电路由回归 |
+| 2026-09-09 | 确认 `07/81` 候选在线语义，并在 x86_64 `r4` APK 验证在线刷新与 60 秒离线 |
 
-当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管和来电目标选择，但没有猜测 `0x07` 候选在线回复，也没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级和备份恢复式回滚验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性、UDP 交付和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
+当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
