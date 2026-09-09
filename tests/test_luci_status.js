@@ -31,6 +31,14 @@ const payload = {
         last_accepted: true,
         last_rejected: false,
         resend_local: false
+    },
+    call: {
+        session: 'ringing',
+        generation: 9,
+        command: 'answer',
+        dispatch: 'sent',
+        confirmation: 'waiting',
+        attempts: 1
     }
 };
 
@@ -54,6 +62,17 @@ assert.deepEqual(model.formatStatus(payload), [
         ]
     },
     {
+        title: '通话控制',
+        rows: [
+            ['会话', '来电振铃'],
+            ['会话代次', '9'],
+            ['命令', '接听'],
+            ['模拟发送', '已发送'],
+            ['业务确认', '等待确认'],
+            ['发送次数', '1']
+        ]
+    },
+    {
         title: '最近同步报文',
         rows: [
             ['操作码', '3'],
@@ -69,6 +88,9 @@ assert.equal(model.roleLabel('maintainer'), '同步维护者');
 assert.equal(model.roleLabel('follower'), '同步跟随者');
 assert.equal(model.roleLabel('starting'), '选举中');
 assert.equal(model.roleLabel('down'), '离线');
+assert.equal(model.callSessionLabel('talking'), '通话中');
+assert.equal(model.callDispatchLabel('failed'), '发送失败');
+assert.equal(model.callConfirmationLabel('expired'), '确认超时');
 assert.equal(model.unavailableLabel, 'Doorfast 服务未运行或状态接口不可用');
 assert.equal(model.staleLabel, '陈旧');
 assert.throws(() => model.formatStatus({running: true, mode: 'passive'}));

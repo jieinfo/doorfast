@@ -176,6 +176,45 @@ static int df_runtime_status_provider(
     return df_gvs_runtime_sync_status(context, status);
 }
 
+struct df_runtime_call_binding {
+    struct df_gvs_call_control *control;
+    struct df_gvs_session *session;
+    const uint8_t *identity;
+};
+
+static int df_runtime_call_status_provider(
+    struct df_gvs_call_control_status *status, void *context) {
+    struct df_runtime_call_binding *binding = context;
+
+    if (binding == NULL) {
+        return DF_ERR_INVALID;
+    }
+    return df_gvs_call_control_status(
+        binding->control, binding->session, status);
+}
+
+static int df_runtime_call_submit(
+    const struct df_runtime_call_request *request, uint64_t now_ms,
+    void *context) {
+    struct df_runtime_call_binding *binding = context;
+
+    if (request == NULL || binding == NULL) {
+        return DF_ERR_INVALID;
+    }
+    if (request->type == DF_GVS_CALL_COMMAND_ANSWER) {
+        return df_gvs_call_control_submit_answer(
+            binding->control, binding->session, request->session_generation,
+            binding->identity, request->primary_media_port,
+            request->secondary_media_port, request->duration_seconds, now_ms);
+    }
+    if (request->type == DF_GVS_CALL_COMMAND_HANGUP) {
+        return df_gvs_call_control_submit_hangup(
+            binding->control, binding->session, request->session_generation,
+            binding->identity, request->reason, now_ms);
+    }
+    return DF_ERR_INVALID;
+}
+
 int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_capture *capture = NULL;
     struct df_gvs_session session = {0};
@@ -191,6 +230,11 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         .ubus = &ubus,
     };
     uint8_t identity[6];
+    struct df_runtime_call_binding call_binding = {
+        .control = &call_control,
+        .session = &session,
+        .identity = identity,
+    };
     uint16_t persisted_version;
     uint64_t started_ms;
     uint64_t logged_frame_generation = 0;
@@ -226,9 +270,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     if (df_runtime_ubus_start(&ubus, df_runtime_status_provider, &sync,
-                              started_ms) == DF_OK) {
+                              started_ms) == DF_OK &&
+        df_runtime_ubus_bind_call(
+            &ubus, df_runtime_call_status_provider, df_runtime_call_submit,
+            &call_binding) == DF_OK) {
         wait_context.ubus_started = true;
     } else {
+        df_runtime_ubus_stop(&ubus);
         (void)fputs("doorfast: event=ubus_start_failed\n", stderr);
     }
     df_runtime_stopping = 0;

@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKGARCH:=all
 
 include $(INCLUDE_DIR)/package.mk
@@ -16,7 +16,7 @@ define Package/luci-app-doorfast
 endef
 
 define Package/luci-app-doorfast/description
-  Read-only Doorfast runtime status page.
+  Doorfast runtime status page and access-controlled local call API.
 endef
 
 define Build/Compile

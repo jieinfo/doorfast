@@ -6,6 +6,8 @@ void test_gvs_call_control_reports_confirmation_timeout_once(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
 void test_gvs_call_control_bounds_failed_simulated_delivery(void);
 void test_gvs_call_control_rejects_receive_before_submission_time(void);
+void test_gvs_call_control_exposes_public_status(void);
+void test_runtime_ubus_validates_and_routes_call_requests(void);
 void test_gvs_pick_exchange(void);
 void test_gvs_presence_receives_sync_replies(void);
 void test_gvs_presence_receives_peer_online_replies(void);
@@ -219,5 +221,7 @@ int main(void) {
     test_gvs_call_control_rejects_busy_and_stale_submission();
     test_gvs_call_control_bounds_failed_simulated_delivery();
     test_gvs_call_control_rejects_receive_before_submission_time();
+    test_gvs_call_control_exposes_public_status();
+    test_runtime_ubus_validates_and_routes_call_requests();
     return test_failures();
 }

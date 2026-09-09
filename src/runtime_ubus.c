@@ -28,9 +28,11 @@ static int df_runtime_ubus_status_handler(
     struct df_runtime_ubus_platform *platform =
         container_of(object, struct df_runtime_ubus_platform, object);
     struct df_gvs_runtime_sync_status status;
+    struct df_gvs_call_control_status call_status;
     const char *phase_name;
     const char *role_name;
     void *sync_table;
+    void *call_table;
     int result;
 
     (void)method;
@@ -72,13 +74,164 @@ static int df_runtime_ubus_status_handler(
     blobmsg_add_u8(&platform->response, "resend_local",
                    status.last_receive.resend_local);
     blobmsg_close_table(&platform->response, sync_table);
+    if (df_runtime_ubus_read_call_status(
+            platform->owner, &call_status) != DF_OK ||
+        df_gvs_session_state_name(call_status.session_state) == NULL ||
+        df_gvs_call_command_type_name(call_status.command_type) == NULL ||
+        df_gvs_call_dispatch_state_name(call_status.dispatch_state) == NULL ||
+        df_gvs_call_ack_state_name(call_status.acknowledgement_state) == NULL) {
+        blob_buf_free(&platform->response);
+        return UBUS_STATUS_UNKNOWN_ERROR;
+    }
+    call_table = blobmsg_open_table(&platform->response, "call");
+    blobmsg_add_string(&platform->response, "session",
+        df_gvs_session_state_name(call_status.session_state));
+    blobmsg_add_u64(&platform->response, "generation",
+                    call_status.session_generation);
+    blobmsg_add_string(&platform->response, "command",
+        df_gvs_call_command_type_name(call_status.command_type));
+    blobmsg_add_string(&platform->response, "dispatch",
+        df_gvs_call_dispatch_state_name(call_status.dispatch_state));
+    blobmsg_add_string(&platform->response, "confirmation",
+        df_gvs_call_ack_state_name(call_status.acknowledgement_state));
+    blobmsg_add_u32(&platform->response, "attempts", call_status.attempts);
+    blobmsg_close_table(&platform->response, call_table);
     result = ubus_send_reply(context, request, platform->response.head);
     blob_buf_free(&platform->response);
     return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
 }
 
+enum {
+    DF_UBUS_ANSWER_GENERATION,
+    DF_UBUS_ANSWER_PRIMARY_PORT,
+    DF_UBUS_ANSWER_SECONDARY_PORT,
+    DF_UBUS_ANSWER_DURATION,
+    __DF_UBUS_ANSWER_MAX,
+};
+
+static const struct blobmsg_policy df_runtime_ubus_answer_policy[] = {
+    [DF_UBUS_ANSWER_GENERATION] = {
+        .name = "generation", .type = BLOBMSG_TYPE_INT64},
+    [DF_UBUS_ANSWER_PRIMARY_PORT] = {
+        .name = "primary_media_port", .type = BLOBMSG_TYPE_INT32},
+    [DF_UBUS_ANSWER_SECONDARY_PORT] = {
+        .name = "secondary_media_port", .type = BLOBMSG_TYPE_INT32},
+    [DF_UBUS_ANSWER_DURATION] = {
+        .name = "duration_seconds", .type = BLOBMSG_TYPE_INT32},
+};
+
+enum {
+    DF_UBUS_HANGUP_GENERATION,
+    DF_UBUS_HANGUP_REASON,
+    __DF_UBUS_HANGUP_MAX,
+};
+
+static const struct blobmsg_policy df_runtime_ubus_hangup_policy[] = {
+    [DF_UBUS_HANGUP_GENERATION] = {
+        .name = "generation", .type = BLOBMSG_TYPE_INT64},
+    [DF_UBUS_HANGUP_REASON] = {
+        .name = "reason", .type = BLOBMSG_TYPE_INT32},
+};
+
+static int df_runtime_ubus_submit_reply(
+    struct ubus_context *context, struct ubus_request_data *request,
+    struct df_runtime_ubus_platform *platform,
+    const struct df_runtime_call_request *call) {
+    int status = df_runtime_ubus_submit_call(platform->owner, call);
+    int result;
+
+    if (status != DF_OK) {
+        return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT
+                                        : UBUS_STATUS_UNKNOWN_ERROR;
+    }
+    blob_buf_init(&platform->response, 0);
+    blobmsg_add_u8(&platform->response, "queued", 1);
+    blobmsg_add_u64(&platform->response, "generation",
+                    call->session_generation);
+    result = ubus_send_reply(context, request, platform->response.head);
+    blob_buf_free(&platform->response);
+    return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+}
+
+static int df_runtime_ubus_answer_handler(
+    struct ubus_context *context, struct ubus_object *object,
+    struct ubus_request_data *request, const char *method,
+    struct blob_attr *message) {
+    struct df_runtime_ubus_platform *platform =
+        container_of(object, struct df_runtime_ubus_platform, object);
+    struct blob_attr *fields[__DF_UBUS_ANSWER_MAX] = {0};
+    struct df_runtime_call_request call = {
+        .type = DF_GVS_CALL_COMMAND_ANSWER,
+    };
+    uint32_t primary;
+    uint32_t secondary;
+    uint32_t duration;
+
+    (void)method;
+    if (message == NULL) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+    blobmsg_parse(df_runtime_ubus_answer_policy, __DF_UBUS_ANSWER_MAX,
+                  fields, blob_data(message), blob_len(message));
+    if (fields[DF_UBUS_ANSWER_GENERATION] == NULL ||
+        fields[DF_UBUS_ANSWER_PRIMARY_PORT] == NULL ||
+        fields[DF_UBUS_ANSWER_SECONDARY_PORT] == NULL ||
+        fields[DF_UBUS_ANSWER_DURATION] == NULL) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+    primary = blobmsg_get_u32(fields[DF_UBUS_ANSWER_PRIMARY_PORT]);
+    secondary = blobmsg_get_u32(fields[DF_UBUS_ANSWER_SECONDARY_PORT]);
+    duration = blobmsg_get_u32(fields[DF_UBUS_ANSWER_DURATION]);
+    if (primary > UINT16_MAX || secondary > UINT16_MAX ||
+        duration > UINT8_MAX) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+    call.session_generation =
+        blobmsg_get_u64(fields[DF_UBUS_ANSWER_GENERATION]);
+    call.primary_media_port = (uint16_t)primary;
+    call.secondary_media_port = (uint16_t)secondary;
+    call.duration_seconds = (uint8_t)duration;
+    return df_runtime_ubus_submit_reply(context, request, platform, &call);
+}
+
+static int df_runtime_ubus_hangup_handler(
+    struct ubus_context *context, struct ubus_object *object,
+    struct ubus_request_data *request, const char *method,
+    struct blob_attr *message) {
+    struct df_runtime_ubus_platform *platform =
+        container_of(object, struct df_runtime_ubus_platform, object);
+    struct blob_attr *fields[__DF_UBUS_HANGUP_MAX] = {0};
+    struct df_runtime_call_request call = {
+        .type = DF_GVS_CALL_COMMAND_HANGUP,
+    };
+    uint32_t reason;
+
+    (void)method;
+    if (message == NULL) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+    blobmsg_parse(df_runtime_ubus_hangup_policy, __DF_UBUS_HANGUP_MAX,
+                  fields, blob_data(message), blob_len(message));
+    if (fields[DF_UBUS_HANGUP_GENERATION] == NULL ||
+        fields[DF_UBUS_HANGUP_REASON] == NULL) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+    reason = blobmsg_get_u32(fields[DF_UBUS_HANGUP_REASON]);
+    if (reason > UINT8_MAX) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
+    call.session_generation =
+        blobmsg_get_u64(fields[DF_UBUS_HANGUP_GENERATION]);
+    call.reason = (uint8_t)reason;
+    return df_runtime_ubus_submit_reply(context, request, platform, &call);
+}
+
 static const struct ubus_method df_runtime_ubus_methods[] = {
     UBUS_METHOD_NOARG("status", df_runtime_ubus_status_handler),
+    UBUS_METHOD("answer", df_runtime_ubus_answer_handler,
+                df_runtime_ubus_answer_policy),
+    UBUS_METHOD("hangup", df_runtime_ubus_hangup_handler,
+                df_runtime_ubus_hangup_policy),
 };
 
 static struct ubus_object_type df_runtime_ubus_object_type =
@@ -229,6 +382,56 @@ int df_runtime_ubus_process(struct df_runtime_ubus *service,
 #else
     return DF_OK;
 #endif
+}
+
+int df_runtime_ubus_bind_call(
+    struct df_runtime_ubus *service,
+    df_runtime_call_status_provider_fn provide_call_status,
+    df_runtime_call_submit_fn submit_call, void *context) {
+    if (service == NULL || !service->started || provide_call_status == NULL ||
+        submit_call == NULL || service->provide_call_status != NULL ||
+        service->submit_call != NULL) {
+        return DF_ERR_INVALID;
+    }
+    service->provide_call_status = provide_call_status;
+    service->submit_call = submit_call;
+    service->call_context = context;
+    return DF_OK;
+}
+
+int df_runtime_ubus_read_call_status(
+    struct df_runtime_ubus *service,
+    struct df_gvs_call_control_status *status) {
+    if (service == NULL || !service->started || status == NULL ||
+        service->provide_call_status == NULL) {
+        return DF_ERR_INVALID;
+    }
+    return service->provide_call_status(status, service->call_context);
+}
+
+int df_runtime_ubus_submit_call(
+    struct df_runtime_ubus *service,
+    const struct df_runtime_call_request *request) {
+    bool answer;
+    bool hangup;
+
+    if (service == NULL || !service->started || request == NULL ||
+        service->submit_call == NULL || request->session_generation == 0U) {
+        return DF_ERR_INVALID;
+    }
+    answer = request->type == DF_GVS_CALL_COMMAND_ANSWER &&
+        request->primary_media_port != 0U &&
+        request->secondary_media_port != 0U &&
+        request->duration_seconds != 0U && request->reason == 0U;
+    hangup = request->type == DF_GVS_CALL_COMMAND_HANGUP &&
+        request->primary_media_port == 0U &&
+        request->secondary_media_port == 0U &&
+        request->duration_seconds == 0U;
+    if (!answer && !hangup) {
+        return DF_ERR_INVALID;
+    }
+    return service->submit_call(
+        request, service->last_now_ms, service->call_context);
 }
 
 void df_runtime_ubus_stop(struct df_runtime_ubus *service) {
