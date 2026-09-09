@@ -147,4 +147,46 @@ rg -n -C 12 '0x81' \
 
 ## 下一步
 
+2026-09-09 更新：已完成离线接听与挂断构帧，下一步接入模拟发送事务及应答关联，详见 [命令实现说明](gvs-call-command-frames.md)。下段保留早期阶段记录。
+
 已移除未经证实的 `0x03/0x50 → SessionEstablished` 映射，并已实现 `IS:楼栋-单元-房间-分机` 到六字节 BCD 地址的纯本地解析、显式配置校验及前五字节筛选。离线回放管线现可将 Ethernet/IPv4/UDP 的 8300 端口载荷送入同一观察器，且只统计结果、不写入或发送网络数据。下一步才是在隔离环境中为 `0x55` 的媒体协商补充被动观测和测试。
+
+### E-004
+
+- title: 接听及挂断发送包装函数的字节布局
+- observed_at: 2026-09-09
+- source_type: file
+- source_ref: `com/gvs/general/protocol/c.smali`，约 4898–4937、7085–7330 行
+- content_hash: `sha256:f00c40bf2e45511d6e55ed5903d2231877073d43a2d78f1485d306eeb8a20196`
+- artifact_path: 沿用本文范围中的外部获授权 APK 解码材料
+- repro_command: `rg -n -A 110 'method public static (h|i|j)\(' "$MOOGREN_WORKDIR/../analysis/mt8157_apk_decoded/smali_classes3/com/gvs/general/protocol/c.smali"`
+- raw_excerpt: `sendPickAsk` 写入 `03/03` 和七字节载荷；`sendPickReply` 写入 `03/83`；`sendHandUpAsk` 写入 `03/02` 和一个参数字节；`sendHandUpReply` 写入 `03/82`；`sendBusy` 写入 `03/50`。
+- linked_workitem: M3
+- supersedes: none
+
+### F-003
+
+- title: 接听与挂断帧具有可独立实现的固定布局
+- severity: n/a_re
+- category: reverse_algo
+- status: candidate
+- evidence_ids: [E-004]
+- location: `src/gvs_call_command.c`
+- impact: 支持离线构帧；无法由此推断公共头字段的设备接受性或完整通话成功。
+- confidence: high（静态字节布局）
+- repro_steps: 核对 E-004 的发送包装函数，再运行 `make test` 检查合成接听帧为 49 字节、挂断帧为 43 字节。
+- remediation: n/a；后续补独立对端应答及实机验证。
+- optional_attack: n/a
+
+### P-002
+
+- title: 当前会话到离线命令帧
+- path_type: callflow
+- start: 调用方提供会话代次、本机地址与动作参数
+- goal: 生成内存帧，不改变会话
+- steps:
+  1. 校验本地状态及代次并保存地址快照。evidence: E-004 与 `tests/test_gvs_call_command.c` — finding: F-003（状态门控为项目策略）。
+  2. 根据动作构造固定载荷并经 42 字节公共头序列化。evidence: E-004 — finding: F-003。
+- residual_risks: 准备后的会话可能失效，未来发送时必须重新检查；当前没有发送队列接入、对端确认或媒体协商验收。
+
+时间线补记：2026-09-09 复核发送包装函数，新增命令模块，完成 88 个 C 测试及内存/未定义行为检查。报告使用 `flavor=null`，范围继续沿用本文“范围与复现”的本地材料约定。
