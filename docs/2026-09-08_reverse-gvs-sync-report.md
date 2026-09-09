@@ -237,6 +237,19 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `linked_workitem`: M2
 - `supersedes`: none
 
+#### E-014
+
+- `title`: r5 APK 完成目标虚拟机探测请求接收验收
+- `observed_at`: 2026-09-09
+- `source_type`: log
+- `source_ref`: GitHub Actions 34299375775，ImmortalWrt 25.12.1 x86/64 QEMU，tests/run_gvs_vm_udp.py
+- `content_hash`: doorfast-0.1.0-r5.apk=fbc33c632d39db09c39308028229b93ecf7a6b5b5e5926d5d954f30b980e2c00; installed_daemon=00e4bfaee53cc88d771a1c11bd33889f30b8043ed3798df47215ef3b376ba738
+- `artifact_path`: build/ci-34299375775/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64/bin/packages/x86_64/base/doorfast-0.1.0-r5.apk
+- `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /Users/shenwenjie/Documents/PVE/vms/doorfast-immortalwrt-25.12.1-x86_64/ssh.sh`
+- `raw_excerpt`: r4 升级至 r5 成功；实际程序为 x86-64 musl ELF。日志出现 peer_probe accepted=1 reply_pending=1 peer_observed=1 mode=passive、peer_reply accepted=1 和 IncomingCall generation=1；ubus 为 follower、online_peers=1、version=8，UCI 版本为 8。短流程和服务冒烟通过。本轮未重跑两个 60 秒周期，未进行独立出站抓包；零发送结论来自当前源码没有发送路径。
+- `linked_workitem`: M2
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -375,12 +388,12 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `severity`: n/a_re
 - `category`: reverse_algo
 - `status`: validated
-- `evidence_ids`: E-012, E-013
+- `evidence_ids`: E-012, E-013, E-014
 - `location`: `ManagerBusiness.messageDeal`, `GVS_Protocol`, `src/gvs_presence.c`, `src/gvs_serialize.c`, `src/runtime_service.c`
 - `impact`: Doorfast 已具备离线可验证的探测应答业务语义，同时保持生产网络零发送；这补齐了主动在线维护前的请求解析与回复构造层，但尚未证明真实设备会接受该回复。
 - `confidence`: high
 - `repro_steps`: 运行 E-012 的静态定位命令核对旧调用顺序，再运行 E-013 的常规和 Sanitizer 测试。
-- `remediation`: 下一阶段在隔离 x86_64 虚拟机验证 `07/01` 抓包入口和 `reply_pending` 日志；之后单独设计受控发送事务与公共头兼容性验收。
+- `remediation`: `r5` 已完成隔离 x86_64 虚拟机接收验收（E-014）；后续设计离线回复队列、失效与限额规则，并单独验证公共头兼容性。
 
 ### Path P-001
 
@@ -399,7 +412,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   8. x86_64 目标 APK 在官方 25.12.1 虚拟机由 procd 运行，空闲时仍可响应 ubus 并支持重启和卸载重装。evidence: E-007 — finding: F-006
   9. 隔离回环 UDP 注入验证 `Period` 刷新、`Normal` 版本持久化和两个缺失周期接管。evidence: E-010 — finding: F-009
   10. `07/81` 候选应答从目标抓包入口刷新在线期限，60 秒后自动离线。evidence: E-011 — finding: F-010
-  11. `07/01` 请求经完整帧校验后形成 `07/81` 待回复对象；已知候选同时刷新在线状态，生产运行时不发送。evidence: E-012, E-013 — finding: F-011
+  11. `07/01` 请求经完整帧校验后形成 `07/81` 待回复对象；已知候选同时刷新在线状态，生产运行时不发送。evidence: E-012, E-013, E-014 — finding: F-011
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未获得真实设备接受证据；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ### Path P-002
@@ -447,4 +460,6 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 | 2026-09-09 | 确认 `07/81` 候选在线语义，并在 x86_64 `r4` APK 验证在线刷新与 60 秒离线 |
 | 2026-09-09 | 静态确认 `07/01` 回复顺序与载荷来源，完成离线待回复生成及 66 项 C 测试 |
 
-当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护、`07/01` 待回复生成和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；`07/01` 目标 APK 验收、正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
+当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护、`07/01` 待回复生成和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
+
+2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。下一步为离线回复队列和生命周期测试；真实设备认可仍未验证。
