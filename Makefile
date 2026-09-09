@@ -23,6 +23,9 @@ TEST_SOURCES += tests/test_gvs_peer_sim.c tests/support/gvs_peer_sim.c
 DAEMON_SOURCES += src/gvs_priority.c
 TEST_SOURCES += tests/test_gvs_call_dispatch.c src/gvs_call_dispatch.c
 TEST_SOURCES += tests/test_gvs_call_ack.c src/gvs_call_ack.c
+TEST_SOURCES += tests/test_gvs_call_runtime.c src/gvs_call_runtime.c
+DAEMON_SOURCES += src/gvs_call_runtime.c
+build/doorfast-tests build/doorfast: src/gvs_call_runtime.h
 DAEMON_SOURCES += src/gvs_call_ack.c
 build/doorfast-tests build/doorfast: src/gvs_call_ack.h
 DAEMON_SOURCES += src/gvs_call_dispatch.c

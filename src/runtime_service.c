@@ -11,6 +11,7 @@
 #include "gvs_deadline.h"
 #include "gvs_identity.h"
 #include "gvs_memory_sender.h"
+#include "gvs_call_runtime.h"
 #include "gvs_packet.h"
 #include "gvs_receive.h"
 #include "gvs_reply_queue.h"
@@ -183,6 +184,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_reply_queue reply_queue = {0};
     struct df_gvs_send_transaction send_transaction = {0};
     struct df_gvs_memory_sender memory_sender = {0};
+    struct df_gvs_call_ack call_ack = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
@@ -207,6 +209,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     started_ms = df_monotonic_ms();
+    df_gvs_call_ack_init(&call_ack, started_ms);
     if (df_gvs_reply_queue_init(&reply_queue, started_ms) != DF_OK ||
         df_gvs_send_transaction_init(&send_transaction, started_ms) != DF_OK ||
         df_gvs_memory_sender_init(
@@ -280,6 +283,20 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             status = DF_ERR_IO;
             goto done;
         }
+        {
+            enum df_gvs_call_ack_state previous = call_ack.state;
+            if (df_gvs_call_ack_tick(&call_ack, &session, identity, now_ms) != DF_OK) {
+                status = DF_ERR_IO;
+                goto done;
+            }
+            if (previous == DF_GVS_CALL_ACK_WAITING &&
+                call_ack.state == DF_GVS_CALL_ACK_EXPIRED) {
+                (void)fputs("doorfast: event=call_ack_expired mode=passive\n", stdout);
+            } else if (previous == DF_GVS_CALL_ACK_WAITING &&
+                       call_ack.state == DF_GVS_CALL_ACK_CANCELLED) {
+                (void)fputs("doorfast: event=call_ack_cancelled mode=passive\n", stdout);
+            }
+        }
         if (wait_context.ubus_started &&
             df_runtime_ubus_process(&ubus, now_ms) != DF_OK) {
             (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
@@ -304,6 +321,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
 
             (void)df_gvs_session_abort(&session, &ended);
             df_gvs_deadline_cancel(&deadline);
+            if (df_gvs_call_ack_tick(&call_ack, &session, identity, now_ms) != DF_OK) {
+                status = DF_ERR_IO;
+                goto done;
+            }
             if (ended) {
                 (void)printf("doorfast: event=network_lost generation=%llu\n",
                              (unsigned long long)session.generation);
@@ -384,7 +405,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 continue;
             }
             struct df_gvs_runtime_sync_result sync_result;
-            struct df_gvs_receive_result result;
+            struct df_gvs_call_runtime_result call_result;
             if (df_gvs_runtime_sync_receive(&sync, payload, payload_length,
                                             now_ms, &sync_result) != DF_OK) {
                 status = DF_ERR_IO;
@@ -401,22 +422,33 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 }
                 continue;
             }
-            if (df_gvs_receive_datagram(payload, payload_length, identity,
-                                        &session, &deadline, now_ms,
-                                        &result) == DF_OK) {
+            if (df_gvs_call_runtime_receive(&call_ack, payload, payload_length,
+                                            identity, &session, &deadline,
+                                            now_ms, &call_result) == DF_OK) {
+                const struct df_gvs_receive_result *result = &call_result.receive;
                 unsigned i;
-                for (i = 0; i < result.transition.count; ++i) {
-                    df_log_transition(&result.transition.events[i]);
+                if (call_result.acknowledgement_confirmed) {
+                    (void)fputs("doorfast: event=call_ack_confirmed mode=passive\n", stdout);
+                } else if (call_result.acknowledgement_rejected) {
+                    (void)fputs("doorfast: event=call_ack_rejected mode=passive\n", stdout);
                 }
-                if (result.talking_transition) {
+                if (call_result.acknowledgement_expired) {
+                    (void)fputs("doorfast: event=call_ack_expired mode=passive\n", stdout);
+                } else if (call_result.acknowledgement_cancelled) {
+                    (void)fputs("doorfast: event=call_ack_cancelled mode=passive\n", stdout);
+                }
+                for (i = 0; i < result->transition.count; ++i) {
+                    df_log_transition(&result->transition.events[i]);
+                }
+                if (result->talking_transition) {
                     (void)printf("doorfast: event=session_established generation=%llu\n",
                                  (unsigned long long)session.generation);
                 }
-                if (result.observed_hangup) {
+                if (result->observed_hangup) {
                     (void)printf("doorfast: event=hangup generation=%llu\n",
                                  (unsigned long long)session.generation);
                 }
-                if (result.timed_out_transition) {
+                if (result->timed_out_transition) {
                     (void)printf("doorfast: event=session_timeout generation=%llu\n",
                                  (unsigned long long)session.generation);
                 }
