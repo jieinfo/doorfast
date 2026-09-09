@@ -76,7 +76,7 @@ return view.extend({
         poll.add(function() { return self.refreshStatus(); }, 5);
         return E('div', {}, [
             E('h2', {}, ['Doorfast']),
-            E('p', {}, ['仅显示被动观察与同步维护状态。']),
+            E('p', {}, ['显示被动观察、同步维护与离线模拟控制状态。']),
             this.statusNode
         ]);
     },

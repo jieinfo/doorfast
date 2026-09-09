@@ -173,3 +173,33 @@ void test_gvs_call_control_rejects_receive_before_submission_time(void) {
     TEST_ASSERT_INT_EQ(0, memcmp(&before_deadline, &deadline, sizeof(deadline)));
     TEST_ASSERT_INT_EQ(1, result.frame_ready);
 }
+
+void test_gvs_call_control_exposes_public_status(void) {
+    struct df_gvs_session session = {.state = DF_GVS_RINGING, .generation = 7};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_status status;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control, 0, df_gvs_placeholder_header_fields, NULL));
+    control.dispatch.state = DF_GVS_CALL_RETRY;
+    control.dispatch.command.type = DF_GVS_CALL_COMMAND_ANSWER;
+    control.dispatch.attempts = 2;
+    control.acknowledgement.state = DF_GVS_CALL_ACK_EMPTY;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
+        &control, &session, &status));
+    TEST_ASSERT_INT_EQ(DF_GVS_RINGING, status.session_state);
+    TEST_ASSERT_INT_EQ(7, status.session_generation);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_COMMAND_ANSWER, status.command_type);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_RETRY, status.dispatch_state);
+    TEST_ASSERT_INT_EQ(2, status.attempts);
+    TEST_ASSERT_INT_EQ(0, strcmp("ringing",
+        df_gvs_session_state_name(status.session_state)));
+    TEST_ASSERT_INT_EQ(0, strcmp("answer",
+        df_gvs_call_command_type_name(status.command_type)));
+    TEST_ASSERT_INT_EQ(0, strcmp("retry",
+        df_gvs_call_dispatch_state_name(status.dispatch_state)));
+    TEST_ASSERT_INT_EQ(0, strcmp("empty",
+        df_gvs_call_ack_state_name(status.acknowledgement_state)));
+    TEST_ASSERT_INT_EQ(1, df_gvs_session_state_name(
+        (enum df_gvs_session_state)99) == NULL);
+}

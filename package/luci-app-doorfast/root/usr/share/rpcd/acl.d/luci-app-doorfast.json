@@ -1,9 +1,14 @@
 {
   "luci-app-doorfast": {
-    "description": "Read Doorfast runtime status",
+    "description": "Read Doorfast status and submit local simulated call controls",
     "read": {
       "ubus": {
         "doorfast": ["status"]
+      }
+    },
+    "write": {
+      "ubus": {
+        "doorfast": ["answer", "hangup"]
       }
     }
   }

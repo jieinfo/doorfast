@@ -39,6 +39,54 @@ function yesNo(value) {
     return value ? '是' : '否';
 }
 
+function enumLabel(value, labels, name) {
+    if (typeof value !== 'string' ||
+        !Object.prototype.hasOwnProperty.call(labels, value))
+        throw new TypeError('invalid ' + name);
+    return labels[value];
+}
+
+function callSessionLabel(state) {
+    return enumLabel(state, {
+        idle: '空闲',
+        preview: '预览',
+        ringing: '来电振铃',
+        talking: '通话中',
+        ended: '已结束'
+    }, 'call session');
+}
+
+function callCommandLabel(command) {
+    return enumLabel(command, {
+        none: '无',
+        answer: '接听',
+        hangup: '挂断'
+    }, 'call command');
+}
+
+function callDispatchLabel(state) {
+    return enumLabel(state, {
+        empty: '空闲',
+        queued: '已入队',
+        sending: '发送中',
+        retry: '等待重试',
+        sent: '已发送',
+        failed: '发送失败',
+        timeout: '发送超时',
+        cancelled: '已取消'
+    }, 'call dispatch');
+}
+
+function callConfirmationLabel(state) {
+    return enumLabel(state, {
+        empty: '无',
+        waiting: '等待确认',
+        confirmed: '已确认',
+        expired: '确认超时',
+        cancelled: '已取消'
+    }, 'call confirmation');
+}
+
 function unsignedText(value, name) {
     if (!Number.isInteger(value) || value < 0)
         throw new TypeError(name + ' must be an unsigned integer');
@@ -48,6 +96,7 @@ function unsignedText(value, name) {
 function formatStatus(payload) {
     var root = requireObject(payload, 'payload');
     var sync = requireObject(root.sync, 'sync');
+    var call = requireObject(root.call, 'call');
 
     if (typeof root.running !== 'boolean' || root.mode !== 'passive')
         throw new TypeError('invalid service status');
@@ -77,6 +126,17 @@ function formatStatus(payload) {
             ]
         },
         {
+            title: '通话控制',
+            rows: [
+                ['会话', callSessionLabel(call.session)],
+                ['会话代次', unsignedText(call.generation, 'generation')],
+                ['命令', callCommandLabel(call.command)],
+                ['模拟发送', callDispatchLabel(call.dispatch)],
+                ['业务确认', callConfirmationLabel(call.confirmation)],
+                ['发送次数', unsignedText(call.attempts, 'attempts')]
+            ]
+        },
+        {
             title: '最近同步报文',
             rows: [
                 ['操作码', unsignedText(sync.last_opcode, 'last_opcode')],
@@ -92,6 +152,9 @@ function formatStatus(payload) {
 var statusModel = {
     formatStatus: formatStatus,
     roleLabel: roleLabel,
+    callSessionLabel: callSessionLabel,
+    callDispatchLabel: callDispatchLabel,
+    callConfirmationLabel: callConfirmationLabel,
     unavailableLabel: 'Doorfast 服务未运行或状态接口不可用',
     staleLabel: '陈旧'
 };

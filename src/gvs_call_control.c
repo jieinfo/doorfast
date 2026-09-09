@@ -165,3 +165,73 @@ int df_gvs_call_control_receive(
     *result = next_result;
     return DF_OK;
 }
+
+const char *df_gvs_session_state_name(enum df_gvs_session_state state) {
+    switch (state) {
+    case DF_GVS_IDLE: return "idle";
+    case DF_GVS_PREVIEW: return "preview";
+    case DF_GVS_RINGING: return "ringing";
+    case DF_GVS_TALKING: return "talking";
+    case DF_GVS_ENDED: return "ended";
+    default: return NULL;
+    }
+}
+
+const char *df_gvs_call_command_type_name(enum df_gvs_call_command_type type) {
+    switch (type) {
+    case DF_GVS_CALL_COMMAND_NONE: return "none";
+    case DF_GVS_CALL_COMMAND_ANSWER: return "answer";
+    case DF_GVS_CALL_COMMAND_HANGUP: return "hangup";
+    default: return NULL;
+    }
+}
+
+const char *df_gvs_call_dispatch_state_name(
+    enum df_gvs_call_dispatch_state state) {
+    switch (state) {
+    case DF_GVS_CALL_EMPTY: return "empty";
+    case DF_GVS_CALL_QUEUED: return "queued";
+    case DF_GVS_CALL_SENDING: return "sending";
+    case DF_GVS_CALL_RETRY: return "retry";
+    case DF_GVS_CALL_SENT: return "sent";
+    case DF_GVS_CALL_FAILED: return "failed";
+    case DF_GVS_CALL_TIMEOUT: return "timeout";
+    case DF_GVS_CALL_CANCELLED: return "cancelled";
+    default: return NULL;
+    }
+}
+
+const char *df_gvs_call_ack_state_name(enum df_gvs_call_ack_state state) {
+    switch (state) {
+    case DF_GVS_CALL_ACK_EMPTY: return "empty";
+    case DF_GVS_CALL_ACK_WAITING: return "waiting";
+    case DF_GVS_CALL_ACK_CONFIRMED: return "confirmed";
+    case DF_GVS_CALL_ACK_EXPIRED: return "expired";
+    case DF_GVS_CALL_ACK_CANCELLED: return "cancelled";
+    default: return NULL;
+    }
+}
+
+int df_gvs_call_control_status(
+    const struct df_gvs_call_control *control,
+    const struct df_gvs_session *session,
+    struct df_gvs_call_control_status *status) {
+    struct df_gvs_call_control_status next;
+
+    if (control == NULL || session == NULL || status == NULL ||
+        df_gvs_session_state_name(session->state) == NULL ||
+        df_gvs_call_command_type_name(control->dispatch.command.type) == NULL ||
+        df_gvs_call_dispatch_state_name(control->dispatch.state) == NULL ||
+        df_gvs_call_ack_state_name(control->acknowledgement.state) == NULL) {
+        return DF_ERR_INVALID;
+    }
+    memset(&next, 0, sizeof(next));
+    next.session_state = session->state;
+    next.session_generation = session->generation;
+    next.command_type = control->dispatch.command.type;
+    next.dispatch_state = control->dispatch.state;
+    next.acknowledgement_state = control->acknowledgement.state;
+    next.attempts = control->dispatch.attempts;
+    *status = next;
+    return DF_OK;
+}
