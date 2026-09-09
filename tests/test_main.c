@@ -66,6 +66,8 @@ void test_gvs_serialize_builds_complete_peer_probe_frame(void);
 void test_gvs_serialize_builds_sync_ask_and_version_ask(void);
 void test_gvs_serialize_builds_peer_reply_from_request_data(void);
 void test_gvs_serialize_rejects_missing_header_fields_and_unsupported_actions(void);
+void test_gvs_header_provider_receives_complete_read_only_frame_contract(void);
+void test_gvs_header_provider_failure_is_output_atomic(void);
 void test_gvs_observer_only_starts_a_session_for_the_configured_identity(void);
 void test_gvs_replay_reads_an_offline_control_packet_without_transmitting(void);
 void test_gvs_session_tracks_passive_lifecycle(void);
@@ -87,7 +89,7 @@ void test_discovery_requires_approval(void);
 void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 75;
+    return 85;
 }
 
 int main(void) {
@@ -96,7 +98,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(75, test_suite_count());
+    TEST_ASSERT_INT_EQ(85, test_suite_count());
     test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue();
     test_gvs_peer_sim_builds_synthetic_call_frame();
     test_gvs_peer_sim_elects_maintainer_without_peers();
@@ -156,6 +158,8 @@ int main(void) {
     test_gvs_serialize_builds_sync_ask_and_version_ask();
     test_gvs_serialize_builds_peer_reply_from_request_data();
     test_gvs_serialize_rejects_missing_header_fields_and_unsupported_actions();
+    test_gvs_header_provider_receives_complete_read_only_frame_contract();
+    test_gvs_header_provider_failure_is_output_atomic();
     test_gvs_observer_only_starts_a_session_for_the_configured_identity();
     test_gvs_replay_reads_an_offline_control_packet_without_transmitting();
     test_gvs_session_tracks_passive_lifecycle();

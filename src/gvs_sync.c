@@ -139,7 +139,7 @@ static int df_gvs_sync_frame(const struct df_gvs_sync_entry *entries,
                              const uint8_t source[6], uint16_t version,
                              uint8_t *output, size_t capacity,
                              size_t *output_length,
-                             df_gvs_header_fields_fn provide_fields,
+                             df_gvs_header_provider_fn provide_fields,
                              void *fields_context) {
     uint8_t payload[DF_GVS_SYNC_MAX_PACKET_SIZE -
                     DF_GVS_CONTROL_HEADER_SIZE];
@@ -412,7 +412,7 @@ int df_gvs_sync_periodic_serialize(
     const struct df_gvs_sync_store *store, size_t chunk_index,
     const struct df_gvs_presence_action *action, const uint8_t source[6],
     uint16_t version, uint8_t *output, size_t capacity,
-    size_t *output_length, df_gvs_header_fields_fn provide_fields,
+    size_t *output_length, df_gvs_header_provider_fn provide_fields,
     void *fields_context) {
     size_t offset;
     size_t count;
@@ -439,7 +439,7 @@ int df_gvs_sync_normal_serialize(
     const struct df_gvs_sync_store *store, const char *key,
     const uint8_t destination[6], const uint8_t source[6], uint16_t version,
     uint8_t *output, size_t capacity, size_t *output_length,
-    df_gvs_header_fields_fn provide_fields, void *fields_context) {
+    df_gvs_header_provider_fn provide_fields, void *fields_context) {
     const struct df_gvs_sync_entry *entry = df_gvs_sync_find(store, key);
 
     if (output_length != NULL) {

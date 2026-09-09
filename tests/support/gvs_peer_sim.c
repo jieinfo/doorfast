@@ -30,8 +30,10 @@ struct df_gvs_peer_sim {
 };
 
 static int df_gvs_sim_header_fields(
+    const struct df_gvs_header_request *request,
     uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE],
     uint8_t encryption_code[DF_GVS_HEADER_FIELD_SIZE], void *context) {
+    (void)request;
     (void)context;
     memset(random_code, 0x31, DF_GVS_HEADER_FIELD_SIZE);
     memset(encryption_code, 0x41, DF_GVS_HEADER_FIELD_SIZE);

@@ -21,17 +21,18 @@ struct df_gvs_memory_frame_record {
 
 struct df_gvs_memory_sender {
     uint8_t source[6];
-    df_gvs_header_fields_fn provide_fields;
+    df_gvs_header_provider_fn provide_fields;
     void *fields_context;
     struct df_gvs_memory_frame_record record;
 };
 
 int df_gvs_placeholder_header_fields(
+    const struct df_gvs_header_request *request,
     uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE],
     uint8_t encryption_code[DF_GVS_HEADER_FIELD_SIZE], void *context);
 int df_gvs_memory_sender_init(struct df_gvs_memory_sender *sender,
                               const uint8_t source[6],
-                              df_gvs_header_fields_fn provide_fields,
+                              df_gvs_header_provider_fn provide_fields,
                               void *fields_context);
 enum df_gvs_send_attempt_result df_gvs_memory_send_attempt(
     const struct df_gvs_reply_queue_entry *entry, unsigned attempt,
