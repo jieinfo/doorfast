@@ -21,6 +21,9 @@ UDP_INJECT_SOURCES := tools/gvs-peer-udp-inject.c \
 TEST_SOURCES += tests/test_gvs_priority.c src/gvs_priority.c
 TEST_SOURCES += tests/test_gvs_peer_sim.c tests/support/gvs_peer_sim.c
 DAEMON_SOURCES += src/gvs_priority.c
+TEST_SOURCES += tests/test_gvs_call_dispatch.c src/gvs_call_dispatch.c
+DAEMON_SOURCES += src/gvs_call_dispatch.c
+build/doorfast-tests build/doorfast: src/gvs_call_dispatch.h
 
 .PHONY: test doorfast peer-sim peer-udp-inject clean
 
