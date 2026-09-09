@@ -111,7 +111,7 @@ enum {
 
 static const struct blobmsg_policy df_runtime_ubus_answer_policy[] = {
     [DF_UBUS_ANSWER_GENERATION] = {
-        .name = "generation", .type = BLOBMSG_TYPE_INT64},
+        .name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
     [DF_UBUS_ANSWER_PRIMARY_PORT] = {
         .name = "primary_media_port", .type = BLOBMSG_TYPE_INT32},
     [DF_UBUS_ANSWER_SECONDARY_PORT] = {
@@ -128,10 +128,26 @@ enum {
 
 static const struct blobmsg_policy df_runtime_ubus_hangup_policy[] = {
     [DF_UBUS_HANGUP_GENERATION] = {
-        .name = "generation", .type = BLOBMSG_TYPE_INT64},
+        .name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
     [DF_UBUS_HANGUP_REASON] = {
         .name = "reason", .type = BLOBMSG_TYPE_INT32},
 };
+
+static bool df_runtime_ubus_get_generation(
+    struct blob_attr *field, uint64_t *generation) {
+    if (field == NULL || generation == NULL) {
+        return false;
+    }
+    if (blobmsg_type(field) == BLOBMSG_TYPE_INT32) {
+        *generation = blobmsg_get_u32(field);
+        return true;
+    }
+    if (blobmsg_type(field) == BLOBMSG_TYPE_INT64) {
+        *generation = blobmsg_get_u64(field);
+        return true;
+    }
+    return false;
+}
 
 static int df_runtime_ubus_submit_reply(
     struct ubus_context *context, struct ubus_request_data *request,
@@ -186,8 +202,10 @@ static int df_runtime_ubus_answer_handler(
         duration > UINT8_MAX) {
         return UBUS_STATUS_INVALID_ARGUMENT;
     }
-    call.session_generation =
-        blobmsg_get_u64(fields[DF_UBUS_ANSWER_GENERATION]);
+    if (!df_runtime_ubus_get_generation(
+            fields[DF_UBUS_ANSWER_GENERATION], &call.session_generation)) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
     call.primary_media_port = (uint16_t)primary;
     call.secondary_media_port = (uint16_t)secondary;
     call.duration_seconds = (uint8_t)duration;
@@ -220,8 +238,10 @@ static int df_runtime_ubus_hangup_handler(
     if (reason > UINT8_MAX) {
         return UBUS_STATUS_INVALID_ARGUMENT;
     }
-    call.session_generation =
-        blobmsg_get_u64(fields[DF_UBUS_HANGUP_GENERATION]);
+    if (!df_runtime_ubus_get_generation(
+            fields[DF_UBUS_HANGUP_GENERATION], &call.session_generation)) {
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    }
     call.reason = (uint8_t)reason;
     return df_runtime_ubus_submit_reply(context, request, platform, &call);
 }
