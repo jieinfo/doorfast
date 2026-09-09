@@ -302,6 +302,19 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `linked_workitem`: M2
 - `supersedes`: none
 
+#### E-019
+
+- `title`: r8 APK 在目标虚拟机贯通抓包、队列、完整内存构帧与模拟终态
+- `observed_at`: 2026-09-09
+- `source_type`: command
+- `source_ref`: GitHub Actions `34316006507`, `tests/run_gvs_vm_udp.py`, ImmortalWrt 25.12.1 x86_64 虚拟机
+- `content_hash`: `doorfast-0.1.0-r8.apk=620576af4f5fa64064398cc27b0a18eda4b626416946264ce02ebca207b2192a; /usr/sbin/doorfast=233d81242bbe39bb384f7ea3bd92e57febaf443d4868ce2a1047eb5590d31255`
+- `artifact_path`: GitHub Actions artifact `doorfast-apk`, installed `/usr/sbin/doorfast`, `docs/gvs-vm-udp-validation.md`
+- `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /absolute/path/to/vm/ssh.sh`
+- `raw_excerpt`: `doorfast-0.1.0-r8` 从 r7 升级后在官方 ImmortalWrt 25.12.1 x86/64 隔离虚拟机由 procd 运行。两个固定 `07/01` 探针分别记录 `peer_reply_frame prepared=1 length=48 attempt=1 header=placeholder mode=memory`，随后各自进入 `peer_reply_tx state=success attempt=1 timed_out=0 mode=simulated`；独立 `07/81` 使 `online_peers=1`，Normal 同步把运行时与 UCI 版本保持为 8，本户 `03/01` 产生新的 IncomingCall。短流程通过；程序未创建真实发送路径，公共头认证字段仍为占位值。
+- `linked_workitem`: M2
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -445,7 +458,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `impact`: Doorfast 已具备离线可验证的探测应答业务语义，同时保持生产网络零发送；这补齐了主动在线维护前的请求解析与回复构造层，但尚未证明真实设备会接受该回复。
 - `confidence`: high
 - `repro_steps`: 运行 E-012 的静态定位命令核对旧调用顺序，再运行 E-013 的常规和 Sanitizer 测试。
-- `remediation`: `r5` 已完成隔离 x86_64 虚拟机接收验收（E-014），`r6` 已完成离线回复队列（E-015），`r7` 已完成模拟发送事务（E-016），`r8` 已接入内存构帧适配层（E-018）；后续定义合法公共头提供器并单独验证兼容性。
+- `remediation`: `r5` 已完成隔离 x86_64 虚拟机接收验收（E-014），`r6` 已完成离线回复队列（E-015），`r7` 已完成模拟发送事务（E-016），`r8` 已接入内存构帧适配层并完成目标验收（E-018、E-019）；后续定义合法公共头提供器并单独验证兼容性。
 
 #### F-012
 
@@ -458,7 +471,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `impact`: 入站探测不会造成无界内存增长；重复请求和过期回复有确定性行为，未来发送端可从 FIFO 接口接入而无需改写接收解析。
 - `confidence`: high
 - `repro_steps`: 运行 E-015 的常规和 Sanitizer 测试，核对满队列和失败路径不修改原状态。
-- `remediation`: `r7` 已从该队列接入离线发送事务，并在隔离 x86_64 虚拟机验证实际抓包入口到模拟终态（E-017）；`r8` 继续加入内存构帧记录（E-018）。
+- `remediation`: `r7` 已从该队列接入离线发送事务，并在隔离 x86_64 虚拟机验证实际抓包入口到模拟终态（E-017）；`r8` 已加入内存构帧记录并完成目标验证（E-018、E-019）。
 
 #### F-013
 
@@ -466,11 +479,11 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `severity`: n/a_re
 - `category`: design
 - `status`: validated
-- `evidence_ids`: E-015, E-016, E-017, E-018
+- `evidence_ids`: E-015, E-016, E-017, E-018, E-019
 - `location`: `src/gvs_reply_queue.c`, `src/gvs_send_transaction.c`, `src/gvs_memory_sender.c`, `src/runtime_service.c`
 - `impact`: 未来真实传输适配器可以复用同一事务生命周期；失败、无响应和迟到完成不会被误报为成功，也不会产生无界重试。
 - `confidence`: high
-- `repro_steps`: 运行 E-016 与 E-018 的常规及 Sanitizer 测试，核对精确 48 字节帧、首次构帧失败后的重试和旧尝试完成被拒绝；再按 E-017 核对 r7 目标链路。
+- `repro_steps`: 运行 E-016 与 E-018 的常规及 Sanitizer 测试，核对精确 48 字节帧、首次构帧失败后的重试和旧尝试完成被拒绝；再按 E-019 核对 r8 目标链路。
 - `remediation`: 保持内存传输边界，定义可替换的合法公共头提供器并验证字段来源。
 
 ### Path P-001
@@ -492,7 +505,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   10. `07/81` 候选应答从目标抓包入口刷新在线期限，60 秒后自动离线。evidence: E-011 — finding: F-010
   11. `07/01` 请求经完整帧校验后形成 `07/81` 待回复对象；已知候选同时刷新在线状态，生产运行时不发送。evidence: E-012, E-013, E-014 — finding: F-011
   12. 待回复对象进入固定容量队列，重复项刷新期限，过期项由事件循环清理。evidence: E-015 — finding: F-012
-  13. 单事务状态机按 FIFO 取出对象，构造并回读校验完整 48 字节 `07/81` 内存帧；模拟结果驱动成功、失败、重试和超时，单调 64 位完成标识隔离迟到结果；r7 目标 APK 已贯通抓包入口到模拟成功终态。evidence: E-015, E-016, E-017, E-018 — finding: F-013
+  13. 单事务状态机按 FIFO 取出对象，构造并回读校验完整 48 字节 `07/81` 内存帧；模拟结果驱动成功、失败、重试和超时，单调 64 位完成标识隔离迟到结果；r8 目标 APK 已贯通抓包入口、队列、完整内存构帧与模拟成功终态。evidence: E-015, E-016, E-017, E-018, E-019 — finding: F-013
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未获得真实设备接受证据；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ### Path P-002
@@ -521,7 +534,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   4. 公开同步状态快照和会话状态生成脱敏 JSON Lines，并以固定逻辑时间验证选举与接管。evidence: E-009 — finding: F-008
   5. `07/01` 请求经过公共头、目标地址和长度校验后生成 `07/81` 待回复动作，已知候选刷新在线期限；运行时保持零发送。evidence: E-012, E-013 — finding: F-011
   6. 待回复动作进入 16 项固定队列，精确重复刷新一秒期限，过期或满载均有确定性结果且不触发网络发送。evidence: E-015 — finding: F-012
-  7. 队列对象进入单事务内存适配器，生成完整 `07/81` 并由生产解析器回读；失败、重试及超时路径由离线脚本化结果验证，r7 目标 APK 验证抓包入口可到达模拟终态。evidence: E-015, E-016, E-017, E-018 — finding: F-013
+  7. 队列对象进入单事务内存适配器，生成完整 `07/81` 并由生产解析器回读；失败、重试及超时路径由离线脚本化结果验证，r8 目标 APK 验证抓包入口可到达完整内存构帧与模拟终态。evidence: E-015, E-016, E-017, E-018, E-019 — finding: F-013
   8. 固定测试帧通过回环转发进入 x86_64 APK，验证同步角色、版本状态和来电事件。evidence: E-010 — finding: F-009
 - `residual_risks`: 真实公共头兼容性、主动发送事务和门口机接受性均未验证；隔离 UDP 验证不等同于完整主机模式。
 
@@ -545,7 +558,8 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 | 2026-09-09 | 完成单事务模拟发送、三次尝试、失败与超时终态及跨事务迟到结果隔离，C 测试增至 75 项 |
 | 2026-09-09 | 合并 PR #3，并在 ImmortalWrt 25.12.1 x86/64 验证 r7 APK 的抓包、队列和模拟发送事务短流程 |
 | 2026-09-09 | 完成完整 48 字节 `07/81` 内存构帧、回读校验和失败重试，C 测试增至 79 项 |
+| 2026-09-09 | 合并 PR #5，并在 ImmortalWrt 25.12.1 x86/64 验证 r8 APK 的抓包、队列、48 字节内存构帧和模拟成功终态 |
 
 当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护、`07/01` 待回复生成、离线发送事务和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
 
-2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。`r6` 的远程主机与 APK 构建检查已经通过；`r7` 已完成离线发送事务测试（E-016），并在目标虚拟机验证两个探测请求从抓包入口进入独立模拟成功终态（E-017）。`r8` 已完成内存构帧实现与本地验证，等待目标 APK 构建和虚拟机验收。真实设备认可仍未验证。
+2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。`r6` 的远程主机与 APK 构建检查已经通过；`r7` 已完成离线发送事务测试（E-016），并在目标虚拟机验证两个探测请求从抓包入口进入独立模拟成功终态（E-017）。`r8` 已完成内存构帧实现、本地验证及目标 APK 验收：两个探测请求均从抓包入口进入队列，生成并回读验证 48 字节内存帧，最后到达模拟成功终态（E-018、E-019）。真实设备认可仍未验证。
