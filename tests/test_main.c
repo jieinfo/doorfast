@@ -5,6 +5,13 @@ void test_gvs_presence_receives_peer_online_replies(void);
 void test_gvs_presence_receives_peer_probe_and_prepares_reply(void);
 void test_gvs_reply_queue_coalesces_and_expires_pending_replies(void);
 void test_gvs_reply_queue_is_bounded_and_failure_atomic(void);
+void test_gvs_send_transaction_completes_immediate_success(void);
+void test_gvs_send_transaction_retries_failure_then_succeeds(void);
+void test_gvs_send_transaction_distinguishes_failure_and_timeout(void);
+void test_gvs_send_transaction_rejects_late_completion_and_bad_time(void);
+void test_gvs_send_transaction_rejects_completion_from_prior_entry(void);
+void test_gvs_send_transaction_preserves_state_on_queue_clock_error(void);
+void test_gvs_send_transaction_finishes_timeout_near_clock_limit(void);
 void test_gvs_sync_updates_version_and_registered_values(void);
 void test_gvs_sync_serializes_periodic_chunks_and_json_escaping(void);
 void test_gvs_sync_serializes_normal_update_and_rejects_oversize(void);
@@ -76,7 +83,7 @@ void test_discovery_requires_approval(void);
 void test_network_overlap_is_read_only(void);
 
 int test_suite_count(void) {
-    return 68;
+    return 75;
 }
 
 int main(void) {
@@ -85,7 +92,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(68, test_suite_count());
+    TEST_ASSERT_INT_EQ(75, test_suite_count());
     test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue();
     test_gvs_peer_sim_builds_synthetic_call_frame();
     test_gvs_peer_sim_elects_maintainer_without_peers();
@@ -98,6 +105,13 @@ int main(void) {
     test_gvs_presence_receives_peer_probe_and_prepares_reply();
     test_gvs_reply_queue_coalesces_and_expires_pending_replies();
     test_gvs_reply_queue_is_bounded_and_failure_atomic();
+    test_gvs_send_transaction_completes_immediate_success();
+    test_gvs_send_transaction_retries_failure_then_succeeds();
+    test_gvs_send_transaction_distinguishes_failure_and_timeout();
+    test_gvs_send_transaction_rejects_late_completion_and_bad_time();
+    test_gvs_send_transaction_rejects_completion_from_prior_entry();
+    test_gvs_send_transaction_preserves_state_on_queue_clock_error();
+    test_gvs_send_transaction_finishes_timeout_near_clock_limit();
     test_gvs_sync_updates_version_and_registered_values();
     test_gvs_sync_serializes_periodic_chunks_and_json_escaping();
     test_gvs_sync_serializes_normal_update_and_rejects_oversize();
