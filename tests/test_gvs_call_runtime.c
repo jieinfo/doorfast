@@ -2,12 +2,23 @@
 #include "gvs_call_runtime.h"
 #include "test.h"
 
-static size_t runtime_frame(uint8_t out[64],const uint8_t dst[6],
-    const uint8_t src[6],uint8_t opcode,const uint8_t *payload,size_t n) {
-    static const uint8_t magic[10]={'G','V','S','G','V','S',0xa5,0xa5,0xa5,0xa5};
-    memset(out,0,64); memcpy(out,magic,10); memcpy(out+10,dst,6);
-    memcpy(out+16,src,6); out[38]=3; out[39]=opcode; out[40]=(uint8_t)n;
-    if(n) memcpy(out+42,payload,n); return 42+n;
+static size_t runtime_frame(uint8_t out[64], const uint8_t dst[6],
+    const uint8_t src[6], uint8_t opcode, const uint8_t *payload, size_t n) {
+    static const uint8_t magic[10] = {
+        'G', 'V', 'S', 'G', 'V', 'S', 0xa5, 0xa5, 0xa5, 0xa5
+    };
+
+    memset(out, 0, 64);
+    memcpy(out, magic, 10);
+    memcpy(out + 10, dst, 6);
+    memcpy(out + 16, src, 6);
+    out[38] = 3;
+    out[39] = opcode;
+    out[40] = (uint8_t)n;
+    if (n != 0) {
+        memcpy(out + 42, payload, n);
+    }
+    return 42 + n;
 }
 
 void test_gvs_call_runtime_confirms_before_talking_transition(void) {
