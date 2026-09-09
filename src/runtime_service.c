@@ -14,6 +14,7 @@
 #include "gvs_receive.h"
 #include "gvs_reply_queue.h"
 #include "gvs_runtime_sync.h"
+#include "gvs_send_transaction.h"
 #include "gvs_sync_state.h"
 #include "runtime_ubus.h"
 
@@ -75,6 +76,41 @@ static void df_runtime_sync_log(
         (unsigned)sync->presence.sync_version,
         sync->presence.sync_maintainer ? 1U : 0U,
         result->resend_local ? 1U : 0U);
+}
+
+static enum df_gvs_send_attempt_result df_runtime_simulated_send(
+    const struct df_gvs_reply_queue_entry *entry, unsigned attempt,
+    uint64_t completion_id, void *context) {
+    (void)attempt;
+    (void)completion_id;
+    (void)context;
+    return entry == NULL ? DF_GVS_SEND_ATTEMPT_FAILURE
+                         : DF_GVS_SEND_ATTEMPT_SUCCESS;
+}
+
+static const char *df_runtime_send_event_name(
+    enum df_gvs_send_event_type type) {
+    switch (type) {
+    case DF_GVS_SEND_EVENT_SENDING: return "sending";
+    case DF_GVS_SEND_EVENT_RETRY: return "retry";
+    case DF_GVS_SEND_EVENT_SUCCESS: return "success";
+    case DF_GVS_SEND_EVENT_FAILED: return "failed";
+    case DF_GVS_SEND_EVENT_TIMEOUT: return "timeout";
+    default: return "unknown";
+    }
+}
+
+static void df_runtime_send_log(const struct df_gvs_send_trace *trace) {
+    size_t index;
+
+    for (index = 0; trace != NULL && index < trace->count; index++) {
+        (void)printf(
+            "doorfast: event=peer_reply_tx state=%s attempt=%u "
+            "timed_out=%u mode=simulated\n",
+            df_runtime_send_event_name(trace->events[index].type),
+            trace->events[index].attempt,
+            trace->events[index].timed_out ? 1U : 0U);
+    }
 }
 
 static int df_runtime_capture_open(const struct df_runtime_config *runtime,
@@ -143,6 +179,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_deadline deadline = {0};
     struct df_capture_retry retry = {0};
     struct df_gvs_reply_queue reply_queue = {0};
+    struct df_gvs_send_transaction send_transaction = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
@@ -167,6 +204,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     }
     started_ms = df_monotonic_ms();
     if (df_gvs_reply_queue_init(&reply_queue, started_ms) != DF_OK ||
+        df_gvs_send_transaction_init(&send_transaction, started_ms) != DF_OK ||
         df_gvs_runtime_sync_start(&sync, identity, persisted_version,
                                   started_ms) != DF_OK) {
         return DF_ERR_IO;
@@ -199,6 +237,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         uint64_t now_ms;
         bool timed_out = false;
         size_t expired_replies = 0;
+        struct df_gvs_send_trace send_trace;
         int captured = df_capture_next(capture, &packet, &packet_length);
 
         now_ms = df_monotonic_ms();
@@ -213,6 +252,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 "mode=passive\n",
                 expired_replies, df_gvs_reply_queue_count(&reply_queue));
         }
+        if (df_gvs_send_transaction_step(
+                &send_transaction, &reply_queue, now_ms,
+                df_runtime_simulated_send, NULL, &send_trace) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
+        df_runtime_send_log(&send_trace);
         if (df_gvs_runtime_sync_tick(&sync, now_ms, df_runtime_sync_action,
                                      NULL) != DF_OK) {
             status = DF_ERR_IO;
