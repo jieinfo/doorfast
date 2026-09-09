@@ -321,10 +321,23 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `observed_at`: 2026-09-09
 - `source_type`: command
 - `source_ref`: `src/gvs_serialize.h`, `src/gvs_serialize.c`, `tests/test_gvs_serialize.c`, `docs/gvs-header-provider-contract.md`
-- `content_hash`: `gvs_serialize.h=9f5ff669d5b25d4a7908a4170c2de8e16705f3c229416d883161106e8ec0ffd0; gvs_serialize.c=129dffdd01ca88f6991b0b17c2596bd6c6aeed03b898df6522a4e09121bd36b5; test_gvs_serialize.c=3cb5fbf34165075e74cd163fb6a4d903219d8c33b1e2bed992e93afc50e9ef81; gvs-header-provider-contract.md=df32b5347dfa6655b9d80c233c8df214ef7ee943ac66c68128648be9588d624e`
+- `content_hash`: `gvs_serialize.h=9f5ff669d5b25d4a7908a4170c2de8e16705f3c229416d883161106e8ec0ffd0; gvs_serialize.c=129dffdd01ca88f6991b0b17c2596bd6c6aeed03b898df6522a4e09121bd36b5; test_gvs_serialize.c=3cb5fbf34165075e74cd163fb6a4d903219d8c33b1e2bed992e93afc50e9ef81; gvs-header-provider-contract.md=6c785e5074377bf6c32014ce44fbe3839045721e3e78f137c4b390cf5ac66917`
 - `artifact_path`: `src/gvs_serialize.h`, `src/gvs_serialize.c`, `src/gvs_memory_sender.c`, `tests/test_gvs_serialize.c`, `docs/gvs-header-provider-contract.md`
 - `repro_command`: `make clean && make CC='cc -fsanitize=address,undefined -fno-omit-frame-pointer' test && make clean && make test doorfast peer-sim peer-udp-inject && python3 -B -m unittest tests/test_gvs_peer_udp.py && sh tests/test_gvs_peer_sim_cli.sh && sh tests/test_package_manifest.sh && sh tests/test_main_cli.sh && node tests/test_luci_status.js`
 - `raw_excerpt`: 85 项 C 测试在常规构建及 AddressSanitizer/UndefinedBehaviorSanitizer 下通过。提供器收到目标、来源、功能码、操作码、载荷视图和载荷长度；`07/81` 六字节载荷与 `91/02` 零载荷均有契约测试。提供器即使改写临时字段后返回失败，输出长度仍归零且调用者缓冲区逐字节保持不变。同步构帧、对端模拟器、Python UDP 模型、CLI、LuCI 和包清单回归通过。运行时仍显式使用全零占位提供器且没有网络发送。
+- `linked_workitem`: M2
+- `supersedes`: none
+
+#### E-021
+
+- `title`: r9 APK 在目标虚拟机验证公共头契约重构无运行回归
+- `observed_at`: 2026-09-09
+- `source_type`: command
+- `source_ref`: GitHub Actions `34321275520`, `tests/run_gvs_vm_udp.py`, ImmortalWrt 25.12.1 x86_64 虚拟机
+- `content_hash`: `doorfast-0.1.0-r9.apk=bf02a16d748f13a4752122c0142084f9b074f6c6c90b1c4dad20c0f5e0673d5a; /usr/sbin/doorfast=c0ffc2539881560f46f544af37d1d3492dd38652787a1096eb6f6719d4d5bdd8`
+- `artifact_path`: GitHub Actions artifact `doorfast-apk`, installed `/usr/sbin/doorfast`, `docs/gvs-vm-udp-validation.md`
+- `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /absolute/path/to/vm/ssh.sh`
+- `raw_excerpt`: `doorfast-0.1.0-r9` 在官方 ImmortalWrt 25.12.1 x86/64 隔离虚拟机从 r8 升级成功，procd、ubus 和 LuCI 冒烟通过。两个固定 `07/01` 分别生成 `peer_reply_frame prepared=1 length=48 attempt=1 header=placeholder mode=memory`，随后各自进入模拟发送成功终态；独立 `07/81` 保持 `online_peers=1`，Normal 同步保持运行时和 UCI 版本 8，本户 `03/01` 产生新的 IncomingCall。公共头字段仍为占位值，未创建真实发送路径。
 - `linked_workitem`: M2
 - `supersedes`: none
 
@@ -505,11 +518,11 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `severity`: n/a_re
 - `category`: design
 - `status`: validated
-- `evidence_ids`: E-018, E-019, E-020
+- `evidence_ids`: E-018, E-019, E-020, E-021
 - `location`: `src/gvs_serialize.h`, `src/gvs_serialize.c`, `src/gvs_memory_sender.c`
 - `impact`: Doorfast 项目后续可在不改写地址、长度、载荷和事务生命周期的情况下接入自身维护的兼容提供器；不支持或失败的字段生成不会产生半成品输出。
 - `confidence`: high
-- `repro_steps`: 运行 E-020 的完整命令，核对 `07/81`、零载荷和提供器失败原子性测试。
+- `repro_steps`: 运行 E-020 的完整命令，核对 `07/81`、零载荷和提供器失败原子性测试；再按 E-021 验证 r9 目标 APK 回归。
 - `remediation`: 保持占位提供器离线专用；下一里程碑只登记有合法来源和固定向量证据的候选实现，真实发送必须另行评审。
 
 ### Path P-001
@@ -532,7 +545,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   11. `07/01` 请求经完整帧校验后形成 `07/81` 待回复对象；已知候选同时刷新在线状态，生产运行时不发送。evidence: E-012, E-013, E-014 — finding: F-011
   12. 待回复对象进入固定容量队列，重复项刷新期限，过期项由事件循环清理。evidence: E-015 — finding: F-012
   13. 单事务状态机按 FIFO 取出对象，构造并回读校验完整 48 字节 `07/81` 内存帧；模拟结果驱动成功、失败、重试和超时，单调 64 位完成标识隔离迟到结果；r8 目标 APK 已贯通抓包入口、队列、完整内存构帧与模拟成功终态。evidence: E-015, E-016, E-017, E-018, E-019 — finding: F-013
-  14. 公共头提供器通过只读请求获得完整帧语义，只能返回两个 8 字节字段；失败时不修改输出，现有占位提供器继续仅用于内存验证。evidence: E-018, E-020 — finding: F-014
+  14. 公共头提供器通过只读请求获得完整帧语义，只能返回两个 8 字节字段；失败时不修改输出，现有占位提供器继续仅用于内存验证；r9 目标 APK 已验证接口重构无运行回归。evidence: E-018, E-020, E-021 — finding: F-014
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未获得真实设备接受证据；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ### Path P-002
@@ -562,7 +575,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   5. `07/01` 请求经过公共头、目标地址和长度校验后生成 `07/81` 待回复动作，已知候选刷新在线期限；运行时保持零发送。evidence: E-012, E-013 — finding: F-011
   6. 待回复动作进入 16 项固定队列，精确重复刷新一秒期限，过期或满载均有确定性结果且不触发网络发送。evidence: E-015 — finding: F-012
   7. 队列对象进入单事务内存适配器，生成完整 `07/81` 并由生产解析器回读；失败、重试及超时路径由离线脚本化结果验证，r8 目标 APK 验证抓包入口可到达完整内存构帧与模拟终态。evidence: E-015, E-016, E-017, E-018, E-019 — finding: F-013
-  8. 可替换公共头提供器获得目标、来源、功能码、操作码与载荷只读视图；失败输出保持原子。evidence: E-020 — finding: F-014
+  8. 可替换公共头提供器获得目标、来源、功能码、操作码与载荷只读视图；失败输出保持原子，r9 目标 APK 回归通过。evidence: E-020, E-021 — finding: F-014
   9. 固定测试帧通过回环转发进入 x86_64 APK，验证同步角色、版本状态和来电事件。evidence: E-010 — finding: F-009
 - `residual_risks`: 真实公共头兼容性、主动发送事务和门口机接受性均未验证；隔离 UDP 验证不等同于完整主机模式。
 
@@ -588,7 +601,8 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 | 2026-09-09 | 完成完整 48 字节 `07/81` 内存构帧、回读校验和失败重试，C 测试增至 79 项 |
 | 2026-09-09 | 合并 PR #5，并在 ImmortalWrt 25.12.1 x86/64 验证 r8 APK 的抓包、队列、48 字节内存构帧和模拟成功终态 |
 | 2026-09-09 | 定义 r9 公共头提供器契约，完成完整帧上下文、零载荷和失败输出原子性测试，C 测试增至 85 项 |
+| 2026-09-09 | 合并 PR #7，并在 ImmortalWrt 25.12.1 x86/64 验证 r8 → r9 升级及完整回环协议回归 |
 
 当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护、`07/01` 待回复生成、离线发送事务、公共头提供器契约和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
 
-2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。`r6` 的远程主机与 APK 构建检查已经通过；`r7` 已完成离线发送事务测试（E-016），并在目标虚拟机验证两个探测请求从抓包入口进入独立模拟成功终态（E-017）。`r8` 已完成内存构帧实现、本地验证及目标 APK 验收：两个探测请求均从抓包入口进入队列，生成并回读验证 48 字节内存帧，最后到达模拟成功终态（E-018、E-019）。真实设备认可仍未验证。
+2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。`r6` 的远程主机与 APK 构建检查已经通过；`r7` 已完成离线发送事务测试（E-016），并在目标虚拟机验证两个探测请求从抓包入口进入独立模拟成功终态（E-017）。`r8` 已完成内存构帧实现、本地验证及目标 APK 验收（E-018、E-019）；`r9` 已完成公共头提供器契约、本地测试及 r8 → r9 目标升级回归（E-020、E-021）。真实设备认可仍未验证。
