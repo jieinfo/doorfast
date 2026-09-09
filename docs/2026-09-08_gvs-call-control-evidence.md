@@ -231,3 +231,44 @@ rg -n -C 12 '0x81' \
 - residual_risks: 确认窗口策略、末字节精确语义、运行时处理顺序和实机接受性仍需验证；本阶段不发送网络报文，也不转换会话状态。
 
 时间线补记：2026-09-09 新增离线应答关联器及完整报文入口，包版本升至 r12。报告继续使用 `flavor=null`。
+
+### E-006
+
+- title: 应答确认优先于会话转换的守护进程接收路径
+- observed_at: 2026-09-09
+- source_type: file
+- source_ref: `src/gvs_call_runtime.c`、`src/runtime_service.c`、`tests/test_gvs_call_runtime.c`
+- content_hash: `gvs_call_runtime.c` sha256 `e6121a66ad70c7b0c8b26558366dbdce5fe12933dc7657f450566d6082f89277`；`runtime_service.c` sha256 `d2cc6f6976630621a687891d572bacce20217793a14de36626215e0aa0e2fb39`；测试 sha256 `810177f8945f29ed87f098a11017048286007f11dc774c7f98cd99525bb5adac`
+- artifact_path: 同 source_ref
+- repro_command: `make test`
+- raw_excerpt: 98 个测试入口覆盖匹配接听应答先确认后转入 TALKING、错误端口应答被截断、挂断应答不直接结束会话，以及新来电抢占后取消旧确认。
+- linked_workitem: M3
+- supersedes: none
+
+### F-005
+
+- title: 被动运行接收路径保持应答确认与会话转换的确定顺序
+- severity: n/a_re
+- category: design
+- status: candidate
+- evidence_ids: [E-004, E-005, E-006]
+- location: `src/gvs_call_runtime.c`、`src/runtime_service.c`
+- impact: 防止匹配 `03/83` 先把会话切到 TALKING、再因状态失配而丢失命令确认；错误候选应答不能推动会话。
+- confidence: high（离线顺序与边界），low（实机互操作）
+- repro_steps: 运行 `make test`；匹配应答应同时产生 CONFIRMED 与 talking_transition，错误端口只产生 acknowledgement_rejected。
+- remediation: 下一阶段把模拟调度器接入受控的本地管理入口，并保持实际 UDP 发送关闭，先验证端到端离线命令生命周期。
+- optional_attack: n/a
+
+### P-004
+
+- title: 守护进程收到接听应答后的处理顺序
+- path_type: callflow
+- start: 抓包入口提取出完整 GVS 控制载荷
+- goal: 正确关联应答并更新会话状态
+- steps:
+  1. 解析公共头并推进确认窗口。evidence: E-005、E-006 — finding: F-005。
+  2. 对预期操作码执行方向、代次和动作字段关联；不匹配则截断。evidence: E-004、E-005 — finding: F-004、F-005。
+  3. 匹配 `03/83` 确认后再交给既有接收器进入 TALKING；其他控制帧处理后重新检查是否应取消旧确认。evidence: E-006 — finding: F-005。
+- residual_risks: 服务尚无命令提交入口，真实 UDP 发送关闭；处理顺序尚未在 r13 目标虚拟机或真实设备验证。
+
+时间线补记：2026-09-09 应答协调器接入守护进程接收循环，包版本升至 r13。报告继续使用 `flavor=null`，授权范围沿用本文“范围与复现”。
