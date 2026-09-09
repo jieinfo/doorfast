@@ -1,0 +1,68 @@
+name: Build Doorfast APK
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      - run: make test
+      - run: python3 -m unittest tests/test_gvs_peer_udp.py
+      - run: sh tests/test_main_cli.sh
+      - run: sh tests/test_package_manifest.sh
+
+  apk:
+    runs-on: ubuntu-24.04
+    needs: host-tests
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y zstd
+      - name: Cache verified ImmortalWrt SDK archive
+        uses: actions/cache@v4
+        with:
+          path: .cache/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          key: immortalwrt-sdk-25.12.1-x86-64-gcc-14.3.0-musl
+      - name: Download and verify ImmortalWrt SDK
+        run: |
+          sdk=immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+          mkdir -p .cache
+          if [ ! -f ".cache/$sdk" ]; then
+            curl -fL --retry 3 -o ".cache/$sdk" "https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64/$sdk"
+          fi
+          echo '02ad8cfc775001ccae8e9282d19696de54e3ab3963f005737ad61f8698263edd  .cache/'"$sdk" | sha256sum -c -
+          tar --zstd -xf ".cache/$sdk"
+      - name: Build APK
+        run: |
+          sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
+          test -n "$sdk_dir"
+          (
+            cd "$sdk_dir"
+            ./scripts/feeds update -a
+            ./scripts/feeds install libpcap libuci libjson-c libopenssl luci-base
+          )
+          ./scripts/prepare-sdk-package.sh "$sdk_dir"
+          make -C "$sdk_dir" defconfig
+          # Keep package staging file lists for the verification step below.
+          make -C "$sdk_dir" package/doorfast/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
+          make -C "$sdk_dir" package/luci-app-doorfast/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
+      - name: Verify generated APK file lists
+        run: |
+          sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
+          doorfast_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/doorfast/lib/apk/packages/doorfast.list' | head -n 1)
+          luci_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/luci-app-doorfast/lib/apk/packages/luci-app-doorfast.list' | head -n 1)
+          test -n "$doorfast_list"
+          test -n "$luci_list"
+          grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
+          grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"
+          ! grep -Fq 'gvs-peer-' "$doorfast_list" "$luci_list"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doorfast-apk
+          path: |
+            **/bin/packages/x86_64/base/doorfast-*.apk
+            **/bin/packages/x86_64/base/luci-app-doorfast-*.apk
+          if-no-files-found: error

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a native x86_64 ImmortalWrt daemon that loads Doorfast UCI configuration, transparently captures selected Dnake SIP traffic, emits normalized call events and administrator-reviewed discovery candidates, applies schedule policies, and installs as an IPK without any license or remote-shell behavior.
+**Goal:** Build a native x86_64 ImmortalWrt daemon that loads Doorfast UCI configuration, transparently captures selected Dnake SIP traffic, emits normalized call events and administrator-reviewed discovery candidates, applies schedule policies, and installs as an APK without any license or remote-shell behavior.
 
 **Architecture:** A C17 daemon is split into configuration, capture, SIP parsing, session/policy, discovery, diagnostics, integration, and audit modules. The first increment is deliberately transparent and passive: it produces normalized events, reviewed endpoint candidates, and scheduled action decisions but does not transmit Dnake door/elevator control frames until user-owned packet fixtures document those frames.
 
@@ -47,7 +47,7 @@
 | `tests/test_discovery.c` | Candidate parsing, deduplication, and approval tests |
 | `tests/test_diagnostics.c` | Read-only diagnostic-result tests |
 | `tests/fixtures/*.sip` | Anonymized SIP request/response fixtures |
-| `package/doorfast/Makefile` | ImmortalWrt package recipe |
+| `package/doorfast/Makefile` | ImmortalWrt APK package recipe |
 | `package/doorfast/files/doorfast.init` | procd service definition |
 | `package/doorfast/files/doorfast.config` | Default UCI configuration |
 | `luci-app-doorfast/luasrc/*` | LuCI configuration page and ACL |
@@ -378,7 +378,7 @@ git commit -m "feat: add passive SIP capture daemon"
 - Modify: `README.md`
 
 **Interfaces:**
-- Produces: an x86_64 IPK named `doorfast` and a LuCI page at `admin/services/doorfast`.
+- Produces: an x86_64 APK named `doorfast` and a LuCI page at `admin/services/doorfast`.
 - Consumes: `/usr/sbin/doorfast` and `/etc/config/doorfast`.
 
 - [ ] **Step 1: Add a package manifest test**
@@ -405,7 +405,7 @@ The package recipe depends on `+libpcap +libuci +libjson-c +libopenssl`. The ini
 
 Run: `sh tests/test_package_manifest.sh && make test`
 
-Expected: PASS. In the matching SDK, run `make package/doorfast/compile V=s` and verify that an x86_64 IPK is emitted.
+Expected: PASS. In the matching SDK, run `make package/doorfast/compile V=s` and verify that an x86_64 APK is emitted.
 
 - [ ] **Step 5: Commit**
 

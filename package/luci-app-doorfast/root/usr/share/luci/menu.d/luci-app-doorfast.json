@@ -1,0 +1,13 @@
+{
+  "admin/services/doorfast": {
+    "title": "Doorfast",
+    "order": 60,
+    "action": {
+      "type": "view",
+      "path": "doorfast/status"
+    },
+    "depends": {
+      "acl": ["luci-app-doorfast"]
+    }
+  }
+}
