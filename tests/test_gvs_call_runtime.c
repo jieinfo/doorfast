@@ -2,6 +2,67 @@
 #include "gvs_call_runtime.h"
 #include "test.h"
 
+void test_gvs_call_runtime_idle_deadlines(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_session session = {.state = DF_GVS_RINGING, .generation = 9,
+        .peer = {0x32, 2, 1, 0, 1, 0}};
+    struct df_gvs_call_dispatch dispatch = {.state = DF_GVS_CALL_SENT};
+    struct df_gvs_call_ack ack;
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_runtime_result result;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_command_prepare_answer(
+        &session, 9, local, 8303, 8302, 120, &dispatch.command));
+    df_gvs_call_ack_init(&ack, 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_ack_begin(
+        &ack, &dispatch, &session, local, 0, 100));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_deadline_arm(&deadline, &session, 0, 200));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_runtime_tick(
+        &ack, local, &session, &deadline, 99, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_ACK_WAITING, ack.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_runtime_tick(
+        &ack, local, &session, &deadline, 100, &result));
+    TEST_ASSERT_INT_EQ(1, result.acknowledgement_expired);
+    TEST_ASSERT_INT_EQ(DF_GVS_RINGING, session.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_runtime_tick(
+        &ack, local, &session, &deadline, 100, &result));
+    TEST_ASSERT_INT_EQ(0, result.acknowledgement_expired);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_ack_begin(
+        &ack, &dispatch, &session, local, 100, 100));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_runtime_tick(
+        &ack, local, &session, &deadline, 200, &result));
+    TEST_ASSERT_INT_EQ(1, result.session_timed_out);
+    TEST_ASSERT_INT_EQ(1, result.acknowledgement_cancelled);
+    TEST_ASSERT_INT_EQ(0, result.acknowledgement_expired);
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED, session.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_runtime_tick(
+        &ack, local, &session, &deadline, 201, &result));
+    TEST_ASSERT_INT_EQ(0, result.session_timed_out);
+    TEST_ASSERT_INT_EQ(0, result.acknowledgement_cancelled);
+}
+
+void test_gvs_call_runtime_tick_is_atomic(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_session session = {.state = DF_GVS_RINGING, .generation = 9};
+    struct df_gvs_session before;
+    struct df_gvs_call_ack ack, ack_before;
+    struct df_gvs_deadline deadline, deadline_before;
+    struct df_gvs_call_runtime_result result = {.acknowledgement_confirmed = true};
+
+    df_gvs_call_ack_init(&ack, 200);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_deadline_arm(&deadline, &session, 0, 100));
+    before = session;
+    ack_before = ack;
+    deadline_before = deadline;
+    /* The session would expire, but the acknowledgement clock rejects this tick. */
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_call_runtime_tick(
+        &ack, local, &session, &deadline, 100, &result));
+    TEST_ASSERT_INT_EQ(0, memcmp(&before, &session, sizeof(session)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&ack_before, &ack, sizeof(ack)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&deadline_before, &deadline, sizeof(deadline)));
+    TEST_ASSERT_INT_EQ(1, result.acknowledgement_confirmed);
+}
+
 static size_t runtime_frame(uint8_t out[64], const uint8_t dst[6],
     const uint8_t src[6], uint8_t opcode, const uint8_t *payload, size_t n) {
     static const uint8_t magic[10] = {
