@@ -44,7 +44,7 @@ doorfast: event=peer_reply_tx state=sending attempt=1 timed_out=0 mode=simulated
 doorfast: event=peer_reply_tx state=success attempt=1 timed_out=0 mode=simulated
 ```
 
-日志不包含目标地址、请求数据或公共头字段。`tests/test_gvs_send_transaction.c` 使用脚本化模拟结果覆盖即时成功、异步失败后成功、三次失败、三次无响应、重试期限、最终超时、跨对象迟到完成、双时钟一致性和接近时钟上限的终态；`r7` 已在目标虚拟机验证固定 `07/01` 经实际抓包入口进入模拟事务，`r8` 验收将进一步检查每个探针均生成新的 48 字节内存帧记录。
+日志不包含目标地址、请求数据或公共头字段。`tests/test_gvs_send_transaction.c` 使用脚本化模拟结果覆盖即时成功、异步失败后成功、三次失败、三次无响应、重试期限、最终超时、跨对象迟到完成、双时钟一致性和接近时钟上限的终态；`tests/run_gvs_vm_udp.py` 已在 `r7` APK 中验证两个固定 `07/01` 均经实际抓包入口进入模拟事务并各自产生一次成功终态，`r8` 验收将进一步检查每个探针均生成新的 48 字节内存帧记录。
 
 ## 本地复现
 
