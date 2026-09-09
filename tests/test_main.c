@@ -1,6 +1,11 @@
 #include "test.h"
 void test_gvs_call_runtime_idle_deadlines(void);
 void test_gvs_call_runtime_tick_is_atomic(void);
+void test_gvs_call_control_answer_reaches_confirmation(void);
+void test_gvs_call_control_reports_confirmation_timeout_once(void);
+void test_gvs_call_control_rejects_busy_and_stale_submission(void);
+void test_gvs_call_control_bounds_failed_simulated_delivery(void);
+void test_gvs_call_control_rejects_receive_before_submission_time(void);
 void test_gvs_pick_exchange(void);
 void test_gvs_presence_receives_sync_replies(void);
 void test_gvs_presence_receives_peer_online_replies(void);
@@ -209,5 +214,10 @@ int main(void) {
     test_network_overlap_is_read_only();
     test_gvs_call_runtime_idle_deadlines();
     test_gvs_call_runtime_tick_is_atomic();
+    test_gvs_call_control_answer_reaches_confirmation();
+    test_gvs_call_control_reports_confirmation_timeout_once();
+    test_gvs_call_control_rejects_busy_and_stale_submission();
+    test_gvs_call_control_bounds_failed_simulated_delivery();
+    test_gvs_call_control_rejects_receive_before_submission_time();
     return test_failures();
 }

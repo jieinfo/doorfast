@@ -11,7 +11,7 @@
 #include "gvs_deadline.h"
 #include "gvs_identity.h"
 #include "gvs_memory_sender.h"
-#include "gvs_call_runtime.h"
+#include "gvs_call_control.h"
 #include "gvs_packet.h"
 #include "gvs_receive.h"
 #include "gvs_reply_queue.h"
@@ -184,7 +184,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_reply_queue reply_queue = {0};
     struct df_gvs_send_transaction send_transaction = {0};
     struct df_gvs_memory_sender memory_sender = {0};
-    struct df_gvs_call_ack call_ack = {0};
+    struct df_gvs_call_control call_control = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
@@ -209,11 +209,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     started_ms = df_monotonic_ms();
-    df_gvs_call_ack_init(&call_ack, started_ms);
     if (df_gvs_reply_queue_init(&reply_queue, started_ms) != DF_OK ||
         df_gvs_send_transaction_init(&send_transaction, started_ms) != DF_OK ||
         df_gvs_memory_sender_init(
             &memory_sender, identity, df_gvs_placeholder_header_fields,
+            NULL) != DF_OK ||
+        df_gvs_call_control_init(
+            &call_control, started_ms, df_gvs_placeholder_header_fields,
             NULL) != DF_OK ||
         df_gvs_runtime_sync_start(&sync, identity, persisted_version,
                                   started_ms) != DF_OK) {
@@ -280,16 +282,16 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             goto done;
         }
         {
-            struct df_gvs_call_runtime_result tick_result;
-            if (df_gvs_call_runtime_tick(&call_ack, identity, &session,
+            struct df_gvs_call_control_result tick_result;
+            if (df_gvs_call_control_step(&call_control, &session, identity,
                                          &deadline, now_ms, &tick_result) != DF_OK) {
                 status = DF_ERR_IO;
                 goto done;
             }
-            timed_out = tick_result.session_timed_out;
-            if (tick_result.acknowledgement_expired) {
+            timed_out = tick_result.runtime.session_timed_out;
+            if (tick_result.runtime.acknowledgement_expired) {
                 (void)fputs("doorfast: event=call_ack_expired mode=passive\n", stdout);
-            } else if (tick_result.acknowledgement_cancelled) {
+            } else if (tick_result.runtime.acknowledgement_cancelled) {
                 (void)fputs("doorfast: event=call_ack_cancelled mode=passive\n", stdout);
             }
         }
@@ -317,9 +319,14 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
 
             (void)df_gvs_session_abort(&session, &ended);
             df_gvs_deadline_cancel(&deadline);
-            if (df_gvs_call_ack_tick(&call_ack, &session, identity, now_ms) != DF_OK) {
-                status = DF_ERR_IO;
-                goto done;
+            {
+                struct df_gvs_call_control_result call_result;
+                if (df_gvs_call_control_step(
+                        &call_control, &session, identity, &deadline,
+                        now_ms, &call_result) != DF_OK) {
+                    status = DF_ERR_IO;
+                    goto done;
+                }
             }
             if (ended) {
                 (void)printf("doorfast: event=network_lost generation=%llu\n",
@@ -401,7 +408,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 continue;
             }
             struct df_gvs_runtime_sync_result sync_result;
-            struct df_gvs_call_runtime_result call_result;
+            struct df_gvs_call_control_result call_result;
             if (df_gvs_runtime_sync_receive(&sync, payload, payload_length,
                                             now_ms, &sync_result) != DF_OK) {
                 status = DF_ERR_IO;
@@ -418,19 +425,20 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 }
                 continue;
             }
-            if (df_gvs_call_runtime_receive(&call_ack, payload, payload_length,
-                                            identity, &session, &deadline,
-                                            now_ms, &call_result) == DF_OK) {
-                const struct df_gvs_receive_result *result = &call_result.receive;
+            if (df_gvs_call_control_receive(
+                    &call_control, payload, payload_length, identity,
+                    &session, &deadline, now_ms, &call_result) == DF_OK) {
+                const struct df_gvs_receive_result *result =
+                    &call_result.runtime.receive;
                 unsigned i;
-                if (call_result.acknowledgement_confirmed) {
+                if (call_result.runtime.acknowledgement_confirmed) {
                     (void)fputs("doorfast: event=call_ack_confirmed mode=passive\n", stdout);
-                } else if (call_result.acknowledgement_rejected) {
+                } else if (call_result.runtime.acknowledgement_rejected) {
                     (void)fputs("doorfast: event=call_ack_rejected mode=passive\n", stdout);
                 }
-                if (call_result.acknowledgement_expired) {
+                if (call_result.runtime.acknowledgement_expired) {
                     (void)fputs("doorfast: event=call_ack_expired mode=passive\n", stdout);
-                } else if (call_result.acknowledgement_cancelled) {
+                } else if (call_result.runtime.acknowledgement_cancelled) {
                     (void)fputs("doorfast: event=call_ack_cancelled mode=passive\n", stdout);
                 }
                 for (i = 0; i < result->transition.count; ++i) {
