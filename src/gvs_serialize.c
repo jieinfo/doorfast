@@ -10,9 +10,17 @@ int df_gvs_control_serialize(
     uint8_t *output, size_t capacity, size_t *output_length,
     const uint8_t destination[6], const uint8_t source[6], uint8_t family,
     uint8_t opcode, const uint8_t *payload, uint16_t payload_length,
-    df_gvs_header_fields_fn provide_fields, void *fields_context) {
+    df_gvs_header_provider_fn provide_fields, void *fields_context) {
     uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE];
     uint8_t encryption_code[DF_GVS_HEADER_FIELD_SIZE];
+    const struct df_gvs_header_request request = {
+        .destination = destination,
+        .source = source,
+        .family = family,
+        .opcode = opcode,
+        .payload = payload,
+        .payload_length = payload_length,
+    };
     size_t required = DF_GVS_CONTROL_HEADER_SIZE + (size_t)payload_length;
 
     if (output_length != NULL) {
@@ -21,7 +29,8 @@ int df_gvs_control_serialize(
     if (output == NULL || output_length == NULL || destination == NULL ||
         source == NULL || provide_fields == NULL ||
         (payload_length > 0U && payload == NULL) || capacity < required ||
-        provide_fields(random_code, encryption_code, fields_context) != DF_OK) {
+        provide_fields(&request, random_code, encryption_code,
+                       fields_context) != DF_OK) {
         return DF_ERR_INVALID;
     }
 
@@ -44,7 +53,7 @@ int df_gvs_control_serialize(
 int df_gvs_presence_action_serialize(
     const struct df_gvs_presence_action *action, const uint8_t source[6],
     uint16_t sync_version, uint8_t *output, size_t capacity,
-    size_t *output_length, df_gvs_header_fields_fn provide_fields,
+    size_t *output_length, df_gvs_header_provider_fn provide_fields,
     void *fields_context) {
     uint8_t family;
     uint8_t opcode;
@@ -96,7 +105,7 @@ int df_gvs_presence_action_serialize(
 int df_gvs_peer_reply_serialize(
     const struct df_gvs_peer_reply *reply, const uint8_t source[6],
     uint8_t *output, size_t capacity, size_t *output_length,
-    df_gvs_header_fields_fn provide_fields, void *fields_context) {
+    df_gvs_header_provider_fn provide_fields, void *fields_context) {
     uint8_t payload[6] = {0};
 
     if (output_length != NULL) {

@@ -5,9 +5,11 @@
 #include "gvs_sync.h"
 #include "test.h"
 
-static int sync_header_fields(uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE],
+static int sync_header_fields(const struct df_gvs_header_request *request,
+                              uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE],
                               uint8_t encryption_code[DF_GVS_HEADER_FIELD_SIZE],
                               void *context) {
+    (void)request;
     (void)context;
     memset(random_code, 0x11, DF_GVS_HEADER_FIELD_SIZE);
     memset(encryption_code, 0x22, DF_GVS_HEADER_FIELD_SIZE);

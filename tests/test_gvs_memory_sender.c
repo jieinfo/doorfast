@@ -12,11 +12,13 @@ struct header_script {
 };
 
 static int scripted_header_fields(
+    const struct df_gvs_header_request *request,
     uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE],
     uint8_t encryption_code[DF_GVS_HEADER_FIELD_SIZE], void *context) {
     struct header_script *script = context;
     size_t index;
 
+    (void)request;
     script->calls++;
     if (script->calls <= script->failures) {
         return DF_ERR_INVALID;

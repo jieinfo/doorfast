@@ -44,7 +44,7 @@ doorfast: event=peer_reply_tx state=sending attempt=1 timed_out=0 mode=simulated
 doorfast: event=peer_reply_tx state=success attempt=1 timed_out=0 mode=simulated
 ```
 
-日志不包含目标地址、请求数据或公共头字段。`tests/test_gvs_send_transaction.c` 使用脚本化模拟结果覆盖即时成功、异步失败后成功、三次失败、三次无响应、重试期限、最终超时、跨对象迟到完成、双时钟一致性和接近时钟上限的终态；`tests/run_gvs_vm_udp.py` 已在 `r7` APK 中验证两个固定 `07/01` 均经实际抓包入口进入模拟事务并各自产生一次成功终态，`r8` 验收将进一步检查每个探针均生成新的 48 字节内存帧记录。
+日志不包含目标地址、请求数据或公共头字段。`tests/test_gvs_send_transaction.c` 使用脚本化模拟结果覆盖即时成功、异步失败后成功、三次失败、三次无响应、重试期限、最终超时、跨对象迟到完成、双时钟一致性和接近时钟上限的终态；`tests/run_gvs_vm_udp.py` 已在 `r8` APK 中验证两个固定 `07/01` 均经实际抓包入口进入模拟事务、分别生成新的 48 字节内存帧记录并到达成功终态。
 
 ## 本地复现
 
@@ -58,4 +58,4 @@ sh tests/test_main_cli.sh
 node tests/test_luci_status.js
 ```
 
-本阶段没有证明真实门口机接受 `07/81`。`r8` 已接入受控内存构帧适配层；下一阶段应定义可替换的合法公共头提供器边界，并验证字段来源与兼容性。
+本阶段没有证明真实门口机接受 `07/81`。`r8` 已接入受控内存构帧适配层；`r9` 已定义带完整只读帧上下文和失败原子性的[公共头提供器契约](gvs-header-provider-contract.md)。字段来源与真实兼容性仍未验证。

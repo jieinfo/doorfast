@@ -10,10 +10,14 @@ _Static_assert(DF_GVS_PEER_REPLY_FRAME_SIZE ==
                "peer reply frame size must include the complete payload");
 
 int df_gvs_placeholder_header_fields(
+    const struct df_gvs_header_request *request,
     uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE],
     uint8_t encryption_code[DF_GVS_HEADER_FIELD_SIZE], void *context) {
     (void)context;
-    if (random_code == NULL || encryption_code == NULL) {
+    if (request == NULL || request->destination == NULL ||
+        request->source == NULL || random_code == NULL ||
+        encryption_code == NULL ||
+        (request->payload_length > 0U && request->payload == NULL)) {
         return DF_ERR_INVALID;
     }
     memset(random_code, 0, DF_GVS_HEADER_FIELD_SIZE);
@@ -23,7 +27,7 @@ int df_gvs_placeholder_header_fields(
 
 int df_gvs_memory_sender_init(struct df_gvs_memory_sender *sender,
                               const uint8_t source[6],
-                              df_gvs_header_fields_fn provide_fields,
+                              df_gvs_header_provider_fn provide_fields,
                               void *fields_context) {
     if (sender == NULL || source == NULL || provide_fields == NULL) {
         return DF_ERR_INVALID;

@@ -10,7 +10,20 @@
 #define DF_GVS_CONTROL_HEADER_SIZE 42U
 #define DF_GVS_HEADER_FIELD_SIZE 8U
 
-typedef int (*df_gvs_header_fields_fn)(
+struct df_gvs_header_request {
+    const uint8_t *destination;
+    const uint8_t *source;
+    uint8_t family;
+    uint8_t opcode;
+    const uint8_t *payload;
+    uint16_t payload_length;
+};
+
+/* Providers receive a read-only description of the complete frame being
+ * prepared. They may only return the two opaque 8-byte header fields. A
+ * non-DF_OK result rejects the whole frame before output is modified. */
+typedef int (*df_gvs_header_provider_fn)(
+    const struct df_gvs_header_request *request,
     uint8_t random_code[DF_GVS_HEADER_FIELD_SIZE],
     uint8_t encryption_code[DF_GVS_HEADER_FIELD_SIZE], void *context);
 
@@ -18,16 +31,16 @@ int df_gvs_control_serialize(
     uint8_t *output, size_t capacity, size_t *output_length,
     const uint8_t destination[6], const uint8_t source[6], uint8_t family,
     uint8_t opcode, const uint8_t *payload, uint16_t payload_length,
-    df_gvs_header_fields_fn provide_fields, void *fields_context);
+    df_gvs_header_provider_fn provide_fields, void *fields_context);
 
 int df_gvs_presence_action_serialize(
     const struct df_gvs_presence_action *action, const uint8_t source[6],
     uint16_t sync_version, uint8_t *output, size_t capacity,
-    size_t *output_length, df_gvs_header_fields_fn provide_fields,
+    size_t *output_length, df_gvs_header_provider_fn provide_fields,
     void *fields_context);
 int df_gvs_peer_reply_serialize(
     const struct df_gvs_peer_reply *reply, const uint8_t source[6],
     uint8_t *output, size_t capacity, size_t *output_length,
-    df_gvs_header_fields_fn provide_fields, void *fields_context);
+    df_gvs_header_provider_fn provide_fields, void *fields_context);
 
 #endif
