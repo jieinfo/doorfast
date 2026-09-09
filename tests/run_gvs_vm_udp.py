@@ -58,6 +58,21 @@ def main():
                     'peer-probe'], check=True)
     wait_for(lambda: remote(probe_log_command) != probe_logs_before, timeout=5)
     wait_for(lambda: status()['sync']['online_peers'] == 1)
+    coalesced_log_command = ('logread | grep '
+                             '"doorfast: event=peer_probe accepted=1 '
+                             'reply_pending=1 peer_observed=1 mode=passive '
+                             'pending=1 coalesced=1 queue_full=0" || true')
+    coalesced_logs_before = remote(coalesced_log_command)
+    subprocess.run(['build/gvs-peer-udp-inject', '--scenario',
+                    'peer-probe'], check=True)
+    wait_for(lambda: remote(coalesced_log_command) != coalesced_logs_before,
+             timeout=5)
+    expired_log_command = ('logread | grep '
+                           '"doorfast: event=peer_reply_expired count=1 '
+                           'pending=0 mode=passive" || true')
+    expired_logs_before = remote(expired_log_command)
+    wait_for(lambda: remote(expired_log_command) != expired_logs_before,
+             timeout=5)
     peer_log_command = ('logread | grep '
                         '"doorfast: event=peer_reply accepted=1 mode=passive" '
                         '|| true')

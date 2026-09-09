@@ -6,7 +6,7 @@
 
 ## 1. 执行摘要
 
-本阶段确认并实现了 GVS 室内终端在选举完成后的同步数据链路。同步数据使用 `91/03` 控制帧，载荷由两字节小端版本和 US-ASCII JSON 组成；全量周期数据以 20 项为一组分片，单字段变化使用 `Normal` 类型。Doorfast 已能在内存中登记项目维护的同步字段、更新版本、构造两类 JSON、解析自身兼容格式的入站同步帧，并按旧 APK 的版本和分机号规则选择接受或重发。首批两个静态确认字段已经进入项目适配器目录，但作为敏感字段默认禁用且拒绝空值启用。运行时新增脱敏状态快照与 JSON 查询，为后续 ubus/LuCI 展示同步阶段、维护角色和在线候选数量建立边界。真实公共头认证、UDP 发送及设备接受性仍待独立验证。
+本阶段确认并实现了 GVS 室内终端在选举完成后的同步数据链路。同步数据使用 `91/03` 控制帧，载荷由两字节小端版本和 US-ASCII JSON 组成；全量周期数据以 20 项为一组分片，单字段变化使用 `Normal` 类型。Doorfast 已能在内存中登记项目维护的同步字段、更新版本、构造两类 JSON、解析自身兼容格式的入站同步帧，并按旧 APK 的版本和分机号规则选择接受或重发。首批两个静态确认字段已经进入项目适配器目录，但作为敏感字段默认禁用且拒绝空值启用。运行时新增脱敏状态快照与 JSON 查询，为后续 ubus/LuCI 展示同步阶段、维护角色和在线候选数量建立边界。`r6` 又为 `07/81` 待回复对象增加了固定容量、精确去重和一秒失效的离线队列，但生产运行时仍保持零发送。真实公共头认证、UDP 发送及设备接受性仍待独立验证。
 
 ## 2. 范围与目标
 
@@ -67,7 +67,7 @@ node tests/test_luci_status.js
 python3 -B -m unittest discover -s tests -p 'test_*.py'
 ```
 
-另使用 AddressSanitizer 和 UndefinedBehaviorSanitizer 运行同一套 63 项 C 测试。本地编译、内存回放、确定性场景命令行测试、APK 软件包清单测试、LuCI JavaScript 和 Python 协议模型测试均纳入收尾验证。
+另使用 AddressSanitizer 和 UndefinedBehaviorSanitizer 运行同一套 68 项 C 测试。本地编译、内存回放、确定性场景命令行测试、APK 软件包清单测试、LuCI JavaScript 和 Python 协议模型测试均纳入收尾验证。
 
 ## 5. Evidence → Finding → Path
 
@@ -250,6 +250,19 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `linked_workitem`: M2
 - `supersedes`: none
 
+#### E-015
+
+- `title`: Doorfast 建立固定容量的离线探测回复队列
+- `observed_at`: 2026-09-09
+- `source_type`: command
+- `source_ref`: `src/gvs_reply_queue.c`, `src/runtime_service.c`, `tests/test_gvs_reply_queue.c`, `tests/run_gvs_vm_udp.py`
+- `content_hash`: `gvs_reply_queue.c=f643982c18e736a4728607468ed488bde51a63d65ac33df05884ecb6051d3dc4; gvs_reply_queue.h=eedd0ed92f2047d447615ca10079210e913332d90bbb693207cf8e705465868f; runtime_service.c=b7252dc607bf73d84d0799484708b64244849396478be6b45d7952cb11470ee7; test_gvs_reply_queue.c=4eff9131925472f05a1dd27d336c96cf34bde1e832b7974f636308aade7cef46; run_gvs_vm_udp.py=f48edaceb8179fc3f54ca6054a52afbb41b3986369c798962aab92c88b1f70d8`
+- `artifact_path`: `src/gvs_reply_queue.c`, `src/gvs_reply_queue.h`, `src/runtime_service.c`, `tests/test_gvs_reply_queue.c`, `tests/run_gvs_vm_udp.py`, `docs/gvs-reply-queue.md`
+- `repro_command`: `make clean && make test doorfast peer-sim peer-udp-inject && python3 -B -m unittest tests/test_gvs_peer_udp.py && sh tests/test_gvs_peer_sim_cli.sh && sh tests/test_package_manifest.sh`
+- `raw_excerpt`: 68 项 C 测试和 Sanitizer 通过。队列固定 16 项、有效期 1000 毫秒；相同目标和请求数据合并并刷新期限，不同请求独立。过期清理、FIFO 取出、满队列、时间回退和溢出路径均有测试；运行时只入队、过期和记录脱敏日志，不调用取出或发送。
+- `linked_workitem`: M2
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -393,7 +406,20 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `impact`: Doorfast 已具备离线可验证的探测应答业务语义，同时保持生产网络零发送；这补齐了主动在线维护前的请求解析与回复构造层，但尚未证明真实设备会接受该回复。
 - `confidence`: high
 - `repro_steps`: 运行 E-012 的静态定位命令核对旧调用顺序，再运行 E-013 的常规和 Sanitizer 测试。
-- `remediation`: `r5` 已完成隔离 x86_64 虚拟机接收验收（E-014）；后续设计离线回复队列、失效与限额规则，并单独验证公共头兼容性。
+- `remediation`: `r5` 已完成隔离 x86_64 虚拟机接收验收（E-014），`r6` 已完成离线回复队列、失效与限额规则（E-015）；后续建立离线发送事务模型，并单独验证公共头兼容性。
+
+#### F-012
+
+- `title`: 探测回复已具有有界、可失效、可去重的离线事务入口
+- `severity`: n/a_re
+- `category`: design
+- `status`: validated
+- `evidence_ids`: E-013, E-015
+- `location`: `src/gvs_reply_queue.c`, `src/runtime_service.c`
+- `impact`: 入站探测不会造成无界内存增长；重复请求和过期回复有确定性行为，未来发送端可从 FIFO 接口接入而无需改写接收解析。
+- `confidence`: high
+- `repro_steps`: 运行 E-015 的常规和 Sanitizer 测试，核对满队列和失败路径不修改原状态。
+- `remediation`: 远程构建 `r6` 后在隔离 x86_64 虚拟机验证重复合并和一秒过期日志；随后建立离线发送事务状态机。
 
 ### Path P-001
 
@@ -413,6 +439,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   9. 隔离回环 UDP 注入验证 `Period` 刷新、`Normal` 版本持久化和两个缺失周期接管。evidence: E-010 — finding: F-009
   10. `07/81` 候选应答从目标抓包入口刷新在线期限，60 秒后自动离线。evidence: E-011 — finding: F-010
   11. `07/01` 请求经完整帧校验后形成 `07/81` 待回复对象；已知候选同时刷新在线状态，生产运行时不发送。evidence: E-012, E-013, E-014 — finding: F-011
+  12. 待回复对象进入固定容量队列，重复项刷新期限，过期项由事件循环清理。evidence: E-015 — finding: F-012
 - `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未获得真实设备接受证据；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ### Path P-002
@@ -440,7 +467,8 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   3. 已验证格式的合成 `91/81`、`91/82`、`91/03` 帧通过 `df_gvs_runtime_sync_receive()` 返回，`03/01` 来电通过 `df_gvs_receive_datagram()` 返回。evidence: E-009 — finding: F-008
   4. 公开同步状态快照和会话状态生成脱敏 JSON Lines，并以固定逻辑时间验证选举与接管。evidence: E-009 — finding: F-008
   5. `07/01` 请求经过公共头、目标地址和长度校验后生成 `07/81` 待回复动作，已知候选刷新在线期限；运行时保持零发送。evidence: E-012, E-013 — finding: F-011
-  6. 固定测试帧通过回环转发进入 x86_64 APK，验证同步角色、版本状态和来电事件。evidence: E-010 — finding: F-009
+  6. 待回复动作进入 16 项固定队列，精确重复刷新一秒期限，过期或满载均有确定性结果且不触发网络发送。evidence: E-015 — finding: F-012
+  7. 固定测试帧通过回环转发进入 x86_64 APK，验证同步角色、版本状态和来电事件。evidence: E-010 — finding: F-009
 - `residual_risks`: 真实公共头兼容性、主动发送事务和门口机接受性均未验证；隔离 UDP 验证不等同于完整主机模式。
 
 ## 6. Timeline 与遗留问题
@@ -459,7 +487,8 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 | 2026-09-09 | 完成固定容量离线 GVS 对端模拟器、三种选举/接管场景及同户来电路由回归 |
 | 2026-09-09 | 确认 `07/81` 候选在线语义，并在 x86_64 `r4` APK 验证在线刷新与 60 秒离线 |
 | 2026-09-09 | 静态确认 `07/01` 回复顺序与载荷来源，完成离线待回复生成及 66 项 C 测试 |
+| 2026-09-09 | 完成 16 项固定容量、1 秒失效和精确重复合并的离线回复队列，C 测试增至 68 项 |
 
 当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护、`07/01` 待回复生成和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
 
-2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。下一步为离线回复队列和生命周期测试；真实设备认可仍未验证。
+2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。`r6` 已完成离线回复队列和生命周期测试（E-015），等待目标 APK 构建与虚拟机验收；真实设备认可仍未验证。

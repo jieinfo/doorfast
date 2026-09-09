@@ -12,6 +12,7 @@
 #include "gvs_identity.h"
 #include "gvs_packet.h"
 #include "gvs_receive.h"
+#include "gvs_reply_queue.h"
 #include "gvs_runtime_sync.h"
 #include "gvs_sync_state.h"
 #include "runtime_ubus.h"
@@ -141,6 +142,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_session session = {0};
     struct df_gvs_deadline deadline = {0};
     struct df_capture_retry retry = {0};
+    struct df_gvs_reply_queue reply_queue = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
@@ -164,7 +166,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     started_ms = df_monotonic_ms();
-    if (df_gvs_runtime_sync_start(&sync, identity, persisted_version,
+    if (df_gvs_reply_queue_init(&reply_queue, started_ms) != DF_OK ||
+        df_gvs_runtime_sync_start(&sync, identity, persisted_version,
                                   started_ms) != DF_OK) {
         return DF_ERR_IO;
     }
@@ -195,9 +198,21 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         size_t payload_length = 0;
         uint64_t now_ms;
         bool timed_out = false;
+        size_t expired_replies = 0;
         int captured = df_capture_next(capture, &packet, &packet_length);
 
         now_ms = df_monotonic_ms();
+        if (df_gvs_reply_queue_expire(&reply_queue, now_ms,
+                                      &expired_replies) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
+        if (expired_replies > 0U) {
+            (void)printf(
+                "doorfast: event=peer_reply_expired count=%zu pending=%zu "
+                "mode=passive\n",
+                expired_replies, df_gvs_reply_queue_count(&reply_queue));
+        }
         if (df_gvs_runtime_sync_tick(&sync, now_ms, df_runtime_sync_action,
                                      NULL) != DF_OK) {
             status = DF_ERR_IO;
@@ -281,15 +296,24 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             if (payload_length >= 40U && payload[38] == 0x07 &&
                 payload[39] == 0x01) {
                 struct df_gvs_peer_reply reply;
+                bool coalesced = false;
                 int peer_status = df_gvs_presence_receive_peer_request(
                     &sync.presence, payload, payload_length, now_ms, &reply,
                     df_runtime_sync_action, NULL);
+                int queue_status = peer_status == DF_OK
+                    ? df_gvs_reply_queue_enqueue(&reply_queue, &reply, now_ms,
+                                                 &coalesced)
+                    : DF_ERR_INVALID;
                 (void)printf(
                     "doorfast: event=peer_probe accepted=%u reply_pending=%u "
-                    "peer_observed=%u mode=passive\n",
+                    "peer_observed=%u mode=passive pending=%zu coalesced=%u "
+                    "queue_full=%u\n",
                     peer_status == DF_OK ? 1U : 0U,
-                    peer_status == DF_OK ? 1U : 0U,
-                    peer_status == DF_OK && reply.peer_observed ? 1U : 0U);
+                    queue_status == DF_OK ? 1U : 0U,
+                    peer_status == DF_OK && reply.peer_observed ? 1U : 0U,
+                    df_gvs_reply_queue_count(&reply_queue),
+                    coalesced ? 1U : 0U,
+                    peer_status == DF_OK && queue_status == DF_ERR_IO ? 1U : 0U);
                 continue;
             }
             if (payload_length >= 40U && payload[38] == 0x07 &&
