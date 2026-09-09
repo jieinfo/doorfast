@@ -185,6 +185,19 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `linked_workitem`: M2
 - `supersedes`: none
 
+#### E-010
+
+- `title`: 隔离 ImmortalWrt x86_64 虚拟机贯通周期同步、版本持久化和失联接管
+- `observed_at`: 2026-09-09
+- `source_type`: network
+- `source_ref`: `tools/gvs-peer-udp-inject.c`, `tests/test_gvs_peer_udp.py`, `tests/run_gvs_vm_udp.py`, `docs/gvs-vm-udp-validation.md`, ImmortalWrt 25.12.1 x86_64 虚拟机
+- `content_hash`: `gvs-peer-udp-inject.c=77c339e7d37a1c674e1f4007423b5d550a44dc104bbcfb1cd7906837c75b1d8f; test_gvs_peer_udp.py=e1cd5e155ea3fe6864125ba4f3f4eea382f3a794d482c2ba984bdefa219f017f; run_gvs_vm_udp.py=a452d501c53d5476550d8b640a7fbc5ab744898fbc599f16b6f966f948cebcb3; gvs_peer_sim.c=a2e9f32917705a6f2ea29639e0d5e8e7c48a2af292f6124669240a0cc3c2b808; gvs_peer_sim.h=dbd3792eb22471a2f3dc9e50f88d36dbebde34fffcd2f42b22aea27f5acb1268`
+- `artifact_path`: `tools/gvs-peer-udp-inject.c`, `tests/test_gvs_peer_udp.py`, `tests/run_gvs_vm_udp.py`, `tests/support/gvs_peer_sim.c`, `tests/support/gvs_peer_sim.h`
+- `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /absolute/path/to/vm/ssh.sh --wait-for-takeover`
+- `raw_excerpt`: QEMU 用户网络把固定回环端口 `127.0.0.1:18300` 转发至虚拟机 UDP/8300。运行于官方 ImmortalWrt 25.12.1 x86_64 的 `doorfast-0.1.0-r3.apk` 先在 `SYNC_ASK` 接受合成 `91/81` 并成为 follower；随后接受 `91/03 Period` 版本 7 和 `91/03 Normal` 版本 8，ubus 显示 `last_opcode=3, last_accepted=true`，UCI `doorfast-sync.sync.version` 写入 8。本户 `03/01` 产生新的 `IncomingCall`。停止周期输入后，第一次 60 秒截止观测为 `role=follower, periodic_misses=1`，第二次截止观测为 `role=maintainer, periodic_misses=0`，并新增被动 `periodic_sync` 动作日志。注入器只接受四种内置场景且目的地址固定；APK 包清单排除 `gvs-peer-` 测试工具。
+- `linked_workitem`: M1, M2
+- `supersedes`: none
+
 ### Findings
 
 #### F-001
@@ -256,7 +269,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 
 - `title`: 被动服务 APK 已通过目标系统生命周期冒烟
 - `severity`: n/a_re
-- `category`: validation
+- `category`: other
 - `status`: validated
 - `evidence_ids`: E-006, E-007
 - `location`: `src/capture.c`, `src/runtime_service.c`, `package/doorfast`, `package/luci-app-doorfast`
@@ -269,7 +282,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 
 - `title`: 核心 APK 升级会切换运行进程并保持配置状态
 - `severity`: n/a_re
-- `category`: validation
+- `category`: other
 - `status`: validated
 - `evidence_ids`: E-007, E-008
 - `location`: `package/doorfast/Makefile`, ImmortalWrt apk `post-upgrade`
@@ -282,14 +295,27 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 
 - `title`: 本地协议对端可以确定性验证选举、失联接管和同户来电选择
 - `severity`: n/a_re
-- `category`: validation
+- `category`: other
 - `status`: validated
 - `evidence_ids`: E-001, E-009
 - `location`: `tests/support/gvs_peer_sim.c`, `tools/gvs-peer-sim.c`, `src/gvs_runtime_sync.c`, `src/gvs_receive.c`
 - `impact`: Doorfast 的身份候选、同步状态机、完整 42 字节帧校验和会话入口可以在不联网的情况下端到端回归；这缩小了进入隔离 UDP 测试前的代码不确定性，但不证明真实门口机接受 Doorfast。
 - `confidence`: high
 - `repro_steps`: 运行 E-009 命令，比较两次 `no-peer` 输出，并检查三个内置场景的角色、漏周期和目标范围记录。
-- `remediation`: 下一阶段补充 `0x07` 入站回复证据、隔离虚拟网卡传输测试和真实设备接受性验证。
+- `remediation`: 下一阶段补充 `0x07` 入站回复证据和真实设备接受性验证。
+
+#### F-009
+
+- `title`: 目标 APK 的被动 UDP 路径能够持续维护同步状态并完成失联接管
+- `severity`: n/a_re
+- `category`: other
+- `status`: validated
+- `evidence_ids`: E-003, E-010
+- `location`: `src/runtime_service.c`, `src/gvs_runtime_sync.c`, `src/gvs_presence.c`, ImmortalWrt 25.12.1 x86_64 虚拟机
+- `impact`: 合成 `91/81`、`91/03 Period` 和 `91/03 Normal` 已经过目标系统的真实网卡捕获、UDP 提取、运行时解析、版本持久化和两周期接管链路；后续可以把精力集中到在线回复语义、合法公共头提供器和真实门口机认可。
+- `confidence`: high
+- `repro_steps`: 使用 E-010 的固定回环转发和命令执行完整虚拟机验证，检查 follower 第一次缺失、maintainer 第二次接管、UCI 版本 8 及新增 `periodic_sync` 日志。
+- `remediation`: 保持生产服务被动，直到合法公共头字段和真实设备接受性具备独立证据。
 
 ### Path P-001
 
@@ -306,7 +332,8 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   6. 状态快照将在线维护结果映射为脱敏 JSON，供后续本地管理层读取。evidence: E-005 — finding: F-004
   7. 目标构建将快照映射为只读 ubus 响应，LuCI 通过最小 ACL 周期读取并呈现。evidence: E-005, E-006 — finding: F-005
   8. x86_64 目标 APK 在官方 25.12.1 虚拟机由 procd 运行，空闲时仍可响应 ubus 并支持重启和卸载重装。evidence: E-007 — finding: F-006
-- `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未接入 UDP 和真实设备；严格 JSON 成员顺序仍需用真实抓包验证。
+  9. 隔离回环 UDP 注入验证 `Period` 刷新、`Normal` 版本持久化和两个缺失周期接管。evidence: E-010 — finding: F-009
+- `residual_risks`: 公共头字段尚未获得合法兼容实现；尚未获得真实设备接受证据；严格 JSON 成员顺序仍需用真实抓包验证。
 
 ### Path P-002
 
@@ -333,7 +360,8 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
   3. 已验证格式的合成 `91/81`、`91/82`、`91/03` 帧通过 `df_gvs_runtime_sync_receive()` 返回，`03/01` 来电通过 `df_gvs_receive_datagram()` 返回。evidence: E-009 — finding: F-008
   4. 公开同步状态快照和会话状态生成脱敏 JSON Lines，并以固定逻辑时间验证选举与接管。evidence: E-009 — finding: F-008
   5. 因缺少已确认的 `0x07` 回复语义，模拟同步参与者不增加在线候选数，输出保持 `online_peers=0`。evidence: E-009 — finding: F-008
-- `residual_risks`: 真实公共头兼容性、`0x07` 候选在线回复、真实 UDP 交付和门口机接受性均未验证；离线模拟不等同于完整主机模式。
+  6. 固定测试帧通过回环转发进入 x86_64 APK，验证同步角色、版本状态和来电事件。evidence: E-010 — finding: F-009
+- `residual_risks`: 真实公共头兼容性、`0x07` 候选在线回复和门口机接受性均未验证；隔离 UDP 验证不等同于完整主机模式。
 
 ## 6. Timeline 与遗留问题
 

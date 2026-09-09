@@ -30,6 +30,18 @@ static int make_frame(const char *scenario, struct df_gvs_peer_sim **sim,
             df_gvs_peer_sim_make_call(*sim, local) != DF_OK) {
             return DF_ERR_IO;
         }
+    } else if (strcmp(scenario, "periodic-sync") == 0) {
+        if (df_gvs_peer_sim_create(sim, DF_GVS_SIM_MAINTAINER_LOSS,
+                                   local, 0) != DF_OK ||
+            df_gvs_peer_sim_make_periodic_sync(*sim) != DF_OK) {
+            return DF_ERR_IO;
+        }
+    } else if (strcmp(scenario, "normal-update") == 0) {
+        if (df_gvs_peer_sim_create(sim, DF_GVS_SIM_MAINTAINER_LOSS,
+                                   local, 0) != DF_OK ||
+            df_gvs_peer_sim_make_normal_update(*sim) != DF_OK) {
+            return DF_ERR_IO;
+        }
     } else {
         return DF_ERR_INVALID;
     }
@@ -63,7 +75,9 @@ int main(int argc, char **argv) {
     int result;
 
     if (argc != 3 || strcmp(argv[1], "--scenario") != 0) {
-        fprintf(stderr, "usage: %s --scenario sync-reply|call-local\n",
+        fprintf(stderr,
+                "usage: %s --scenario "
+                "sync-reply|periodic-sync|normal-update|call-local\n",
                 argv[0]);
         return 2;
     }

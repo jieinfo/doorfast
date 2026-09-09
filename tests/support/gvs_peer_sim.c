@@ -248,6 +248,50 @@ int df_gvs_peer_sim_make_call(struct df_gvs_peer_sim *sim,
                                            0x01, NULL, 0);
 }
 
+static int df_gvs_peer_sim_make_sync_data(struct df_gvs_peer_sim *sim,
+                                          bool normal) {
+    struct df_gvs_sync_store store;
+    struct df_gvs_presence_action action = {
+        .type = DF_GVS_PRESENCE_PERIODIC_SYNC,
+    };
+    uint8_t data[DF_GVS_SYNC_MAX_PACKET_SIZE];
+    size_t length;
+
+    if (sim == NULL) {
+        return DF_ERR_INVALID;
+    }
+    df_gvs_sync_store_init(&store);
+    if (df_gvs_sync_store_register(&store, "sim_state",
+                                   normal ? "updated" : "present") != DF_OK) {
+        return DF_ERR_INVALID;
+    }
+    if (normal) {
+        if (df_gvs_sync_normal_serialize(
+                &store, "sim_state", sim->local, sim->lower_peer,
+                (uint16_t)(sim->peer_version + 1U), data, sizeof(data),
+                &length, df_gvs_sim_header_fields, NULL) != DF_OK) {
+            return DF_ERR_INVALID;
+        }
+    } else {
+        memcpy(action.target, sim->local, sizeof(action.target));
+        if (df_gvs_sync_periodic_serialize(
+                &store, 0, &action, sim->lower_peer, sim->peer_version,
+                data, sizeof(data), &length, df_gvs_sim_header_fields,
+                NULL) != DF_OK) {
+            return DF_ERR_INVALID;
+        }
+    }
+    return df_gvs_peer_sim_enqueue_frame(sim, data, length);
+}
+
+int df_gvs_peer_sim_make_periodic_sync(struct df_gvs_peer_sim *sim) {
+    return df_gvs_peer_sim_make_sync_data(sim, false);
+}
+
+int df_gvs_peer_sim_make_normal_update(struct df_gvs_peer_sim *sim) {
+    return df_gvs_peer_sim_make_sync_data(sim, true);
+}
+
 size_t df_gvs_peer_sim_action_count(
     const struct df_gvs_peer_sim *sim,
     enum df_gvs_presence_action_type type) {

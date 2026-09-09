@@ -44,6 +44,30 @@ class GvsPeerUdpInjectorTest(unittest.TestCase):
         self.assertEqual(bytes((0x32, 2, 1, 0, 1, 0)), packet[16:22])
         self.assertEqual(bytes((0x03, 0x01)), packet[38:40])
 
+    def test_periodic_sync_carries_fixed_period_json(self):
+        packet = self.receive_scenario("periodic-sync")
+        self.assertEqual(bytes((0x61, 2, 1, 1, 1, 2)), packet[10:16])
+        self.assertEqual(bytes((0x61, 2, 1, 1, 1, 1)), packet[16:22])
+        self.assertEqual(bytes((0x91, 0x03)), packet[38:40])
+        self.assertEqual(bytes((7, 0)), packet[42:44])
+        self.assertEqual(
+            b'{"TYPE":"Period","COUNT":1,"INFO":['
+            b'{"KEY":"sim_state","VALUE":"present"}]}',
+            packet[44:],
+        )
+
+    def test_normal_update_carries_new_version_and_fixed_json(self):
+        packet = self.receive_scenario("normal-update")
+        self.assertEqual(bytes((0x61, 2, 1, 1, 1, 2)), packet[10:16])
+        self.assertEqual(bytes((0x61, 2, 1, 1, 1, 1)), packet[16:22])
+        self.assertEqual(bytes((0x91, 0x03)), packet[38:40])
+        self.assertEqual(bytes((8, 0)), packet[42:44])
+        self.assertEqual(
+            b'{"TYPE":"Normal","COUNT":1,"INFO":['
+            b'{"KEY":"sim_state","VALUE":"updated"}]}',
+            packet[44:],
+        )
+
     def test_arbitrary_scenario_is_rejected(self):
         result = subprocess.run(
             ["build/gvs-peer-udp-inject", "--scenario", "arbitrary"],
