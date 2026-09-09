@@ -27,6 +27,36 @@ static void df_gvs_call_runtime_record_terminal(
     }
 }
 
+int df_gvs_call_runtime_tick(
+    struct df_gvs_call_ack *ack, const uint8_t identity[6],
+    struct df_gvs_session *session, struct df_gvs_deadline *deadline,
+    uint64_t now_ms, struct df_gvs_call_runtime_result *result) {
+    struct df_gvs_call_ack next_ack;
+    struct df_gvs_session next_session;
+    struct df_gvs_deadline next_deadline;
+    struct df_gvs_call_runtime_result next_result = {0};
+
+    if (ack == NULL || identity == NULL || session == NULL ||
+        deadline == NULL || result == NULL) {
+        return DF_ERR_INVALID;
+    }
+    next_ack = *ack;
+    next_session = *session;
+    next_deadline = *deadline;
+    /* Session expiry wins when both deadlines fall on the same tick. */
+    if (df_gvs_deadline_tick(&next_deadline, &next_session, now_ms,
+                             &next_result.session_timed_out) != DF_OK ||
+        df_gvs_call_ack_tick(&next_ack, &next_session, identity, now_ms) != DF_OK) {
+        return DF_ERR_INVALID;
+    }
+    df_gvs_call_runtime_record_terminal(ack->state, &next_ack, &next_result);
+    *ack = next_ack;
+    *session = next_session;
+    *deadline = next_deadline;
+    *result = next_result;
+    return DF_OK;
+}
+
 int df_gvs_call_runtime_receive(
     struct df_gvs_call_ack *ack, const uint8_t *data, size_t length,
     const uint8_t identity[6], struct df_gvs_session *session,

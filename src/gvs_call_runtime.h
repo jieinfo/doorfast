@@ -9,7 +9,11 @@ struct df_gvs_call_runtime_result {
     bool acknowledgement_rejected;
     bool acknowledgement_expired;
     bool acknowledgement_cancelled;
+    bool session_timed_out;
 };
+int df_gvs_call_runtime_tick(struct df_gvs_call_ack *,
+    const uint8_t identity[6], struct df_gvs_session *,
+    struct df_gvs_deadline *, uint64_t, struct df_gvs_call_runtime_result *);
 int df_gvs_call_runtime_receive(struct df_gvs_call_ack *, const uint8_t *,
     size_t, const uint8_t identity[6], struct df_gvs_session *,
     struct df_gvs_deadline *, uint64_t, struct df_gvs_call_runtime_result *);

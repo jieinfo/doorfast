@@ -279,21 +279,17 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             status = DF_ERR_IO;
             goto done;
         }
-        if (df_gvs_deadline_tick(&deadline, &session, now_ms, &timed_out) != DF_OK) {
-            status = DF_ERR_IO;
-            goto done;
-        }
         {
-            enum df_gvs_call_ack_state previous = call_ack.state;
-            if (df_gvs_call_ack_tick(&call_ack, &session, identity, now_ms) != DF_OK) {
+            struct df_gvs_call_runtime_result tick_result;
+            if (df_gvs_call_runtime_tick(&call_ack, identity, &session,
+                                         &deadline, now_ms, &tick_result) != DF_OK) {
                 status = DF_ERR_IO;
                 goto done;
             }
-            if (previous == DF_GVS_CALL_ACK_WAITING &&
-                call_ack.state == DF_GVS_CALL_ACK_EXPIRED) {
+            timed_out = tick_result.session_timed_out;
+            if (tick_result.acknowledgement_expired) {
                 (void)fputs("doorfast: event=call_ack_expired mode=passive\n", stdout);
-            } else if (previous == DF_GVS_CALL_ACK_WAITING &&
-                       call_ack.state == DF_GVS_CALL_ACK_CANCELLED) {
+            } else if (tick_result.acknowledgement_cancelled) {
                 (void)fputs("doorfast: event=call_ack_cancelled mode=passive\n", stdout);
             }
         }
