@@ -93,8 +93,12 @@ void test_network_overlap_is_read_only(void);
 
 void test_gvs_call_dispatch_lifecycle(void);
 void test_gvs_call_dispatch_bounds(void);
+void test_gvs_call_ack_confirms_matching_answer(void);
+void test_gvs_call_ack_rejects_unrelated_and_expires(void);
+void test_gvs_call_ack_confirms_hangup_and_cancels_stale(void);
+void test_gvs_call_ack_receives_complete_frame(void);
 int test_suite_count(void) {
-    return 90;
+    return 94;
 }
 
 int main(void) {
@@ -103,9 +107,13 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(90, test_suite_count());
+    TEST_ASSERT_INT_EQ(94, test_suite_count());
     test_gvs_call_dispatch_lifecycle();
     test_gvs_call_dispatch_bounds();
+    test_gvs_call_ack_confirms_matching_answer();
+    test_gvs_call_ack_rejects_unrelated_and_expires();
+    test_gvs_call_ack_confirms_hangup_and_cancels_stale();
+    test_gvs_call_ack_receives_complete_frame();
     test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue();
     test_gvs_peer_sim_builds_synthetic_call_frame();
     test_gvs_peer_sim_elects_maintainer_without_peers();

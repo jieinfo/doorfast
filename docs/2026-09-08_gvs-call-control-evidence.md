@@ -190,3 +190,44 @@ rg -n -C 12 '0x81' \
 - residual_risks: 准备后的会话可能失效，未来发送时必须重新检查；当前没有发送队列接入、对端确认或媒体协商验收。
 
 时间线补记：2026-09-09 复核发送包装函数，新增命令模块，完成 88 个 C 测试及内存/未定义行为检查。报告使用 `flavor=null`，范围继续沿用本文“范围与复现”的本地材料约定。
+
+### E-005
+
+- title: `03/83` 与 `03/82` 应答关联的离线实现及测试
+- observed_at: 2026-09-09
+- source_type: file
+- source_ref: `src/gvs_call_ack.c`、`tests/test_gvs_call_ack.c`
+- content_hash: `src/gvs_call_ack.c` sha256 `5c973045ab9fcb1ea9d50435df6e5c66442ce2f64150648471a5dd77a88a12a6`；`tests/test_gvs_call_ack.c` sha256 `4f9be05bb8e65ecfed023d253063bae749ef827c71d48f3ba99e0cc59e002cb1`
+- artifact_path: `src/gvs_call_ack.c`、`tests/test_gvs_call_ack.c`
+- repro_command: `make test`
+- raw_excerpt: 94 个测试入口覆盖完整公共头解析、方向与代次校验、接听端口关联、挂断零载荷应答、确认、过期和取消。
+- linked_workitem: M3
+- supersedes: none
+
+### F-004
+
+- title: 接听与挂断应答可在离线状态中关联到单个已发送命令
+- severity: n/a_re
+- category: reverse_algo
+- status: candidate
+- evidence_ids: [E-004, E-005]
+- location: `src/gvs_call_ack.c`
+- impact: Doorfast 能区分模拟发送完成、收到匹配协议应答、等待过期及会话失效；该结果尚不证明真实设备接受请求。
+- confidence: high（静态布局与离线行为），low（实机互操作）
+- repro_steps: 运行 `make test`，检查匹配 `03/83`/`03/82` 进入 CONFIRMED，错误方向和迟到帧保持未确认。
+- remediation: 下一阶段按“确认器先观察、会话状态机后处理”的顺序接入被动运行时，再做隔离虚拟机回归。
+- optional_attack: n/a
+
+### P-003
+
+- title: 模拟发送完成到协议应答确认
+- path_type: callflow
+- start: 离线调度器处于 SENT，持有接听或挂断命令快照
+- goal: 将匹配的完整 GVS 应答标记为 CONFIRMED
+- steps:
+  1. 建立有限确认窗口并核对会话代次和地址。evidence: E-005 — finding: F-004。
+  2. 解析完整 42 字节公共头及载荷长度。evidence: E-005 — finding: F-004。
+  3. 按动作核对 `03/83` 七字节端口字段或 `03/82` 零载荷，并进入确认终态。evidence: E-004、E-005 — finding: F-004。
+- residual_risks: 确认窗口策略、末字节精确语义、运行时处理顺序和实机接受性仍需验证；本阶段不发送网络报文，也不转换会话状态。
+
+时间线补记：2026-09-09 新增离线应答关联器及完整报文入口，包版本升至 r12。报告继续使用 `flavor=null`。
