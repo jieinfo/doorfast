@@ -1,4 +1,6 @@
 #include <string.h>
+#include <stdlib.h>
+#include "deployment_health.h"
 
 #include "deployment_snapshot.h"
 #include "test.h"
@@ -11,7 +13,8 @@ static struct df_deployment_config confirmed_config(void) {
         " option bridge 'br-door'\n"
         " option upstream 'door-up'\n"
         " option downstream 'door-down'\n"
-        " option management 'br-lan'\n";
+        " option management 'br-lan'\n"
+        " option observation 'door-up'\n";
     memset(&config, 0, sizeof(config));
     (void)df_deployment_config_parse(text, &config);
     return config;
@@ -19,6 +22,7 @@ static struct df_deployment_config confirmed_config(void) {
 
 static void set_bridge(struct df_deployment_config *config, const char *bridge) {
     (void)snprintf(config->bridge, sizeof(config->bridge), "%s", bridge);
+    (void)snprintf(config->observation, sizeof(config->observation), "%s", bridge);
 }
 
 void test_deployment_snapshot_reads_safe_fixture(void) {
@@ -51,6 +55,22 @@ void test_deployment_snapshot_reads_safe_fixture(void) {
     TEST_ASSERT_INT_EQ(DF_OK,
         df_deployment_preflight_evaluate(&config, &snapshot, &report));
     TEST_ASSERT_INT_EQ(1, report.safe);
+    char root[4096];
+    struct df_deployment_health health;
+    TEST_ASSERT_INT_EQ(1, realpath("tests/fixtures/deployment-root", root) != NULL);
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_health_collect(&config, root, &health));
+    TEST_ASSERT_INT_EQ(1, health.configured);
+    TEST_ASSERT_INT_EQ(1, health.upstream.present);
+    TEST_ASSERT_INT_EQ(0, health.upstream.carrier_known);
+    TEST_ASSERT_INT_EQ(0, health.upstream.counters_known);
+    TEST_ASSERT_INT_EQ(0, strcmp(health.upstream.name, "door-up"));
+    TEST_ASSERT_INT_EQ(1, health.management.carrier_known);
+    TEST_ASSERT_INT_EQ(1, health.management.carrier);
+    TEST_ASSERT_INT_EQ(1, health.management.counters_known);
+    TEST_ASSERT_INT_EQ(1, health.management.rx_packets == UINT64_C(9007199254740993));
+    TEST_ASSERT_INT_EQ(1, health.recorder_present);
+    TEST_ASSERT_INT_EQ(0, strcmp(health.recorder_state, "space_guard"));
+    TEST_ASSERT_INT_EQ(1, health.reserve_bytes == UINT64_C(6442450944));
 }
 
 void test_deployment_snapshot_exposes_unsafe_evidence(void) {
@@ -109,7 +129,12 @@ void test_deployment_snapshot_treats_missing_evidence_as_unsafe(void) {
     TEST_ASSERT_INT_EQ(0, memcmp(&before, &snapshot, sizeof(snapshot)));
     config = confirmed_config();
     strcpy(config.upstream, "not-ethernet");
+    strcpy(config.observation, "not-ethernet");
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
         &config, "tests/fixtures/deployment-root", &snapshot));
     TEST_ASSERT_INT_EQ(0, snapshot.upstream_exists);
+    const char disabled[] = "config inline 'main'\n option enabled '0'\n";
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_config_parse(disabled, &config));
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
+        &config, "tests/fixtures/deployment-root", &snapshot));
 }

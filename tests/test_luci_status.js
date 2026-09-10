@@ -98,3 +98,17 @@ assert.equal(JSON.stringify(model.formatStatus(payload)).includes('secretkey'),
              false);
 assert.equal(JSON.stringify(model.formatStatus(payload)).includes('synthetic'),
              false);
+const deployment = {schema_version: 1, configured: true, preflight_safe: false,
+    passive_only: true, upstream: {name: 'up', present: true, carrier: true},
+    downstream: {name: 'down', present: true},
+    management: {name: 'mgmt', present: true, carrier: false},
+    recorder: {present: true, state: 'space_guard'}};
+assert.deepEqual(model.formatStatus({...payload, deployment}).at(-1), {
+    title: '串联部署', rows: [
+        ['部署配置', '已启用'], ['部署预检', '未通过'], ['被动模式', '是'],
+        ['门禁上联', 'up：已连接'], ['室内机下联', 'down：链路未知'],
+        ['管理接口', 'mgmt：未连接'], ['证据记录器', '磁盘余量保护']
+    ]
+});
+deployment.recorder.state = 'stale';
+assert.equal(model.formatStatus({...payload, deployment}).at(-1).rows.at(-1)[1], '陈旧');

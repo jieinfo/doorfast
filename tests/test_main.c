@@ -57,6 +57,11 @@ void test_deployment_preflight_evaluates_snapshot(void);
 void test_deployment_snapshot_reads_safe_fixture(void);
 void test_deployment_snapshot_exposes_unsafe_evidence(void);
 void test_deployment_snapshot_treats_missing_evidence_as_unsafe(void);
+void test_pcap_ring_rotates_and_recovers_oldest_slot(void);
+void test_gvs_udp_prefix_handles_vlan_and_truncation(void);
+void test_evidence_classifier_separates_recent_and_control(void);
+void test_evidence_log_preserves_fixed_fields_and_rotates(void);
+void test_evidence_recorder_guards_and_classifies(void);
 void test_deployment_config_rejects_unsafe_profile(void);
 void test_deployment_config_rejects_ambiguous_input(void);
 
@@ -97,6 +102,7 @@ void test_policy_decisions(void);
 void test_session_rejects_different_call_id(void);
 void test_default_capture_filter(void);
 void test_capture_next_rejects_invalid_arguments(void);
+void test_capture_record_preserves_timestamp_and_wire_length(void);
 void test_capture_retry_is_bounded_and_resets_after_recovery(void);
 void test_gvs_deadline_expires_without_another_packet(void);
 void test_gvs_deadline_does_not_end_a_new_generation(void);
@@ -118,7 +124,7 @@ void test_gvs_call_runtime_swallows_wrong_answer(void);
 void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 int test_suite_count(void) {
-    return 105;
+    return 111;
 }
 
 int main(void) {
@@ -127,7 +133,12 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(105, test_suite_count());
+    TEST_ASSERT_INT_EQ(111, test_suite_count());
+    test_evidence_recorder_guards_and_classifies();
+    test_evidence_log_preserves_fixed_fields_and_rotates();
+    test_gvs_udp_prefix_handles_vlan_and_truncation();
+    test_evidence_classifier_separates_recent_and_control();
+    test_pcap_ring_rotates_and_recovers_oldest_slot();
     test_deployment_snapshot_reads_safe_fixture();
     test_deployment_snapshot_exposes_unsafe_evidence();
     test_deployment_snapshot_treats_missing_evidence_as_unsafe();
@@ -219,6 +230,7 @@ int main(void) {
     test_session_rejects_different_call_id();
     test_default_capture_filter();
     test_capture_next_rejects_invalid_arguments();
+    test_capture_record_preserves_timestamp_and_wire_length();
     test_capture_retry_is_bounded_and_resets_after_recovery();
     test_gvs_deadline_expires_without_another_packet();
     test_gvs_deadline_does_not_end_a_new_generation();

@@ -101,7 +101,7 @@ function formatStatus(payload) {
     if (typeof root.running !== 'boolean' || root.mode !== 'passive')
         throw new TypeError('invalid service status');
 
-    return [
+    var sections = [
         {
             title: '服务',
             rows: [
@@ -147,6 +147,28 @@ function formatStatus(payload) {
             ]
         }
     ];
+    if (root.deployment && root.deployment.schema_version === 1) {
+        var deployment = root.deployment;
+        var rows = [['部署配置', deployment.configured === true ? '已启用' : '未启用或不可读取']];
+        if (deployment.configured === true) {
+            rows.push(['部署预检', deployment.preflight_safe === true ? '通过' : '未通过']);
+            rows.push(['被动模式', deployment.passive_only === true ? '是' : '未确认']);
+            ['upstream', 'downstream', 'management'].forEach(function(key, index) {
+                var link = deployment[key] || {};
+                var state = link.present !== true ? '不存在' :
+                    typeof link.carrier !== 'boolean' ? '链路未知' : link.carrier ? '已连接' : '未连接';
+                rows.push([['门禁上联', '室内机下联', '管理接口'][index],
+                    (typeof link.name === 'string' ? link.name : '') + '：' + state]);
+            });
+            var recorder = deployment.recorder || {};
+            var labels = {recording: '记录中', space_guard: '磁盘余量保护',
+                io_error: '读写错误', stopped: '已停止', stale: '陈旧'};
+            rows.push(['证据记录器', recorder.present === true ?
+                (labels[recorder.state] || '未知') : '状态不可用']);
+        }
+        sections.push({title: '串联部署', rows: rows});
+    }
+    return sections;
 }
 
 var statusModel = {

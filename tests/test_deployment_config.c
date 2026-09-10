@@ -34,12 +34,15 @@ void test_deployment_config_parses_valid_profile(void) {
     TEST_ASSERT_INT_EQ(0, strcmp("door-up", config.upstream));
     TEST_ASSERT_INT_EQ(0, strcmp("door-down", config.downstream));
     TEST_ASSERT_INT_EQ(0, strcmp("br-lan", config.management));
+    TEST_ASSERT_INT_EQ(0, strcmp("door-up", config.observation));
     TEST_ASSERT_INT_EQ(0, strcmp("/mnt/doorfast", config.evidence_root));
     TEST_ASSERT_INT_EQ(14336, (int)config.recent_budget_mib);
     TEST_ASSERT_INT_EQ(8192, (int)config.control_budget_mib);
     TEST_ASSERT_INT_EQ(1024, (int)config.log_budget_mib);
     TEST_ASSERT_INT_EQ(6144, (int)config.reserve_mib);
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_config_validate(&config));
+    strcpy(config.observation, "br-lan");
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_deployment_config_validate(&config));
 }
 
 void test_deployment_config_rejects_unsafe_profile(void) {

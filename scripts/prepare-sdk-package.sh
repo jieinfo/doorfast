@@ -13,3 +13,5 @@ mkdir -p "$sdk_dir/package"
 cp -R "$repo_dir/package/doorfast" "$doorfast_destination"
 cp -R "$repo_dir/package/luci-app-doorfast" "$luci_destination"
 cp -R "$repo_dir/src" "$doorfast_destination/src"
+cp "$repo_dir/scripts/doorfast-site-inventory.sh" \
+    "$doorfast_destination/files/doorfast-site-inventory.impl.sh"

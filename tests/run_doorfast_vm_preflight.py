@@ -35,6 +35,8 @@ def state():
     volatile = {
         "packets", "bytes", "expires", "used", "age",
         "valid_life_time", "preferred_life_time", "cacheinfo",
+        "gc_timer", "hello_timer", "tcn_timer", "topology_change_timer",
+        "forward_delay_timer", "hold_timer", "message_age_timer",
     }
 
     def stable(value):
@@ -60,6 +62,7 @@ deployment = """config inline 'main'
  option bridge 'br-door'
  option upstream 'door-up'
  option downstream 'door-down'
+ option observation 'door-up'
  option management 'br-lan'
  option evidence_root '/mnt/doorfast'
  option recent_budget_mib '14336'

@@ -11,6 +11,7 @@ struct df_deployment_config {
     char upstream[DF_DEPLOYMENT_IFNAME_MAX];
     char downstream[DF_DEPLOYMENT_IFNAME_MAX];
     char management[DF_DEPLOYMENT_IFNAME_MAX];
+    char observation[DF_DEPLOYMENT_IFNAME_MAX];
     char evidence_root[DF_DEPLOYMENT_PATH_MAX];
     uint32_t recent_budget_mib, control_budget_mib, log_budget_mib, reserve_mib;
 };

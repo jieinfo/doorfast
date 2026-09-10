@@ -3,6 +3,12 @@ set -eu
 
 test -f package/doorfast/Makefile
 test -f package/doorfast/files/doorfast.init
+test -f package/doorfast/files/doorfast-recorder.init
+test -f package/doorfast/files/doorfast-site-inventory.sh
+grep -q 'doorfast-site-inventory.*usr/libexec/doorfast' package/doorfast/Makefile
+grep -q 'doorfast-site-inventory.impl.sh' scripts/prepare-sdk-package.sh
+grep -q 'doorfast-recorder.*usr/sbin/doorfast-recorder' package/doorfast/Makefile
+! grep -q 'respawn' package/doorfast/files/doorfast-recorder.init
 test -f package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-sync.config
 test -f package/doorfast/files/doorfast-deployment.config
@@ -30,6 +36,7 @@ node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/sta
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
 grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/workflows/build-apk.yml
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
+grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
 grep -q 'doorfast-\*.apk' .github/workflows/build-apk.yml
 ! grep -q 'bin/packages/\*\*/\*.apk' .github/workflows/build-apk.yml
 grep -q 'config_load doorfast' package/doorfast/files/doorfast.init
@@ -49,6 +56,7 @@ grep -F "config inline 'main'" package/doorfast/files/doorfast-deployment.config
 grep -F "option enabled '0'" package/doorfast/files/doorfast-deployment.config
 grep -F "option recording_enabled '0'" package/doorfast/files/doorfast-deployment.config
 grep -F "option evidence_root '/mnt/doorfast'" package/doorfast/files/doorfast-deployment.config
+grep -F "option observation ''" package/doorfast/files/doorfast-deployment.config
 grep -F "option reserve_mib '6144'" package/doorfast/files/doorfast-deployment.config
 ! grep -q -- '--preflight' package/doorfast/files/doorfast.init
 grep -q 'define Package/doorfast/postinst' package/doorfast/Makefile

@@ -26,6 +26,10 @@ int df_deployment_config_validate(const struct df_deployment_config *c) {
         for (size_t j = 0; j < i; ++j)
             if (names[i][0] && !strcmp(names[i], names[j])) return DF_ERR_INVALID;
     }
+    if (!valid_name(c->observation) || (c->enabled && !c->observation[0]) ||
+        (c->observation[0] && strcmp(c->observation, c->bridge) &&
+         strcmp(c->observation, c->upstream) &&
+         strcmp(c->observation, c->downstream))) return DF_ERR_INVALID;
     return DF_OK;
 }
 
@@ -53,7 +57,7 @@ static int token(const char **p, char *out, size_t size) {
 int df_deployment_config_parse(const char *input, struct df_deployment_config *out) {
     static const char *keys[] = {"enabled", "recording_enabled", "bridge", "upstream",
         "downstream", "management", "evidence_root", "recent_budget_mib",
-        "control_budget_mib", "log_budget_mib", "reserve_mib"};
+        "control_budget_mib", "log_budget_mib", "reserve_mib", "observation"};
     struct df_deployment_config c = {.evidence_root = "/mnt/doorfast",
         .recent_budget_mib = 14336, .control_budget_mib = 8192,
         .log_budget_mib = 1024, .reserve_mib = 6144};
@@ -93,7 +97,7 @@ int df_deployment_config_parse(const char *input, struct df_deployment_config *o
             size_t limit = k == 6 ? sizeof(c.evidence_root) : sizeof(c.bridge);
             if (strlen(value) >= limit) return DF_ERR_INVALID;
             strcpy(dest[k - 2], value);
-        } else {
+        } else if (k < 11) {
             uint32_t number = 0;
             uint32_t *dest[] = {&c.recent_budget_mib, &c.control_budget_mib,
                 &c.log_budget_mib, &c.reserve_mib};
@@ -105,8 +109,12 @@ int df_deployment_config_parse(const char *input, struct df_deployment_config *o
                 number = number * 10 + digit;
             }
             *dest[k - 7] = number;
+        } else {
+            if (strlen(value) >= sizeof(c.observation)) return DF_ERR_INVALID;
+            strcpy(c.observation, value);
         }
     }
+    if (c.enabled && !(seen & (1U << 11))) return DF_ERR_INVALID;
     if (!section || df_deployment_config_validate(&c)) return DF_ERR_INVALID;
     *out = c;
     return DF_OK;

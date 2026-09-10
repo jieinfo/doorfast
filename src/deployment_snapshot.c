@@ -121,6 +121,8 @@ static int df_token_match(const char *text, const char *token) {
     size_t length = strlen(token);
     const char *match = text;
 
+    if (length == 0) return 0;
+
     while ((match = strstr(match, token)) != NULL) {
         unsigned char before = match == text ? 0 : (unsigned char)match[-1];
         unsigned char after = (unsigned char)match[length];

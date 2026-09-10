@@ -290,6 +290,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     (void)printf("doorfast: observing interface=%s mode=passive\n",
                  runtime->config.gvs_interface);
     while (!df_runtime_stopping) {
+        struct df_capture_record capture_record;
         const uint8_t *packet = NULL;
         const uint8_t *payload = NULL;
         size_t packet_length = 0;
@@ -298,7 +299,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         bool timed_out = false;
         size_t expired_replies = 0;
         struct df_gvs_send_trace send_trace;
-        int captured = df_capture_next(capture, &packet, &packet_length);
+        int captured = df_capture_next_record(capture, &capture_record);
+
+        if (captured == DF_CAPTURE_PACKET) {
+            packet = capture_record.data;
+            packet_length = capture_record.captured_length;
+        }
 
         now_ms = df_monotonic_ms();
         if (df_gvs_reply_queue_expire(&reply_queue, now_ms,

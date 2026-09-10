@@ -28,9 +28,20 @@ TEST_SOURCES += tests/test_gvs_call_control.c src/gvs_call_control.c
 TEST_SOURCES += tests/test_deployment_config.c src/deployment_config.c
 TEST_SOURCES += tests/test_deployment_preflight.c src/deployment_preflight.c
 TEST_SOURCES += tests/test_deployment_snapshot.c src/deployment_snapshot.c
+TEST_SOURCES += tests/test_pcap_ring.c src/pcap_ring.c
+TEST_SOURCES += tests/test_gvs_packet.c tests/test_evidence_classifier.c src/evidence_classifier.c
+TEST_SOURCES += tests/test_evidence_log.c src/evidence_log.c
+TEST_SOURCES += src/evidence_metadata.c
+TEST_SOURCES += src/deployment_health.c
+DAEMON_SOURCES += src/deployment_health.c
+TEST_SOURCES += tests/test_evidence_recorder.c src/evidence_recorder.c
+build/doorfast-tests: src/evidence_recorder.h
+build/doorfast-tests: src/evidence_classifier.h
+build/doorfast-tests: src/evidence_log.h
 DAEMON_SOURCES += src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/deployment_report.c
 build/doorfast-tests: src/deployment_preflight.h
 build/doorfast-tests: src/deployment_snapshot.h
+build/doorfast-tests: src/pcap_ring.h
 build/doorfast: src/deployment_config.h src/deployment_preflight.h src/deployment_snapshot.h src/deployment_report.h
 DAEMON_SOURCES += src/gvs_call_runtime.c
 DAEMON_SOURCES += src/gvs_call_control.c
@@ -42,6 +53,13 @@ DAEMON_SOURCES += src/gvs_call_dispatch.c
 build/doorfast-tests build/doorfast: src/gvs_call_dispatch.h
 
 .PHONY: test doorfast peer-sim peer-udp-inject clean
+
+RECORDER_SOURCES := src/recorder_main.c src/evidence_recorder.c src/pcap_ring.c src/evidence_classifier.c src/capture.c src/gvs_packet.c src/gvs_frame.c src/event.c src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/runtime_config.c src/config.c src/gvs_identity.c
+recorder: build/doorfast-recorder
+RECORDER_SOURCES += src/recorder_selftest.c
+RECORDER_SOURCES += src/evidence_metadata.c src/evidence_log.c
+build/doorfast-recorder: $(RECORDER_SOURCES) | build
+	$(CC) $(CPPFLAGS) -DDF_RECORDER_PROGRAM $(CFLAGS) $(RECORDER_SOURCES) -o $@ $(PCAP_LIBS)
 
 test: build/doorfast-tests
 
