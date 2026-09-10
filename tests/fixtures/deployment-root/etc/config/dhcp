@@ -1,0 +1,3 @@
+config dhcp 'unsafe_fixture'
+	option interface 'br-dhcp'
+	option ra 'server'
