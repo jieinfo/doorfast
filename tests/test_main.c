@@ -53,6 +53,7 @@ void test_gvs_peer_sim_takes_over_after_two_missed_periods(void);
 void test_gvs_peer_sim_routes_calls_by_apartment_scope(void);
 void test_gvs_peer_sim_rejects_malformed_and_non_call_frames(void);
 void test_deployment_config_parses_valid_profile(void);
+void test_deployment_preflight_evaluates_snapshot(void);
 void test_deployment_config_rejects_unsafe_profile(void);
 void test_deployment_config_rejects_ambiguous_input(void);
 
@@ -114,7 +115,7 @@ void test_gvs_call_runtime_swallows_wrong_answer(void);
 void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 int test_suite_count(void) {
-    return 101;
+    return 102;
 }
 
 int main(void) {
@@ -123,7 +124,8 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(101, test_suite_count());
+    TEST_ASSERT_INT_EQ(102, test_suite_count());
+    test_deployment_preflight_evaluates_snapshot();
     test_deployment_config_parses_valid_profile();
     test_deployment_config_rejects_unsafe_profile();
     test_deployment_config_rejects_ambiguous_input();
