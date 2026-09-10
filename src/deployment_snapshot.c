@@ -1,4 +1,5 @@
 #include "deployment_snapshot.h"
+#include "runtime_config.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -175,26 +176,11 @@ static int df_read_config(const char *root, const char *name,
 
 static bool df_read_passive(const char *root) {
     char text[DF_SNAPSHOT_FILE_MAX];
-    const char *line;
-    unsigned matches = 0;
-    bool passive = false;
+    struct df_runtime_config runtime;
 
     if (df_read_config(root, "doorfast", text, sizeof(text)) != DF_OK) return false;
-    line = text;
-    while (*line) {
-        size_t length = strcspn(line, "\n");
-        char copy[512], name[64], value[64], quote;
-        if (length >= sizeof(copy)) return false;
-        memcpy(copy, line, length); copy[length] = '\0';
-        if (sscanf(copy, " option %63s %c%63[^'\"]", name, &quote, value) == 3 &&
-            strcmp(name, "passive_only") == 0 && (quote == '\'' || quote == '"')) {
-            matches++;
-            passive = value[0] == '1' && value[1] == '\0';
-        }
-        line += length;
-        if (*line == '\n') line++;
-    }
-    return matches == 1 && passive;
+    return df_runtime_config_parse(text, &runtime) == DF_OK &&
+           runtime.config.passive_only;
 }
 
 static void df_collect_addresses(const struct df_deployment_config *config,
