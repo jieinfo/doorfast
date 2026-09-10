@@ -23,9 +23,9 @@ endef
 
 define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -std=c17 -Wall -Wextra -Werror -pedantic \
-		-I$(PKG_BUILD_DIR)/src $(filter-out $(PKG_BUILD_DIR)/src/recorder_main.c,$(wildcard $(PKG_BUILD_DIR)/src/*.c)) -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
-	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -std=c17 -Wall -Wextra -Werror -pedantic \
-		-I$(PKG_BUILD_DIR)/src $(filter-out $(PKG_BUILD_DIR)/src/main.c,$(wildcard $(PKG_BUILD_DIR)/src/*.c)) -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-recorder
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -DDF_RECORDER_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-recorder
 endef
 
 define Package/doorfast/install

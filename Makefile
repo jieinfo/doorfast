@@ -31,6 +31,9 @@ TEST_SOURCES += tests/test_deployment_snapshot.c src/deployment_snapshot.c
 TEST_SOURCES += tests/test_pcap_ring.c src/pcap_ring.c
 TEST_SOURCES += tests/test_gvs_packet.c tests/test_evidence_classifier.c src/evidence_classifier.c
 TEST_SOURCES += tests/test_evidence_log.c src/evidence_log.c
+TEST_SOURCES += src/evidence_metadata.c
+TEST_SOURCES += src/deployment_health.c
+DAEMON_SOURCES += src/deployment_health.c
 TEST_SOURCES += tests/test_evidence_recorder.c src/evidence_recorder.c
 build/doorfast-tests: src/evidence_recorder.h
 build/doorfast-tests: src/evidence_classifier.h
@@ -56,7 +59,7 @@ recorder: build/doorfast-recorder
 RECORDER_SOURCES += src/recorder_selftest.c
 RECORDER_SOURCES += src/evidence_metadata.c src/evidence_log.c
 build/doorfast-recorder: $(RECORDER_SOURCES) | build
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(RECORDER_SOURCES) -o $@ $(PCAP_LIBS)
+	$(CC) $(CPPFLAGS) -DDF_RECORDER_PROGRAM $(CFLAGS) $(RECORDER_SOURCES) -o $@ $(PCAP_LIBS)
 
 test: build/doorfast-tests
 

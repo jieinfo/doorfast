@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include "evidence_log.h"
+#include "evidence_metadata.h"
 #include "test.h"
 
 void test_evidence_log_preserves_fixed_fields_and_rotates(void) {
@@ -46,6 +47,28 @@ void test_evidence_log_preserves_fixed_fields_and_rotates(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_evidence_log_status(&log, &status));
     TEST_ASSERT_INT_EQ(2, (int)status.completed_segments);
     TEST_ASSERT_INT_EQ(0, (int)status.active_slot);
+    TEST_ASSERT_INT_EQ(DF_OK, df_evidence_log_close(&log));
+    TEST_ASSERT_INT_EQ(DF_OK, df_evidence_log_open(&log, &config));
+    uint8_t packet[84] = {0};
+    packet[12] = 8; packet[14] = 0x45; packet[17] = 70; packet[23] = 17;
+    packet[26] = 192; packet[28] = 2; packet[29] = 10;
+    packet[34] = 0x20; packet[35] = 0x6c; packet[39] = 50;
+    memcpy(packet + 42, "GVSGVS\xa5\xa5\xa5\xa5", 10);
+    memset(packet + 64, 0xff, 16);
+    packet[80] = 3; packet[81] = 1;
+    const struct df_capture_record captured = {.data = packet,
+        .captured_length = sizeof(packet), .original_length = sizeof(packet)};
+    TEST_ASSERT_INT_EQ(DF_OK, df_evidence_metadata_append(&log, &captured, "br-door", 42));
+    TEST_ASSERT_INT_EQ(DF_OK, df_evidence_log_status(&log, &status));
+    snprintf(path, sizeof(path), "%s/events-%03u.partial", directory, status.active_slot);
+    file = fopen(path, "rb");
+    TEST_ASSERT_INT_EQ(1, file != NULL);
+    length = file ? fread(contents, 1, sizeof(contents) - 1, file) : 0;
+    if (file) fclose(file);
+    contents[length] = 0;
+    TEST_ASSERT_INT_EQ(1, strstr(contents, "\"source_ip\":\"192.0.2.10\"") != NULL);
+    TEST_ASSERT_INT_EQ(1, strstr(contents, "\"family\":3") != NULL);
+    TEST_ASSERT_INT_EQ(1, strstr(contents, "ffffffff") == NULL);
     TEST_ASSERT_INT_EQ(DF_OK, df_evidence_log_close(&log));
     for (int slot = 0; slot < 2; ++slot) {
         struct stat metadata;

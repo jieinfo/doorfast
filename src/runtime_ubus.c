@@ -1,4 +1,5 @@
 #include "runtime_ubus.h"
+#include "deployment_health.h"
 
 #include <string.h>
 
@@ -20,6 +21,49 @@ struct df_runtime_ubus_platform {
     struct df_runtime_ubus *owner;
     bool connected;
 };
+
+static void df_ubus_link_health(struct blob_buf *b, const char *key,
+    const struct df_link_health *link) {
+    void *table = blobmsg_open_table(b, key);
+    blobmsg_add_string(b, "name", link->name);
+    blobmsg_add_u8(b, "present", link->present);
+    if (link->carrier_known) blobmsg_add_u8(b, "carrier", link->carrier);
+    if (link->counters_known) {
+        blobmsg_add_u64(b, "rx_packets", link->rx_packets);
+        blobmsg_add_u64(b, "tx_packets", link->tx_packets);
+        blobmsg_add_u64(b, "rx_dropped", link->rx_dropped);
+        blobmsg_add_u64(b, "tx_dropped", link->tx_dropped);
+        blobmsg_add_u64(b, "rx_errors", link->rx_errors);
+        blobmsg_add_u64(b, "tx_errors", link->tx_errors);
+    }
+    blobmsg_close_table(b, table);
+}
+static void df_ubus_deployment_health(struct blob_buf *b) {
+    struct df_deployment_health h = {0};
+    (void)df_deployment_health_load(&h);
+    void *table = blobmsg_open_table(b, "deployment");
+    blobmsg_add_u32(b, "schema_version", 1);
+    blobmsg_add_u8(b, "configured", h.configured);
+    if (h.configured) {
+        blobmsg_add_u8(b, "preflight_safe", h.preflight_safe);
+        blobmsg_add_u8(b, "passive_only", h.passive_only);
+        blobmsg_add_string(b, "observation_interface", h.observation_interface);
+        df_ubus_link_health(b, "upstream", &h.upstream);
+        df_ubus_link_health(b, "downstream", &h.downstream);
+        df_ubus_link_health(b, "management", &h.management);
+        void *recorder = blobmsg_open_table(b, "recorder");
+        blobmsg_add_u8(b, "present", h.recorder_present);
+        if (h.recorder_present) {
+            blobmsg_add_string(b, "state", h.recorder_state);
+            blobmsg_add_u64(b, "recent_bytes", h.recent_bytes);
+            blobmsg_add_u64(b, "control_bytes", h.control_bytes);
+            blobmsg_add_u64(b, "available_bytes", h.available_bytes);
+            blobmsg_add_u64(b, "reserve_bytes", h.reserve_bytes);
+        }
+        blobmsg_close_table(b, recorder);
+    }
+    blobmsg_close_table(b, table);
+}
 
 static int df_runtime_ubus_status_handler(
     struct ubus_context *context, struct ubus_object *object,
@@ -96,6 +140,7 @@ static int df_runtime_ubus_status_handler(
         df_gvs_call_ack_state_name(call_status.acknowledgement_state));
     blobmsg_add_u32(&platform->response, "attempts", call_status.attempts);
     blobmsg_close_table(&platform->response, call_table);
+    df_ubus_deployment_health(&platform->response);
     result = ubus_send_reply(context, request, platform->response.head);
     blob_buf_free(&platform->response);
     return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;

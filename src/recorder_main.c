@@ -14,6 +14,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef DF_RECORDER_PROGRAM
+
 static volatile sig_atomic_t stopping;
 static void stop_recording(int signal_number) { (void)signal_number; stopping = 1; }
 static int available_space(void *context, uint64_t *bytes) {
@@ -165,3 +167,4 @@ done:
     if (lock >= 0) close(lock);
     return result;
 }
+#endif

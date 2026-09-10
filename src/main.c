@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef DF_RECORDER_PROGRAM
+
 #define DF_MAX_LEGACY_CONFIG_BYTES 65536
 
 static void df_print_usage(FILE *stream) {
@@ -178,3 +180,4 @@ int main(int argc, char **argv) {
     df_print_usage(stderr);
     return 2;
 }
+#endif

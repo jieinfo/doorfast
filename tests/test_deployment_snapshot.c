@@ -1,4 +1,6 @@
 #include <string.h>
+#include <stdlib.h>
+#include "deployment_health.h"
 
 #include "deployment_snapshot.h"
 #include "test.h"
@@ -51,6 +53,22 @@ void test_deployment_snapshot_reads_safe_fixture(void) {
     TEST_ASSERT_INT_EQ(DF_OK,
         df_deployment_preflight_evaluate(&config, &snapshot, &report));
     TEST_ASSERT_INT_EQ(1, report.safe);
+    char root[4096];
+    struct df_deployment_health health;
+    TEST_ASSERT_INT_EQ(1, realpath("tests/fixtures/deployment-root", root) != NULL);
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_health_collect(&config, root, &health));
+    TEST_ASSERT_INT_EQ(1, health.configured);
+    TEST_ASSERT_INT_EQ(1, health.upstream.present);
+    TEST_ASSERT_INT_EQ(0, health.upstream.carrier_known);
+    TEST_ASSERT_INT_EQ(0, health.upstream.counters_known);
+    TEST_ASSERT_INT_EQ(0, strcmp(health.upstream.name, "door-up"));
+    TEST_ASSERT_INT_EQ(1, health.management.carrier_known);
+    TEST_ASSERT_INT_EQ(1, health.management.carrier);
+    TEST_ASSERT_INT_EQ(1, health.management.counters_known);
+    TEST_ASSERT_INT_EQ(1, health.management.rx_packets == UINT64_C(9007199254740993));
+    TEST_ASSERT_INT_EQ(1, health.recorder_present);
+    TEST_ASSERT_INT_EQ(0, strcmp(health.recorder_state, "space_guard"));
+    TEST_ASSERT_INT_EQ(1, health.reserve_bytes == UINT64_C(6442450944));
 }
 
 void test_deployment_snapshot_exposes_unsafe_evidence(void) {
