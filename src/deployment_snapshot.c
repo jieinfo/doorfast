@@ -153,9 +153,10 @@ static int df_network_interface_reference(
         copy[length] = '\0';
         const char *p = copy;
         while (isspace((unsigned char)*p)) p++;
-        if (strncmp(p, "config ", 7) == 0)
+        if (strncmp(p, "config ", 7) == 0) {
             in_interface = df_token_match(p + 7, "interface");
-        else if (in_interface && df_references_role(p, config))
+            if (in_interface && df_references_role(p + 7, config)) return 1;
+        } else if (in_interface && df_references_role(p, config))
             return 1;
         line += length;
         if (*line == '\n') line++;

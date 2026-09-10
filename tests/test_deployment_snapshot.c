@@ -69,6 +69,10 @@ void test_deployment_snapshot_exposes_unsafe_evidence(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
         &config, "tests/fixtures/deployment-root", &snapshot));
     TEST_ASSERT_INT_EQ(1, snapshot.dhcp_ra_reference);
+    set_bridge(&config, "br-managed");
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
+        &config, "tests/fixtures/deployment-root", &snapshot));
+    TEST_ASSERT_INT_EQ(1, snapshot.network_interface_reference);
     set_bridge(&config, "br-door");
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
         &config, "tests/fixtures/deployment-root-tmpfs", &snapshot));

@@ -7,3 +7,6 @@ config device 'door_bridge'
 config interface 'lan'
 	option device 'br-lan'
 	option proto 'static'
+
+config interface 'br-managed'
+	option proto 'none'
