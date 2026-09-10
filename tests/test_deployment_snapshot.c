@@ -21,6 +21,7 @@ static struct df_deployment_config confirmed_config(void) {
 
 static void set_bridge(struct df_deployment_config *config, const char *bridge) {
     (void)snprintf(config->bridge, sizeof(config->bridge), "%s", bridge);
+    (void)snprintf(config->observation, sizeof(config->observation), "%s", bridge);
 }
 
 void test_deployment_snapshot_reads_safe_fixture(void) {

@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
         df_evidence_recorder_init(&recorder, &recent, &control,
             (uint64_t)config.reserve_mib * 1024 * 1024,
             available_space, config.evidence_root) ||
-        df_capture_open(config.bridge, true, &capture) ||
+        df_capture_open(config.observation, true, &capture) ||
         df_capture_set_filter(capture, df_capture_default_filter())) goto done;
     signal(SIGTERM, stop_recording); signal(SIGINT, stop_recording);
     if (available_space(config.evidence_root, &recorder.available_bytes) ||
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
             if (free_bytes < recorder.reserve_bytes ||
                 free_bytes - recorder.reserve_bytes < 4096) {
                 recorder.state = DF_RECORDER_SPACE_GUARD;
-            } else if (df_evidence_metadata_append(&log, &packet, config.bridge,
+            } else if (df_evidence_metadata_append(&log, &packet, config.observation,
                 (uint64_t)monotonic.tv_sec * 1000 + (uint64_t)monotonic.tv_nsec / 1000000)) {
                 result = 1; break;
             }

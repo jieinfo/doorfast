@@ -109,7 +109,7 @@ int df_deployment_health_collect(const struct df_deployment_config *config,
     if (!config->enabled) return DF_OK;
     out->configured = true;
     recorder_health(root, out);
-    snprintf(out->observation_interface, sizeof(out->observation_interface), "%s", config->bridge);
+    snprintf(out->observation_interface, sizeof(out->observation_interface), "%s", config->observation);
     link_health(root, config->upstream, &out->upstream);
     link_health(root, config->downstream, &out->downstream);
     link_health(root, config->management, &out->management);

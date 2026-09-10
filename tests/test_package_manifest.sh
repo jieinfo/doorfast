@@ -52,6 +52,7 @@ grep -F "config inline 'main'" package/doorfast/files/doorfast-deployment.config
 grep -F "option enabled '0'" package/doorfast/files/doorfast-deployment.config
 grep -F "option recording_enabled '0'" package/doorfast/files/doorfast-deployment.config
 grep -F "option evidence_root '/mnt/doorfast'" package/doorfast/files/doorfast-deployment.config
+grep -F "option observation ''" package/doorfast/files/doorfast-deployment.config
 grep -F "option reserve_mib '6144'" package/doorfast/files/doorfast-deployment.config
 ! grep -q -- '--preflight' package/doorfast/files/doorfast.init
 grep -q 'define Package/doorfast/postinst' package/doorfast/Makefile

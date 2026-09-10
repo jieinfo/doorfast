@@ -35,7 +35,10 @@ APK 安装前核对 `apk --print-arch`、固件版本以及 APK 校验和。
 
 Doorfast APK 不创建网桥。现场接口名称未确认前，不提供可直接粘贴的网络修改命令。
 在 `/etc/config/doorfast-deployment` 填写核实过的接口角色。
-观察配置保持 `passive_only=1`，记录器保持 `recording_enabled=0`。
+观察配置保持 `passive_only=1`，记录器保持 `recording_enabled=0`。部署配置中的
+`observation` 必须显式选择 `br-door`、门禁上联或 MT8157 下联之一；先在隔离环境
+验证该接口确实能看到双向转发报文。虚拟机验证表明桥接口是否可见取决于系统抓包
+实现，因此不能未经验证固定为 `br-door`。
 
 执行 `doorfast --preflight /etc/config/doorfast-deployment`，必须退出 0 且返回
 `safe: true`。未通过时按具体失败项处理后重新检查。
