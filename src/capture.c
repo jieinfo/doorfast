@@ -2,6 +2,7 @@
 
 #include <pcap/pcap.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct df_capture {
     pcap_t *handle;
@@ -44,9 +45,53 @@ int df_capture_open(const char *device, bool promiscuous, struct df_capture **ca
     return DF_OK;
 }
 
-int df_capture_next(struct df_capture *capture, const uint8_t **packet, size_t *length) {
+int df_capture_open_offline(const char *path, struct df_capture **capture) {
+    char error_buffer[PCAP_ERRBUF_SIZE] = {0};
+    struct df_capture *opened;
+
+    if (path == NULL || path[0] == '\0' || capture == NULL) return DF_ERR_INVALID;
+    *capture = NULL;
+    opened = calloc(1, sizeof(*opened));
+    if (opened == NULL) return DF_ERR_IO;
+    opened->handle = pcap_open_offline(path, error_buffer);
+    if (opened->handle == NULL) {
+        free(opened);
+        return DF_ERR_IO;
+    }
+    if (pcap_datalink(opened->handle) != DLT_EN10MB) {
+        pcap_close(opened->handle);
+        free(opened);
+        return DF_ERR_INVALID;
+    }
+    *capture = opened;
+    return DF_OK;
+}
+
+int df_capture_next_record(struct df_capture *capture,
+                           struct df_capture_record *record) {
     struct pcap_pkthdr *header = NULL;
     const uint8_t *captured = NULL;
+    int result;
+
+    if (record != NULL) memset(record, 0, sizeof(*record));
+    if (capture == NULL || capture->handle == NULL || record == NULL)
+        return DF_CAPTURE_ERROR;
+    result = pcap_next_ex(capture->handle, &header, &captured);
+    if (result == 0) return DF_CAPTURE_TIMEOUT;
+    if (result != 1 || header == NULL || captured == NULL ||
+        header->caplen > header->len || header->ts.tv_sec < 0 ||
+        header->ts.tv_usec < 0 || header->ts.tv_usec > 999999)
+        return DF_CAPTURE_ERROR;
+    record->data = captured;
+    record->captured_length = header->caplen;
+    record->original_length = header->len;
+    record->wall_seconds = (uint64_t)header->ts.tv_sec;
+    record->wall_microseconds = (uint32_t)header->ts.tv_usec;
+    return DF_CAPTURE_PACKET;
+}
+
+int df_capture_next(struct df_capture *capture, const uint8_t **packet, size_t *length) {
+    struct df_capture_record record;
     int result;
 
     if (capture == NULL || capture->handle == NULL || packet == NULL || length == NULL) {
@@ -54,16 +99,11 @@ int df_capture_next(struct df_capture *capture, const uint8_t **packet, size_t *
     }
     *packet = NULL;
     *length = 0;
-    result = pcap_next_ex(capture->handle, &header, &captured);
-    if (result == 0) {
-        return DF_CAPTURE_TIMEOUT;
-    }
-    if (result != 1 || header == NULL || captured == NULL) {
-        return DF_CAPTURE_ERROR;
-    }
-    *packet = captured;
-    *length = header->caplen;
-    return DF_CAPTURE_PACKET;
+    result = df_capture_next_record(capture, &record);
+    if (result != DF_CAPTURE_PACKET) return result;
+    *packet = record.data;
+    *length = record.captured_length;
+    return result;
 }
 
 int df_capture_set_filter(struct df_capture *capture, const char *bpf) {

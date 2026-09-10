@@ -97,6 +97,7 @@ void test_policy_decisions(void);
 void test_session_rejects_different_call_id(void);
 void test_default_capture_filter(void);
 void test_capture_next_rejects_invalid_arguments(void);
+void test_capture_record_preserves_timestamp_and_wire_length(void);
 void test_capture_retry_is_bounded_and_resets_after_recovery(void);
 void test_gvs_deadline_expires_without_another_packet(void);
 void test_gvs_deadline_does_not_end_a_new_generation(void);
@@ -118,7 +119,7 @@ void test_gvs_call_runtime_swallows_wrong_answer(void);
 void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 int test_suite_count(void) {
-    return 105;
+    return 106;
 }
 
 int main(void) {
@@ -127,7 +128,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(105, test_suite_count());
+    TEST_ASSERT_INT_EQ(106, test_suite_count());
     test_deployment_snapshot_reads_safe_fixture();
     test_deployment_snapshot_exposes_unsafe_evidence();
     test_deployment_snapshot_treats_missing_evidence_as_unsafe();
@@ -219,6 +220,7 @@ int main(void) {
     test_session_rejects_different_call_id();
     test_default_capture_filter();
     test_capture_next_rejects_invalid_arguments();
+    test_capture_record_preserves_timestamp_and_wire_length();
     test_capture_retry_is_bounded_and_resets_after_recovery();
     test_gvs_deadline_expires_without_another_packet();
     test_gvs_deadline_does_not_end_a_new_generation();
