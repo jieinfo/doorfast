@@ -2,7 +2,12 @@ name: Build Doorfast APK
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: doorfast-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   host-tests:

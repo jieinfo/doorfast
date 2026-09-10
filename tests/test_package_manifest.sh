@@ -36,6 +36,7 @@ node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/sta
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
 grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/workflows/build-apk.yml
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
+grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
 grep -q 'doorfast-\*.apk' .github/workflows/build-apk.yml
 ! grep -q 'bin/packages/\*\*/\*.apk' .github/workflows/build-apk.yml
 grep -q 'config_load doorfast' package/doorfast/files/doorfast.init
