@@ -131,4 +131,8 @@ void test_deployment_snapshot_treats_missing_evidence_as_unsafe(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
         &config, "tests/fixtures/deployment-root", &snapshot));
     TEST_ASSERT_INT_EQ(0, snapshot.upstream_exists);
+    const char disabled[] = "config inline 'main'\n option enabled '0'\n";
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_config_parse(disabled, &config));
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
+        &config, "tests/fixtures/deployment-root", &snapshot));
 }

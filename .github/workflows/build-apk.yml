@@ -63,6 +63,7 @@ jobs:
           grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-recorder' "$doorfast_list"
           grep -Fxq '/etc/init.d/doorfast-recorder' "$doorfast_list"
+          grep -Fxq '/usr/sbin/doorfast-site-inventory' "$doorfast_list"
           grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"
           ! grep -Fq 'gvs-peer-' "$doorfast_list" "$luci_list"
       - uses: actions/upload-artifact@v4

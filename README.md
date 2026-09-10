@@ -1,5 +1,8 @@
 # Doorfast
 
+现场串联学习部署请先阅读 [现场部署步骤](docs/doorfast-inline-field-deployment.md)。
+APK 不会创建透明桥；软件桥或整机故障会中断 MT8157，必须保留人工直连回退线。
+
 Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的原生门禁网络观察与集成服务。
 它以透明抓包、GVS 会话归一化、脱敏审计和事件通知为起点，替代旧 Doorlink
 部署中的非开源、MIPS 专用和授权依赖部分。

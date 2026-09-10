@@ -4,6 +4,9 @@ set -eu
 test -f package/doorfast/Makefile
 test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast-recorder.init
+test -f package/doorfast/files/doorfast-site-inventory.sh
+grep -q 'doorfast-site-inventory.*usr/libexec/doorfast' package/doorfast/Makefile
+grep -q 'doorfast-site-inventory.impl.sh' scripts/prepare-sdk-package.sh
 grep -q 'doorfast-recorder.*usr/sbin/doorfast-recorder' package/doorfast/Makefile
 ! grep -q 'respawn' package/doorfast/files/doorfast-recorder.init
 test -f package/doorfast/files/doorfast.config

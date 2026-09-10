@@ -7,10 +7,11 @@ test "$#" -eq 1
 test "$1" = /mnt/doorfast/inventory
 test -d /mnt/doorfast
 test ! -L /mnt/doorfast
-mountpoint -q /mnt/doorfast
+grep -q ' /mnt/doorfast ' /proc/mounts
 mkdir -p /mnt/doorfast/inventory
 test ! -L /mnt/doorfast/inventory
-test "$(stat -c %a /mnt/doorfast/inventory)" = 700
+chmod 700 /mnt/doorfast/inventory
+test "$(ls -ld /mnt/doorfast/inventory | cut -c1-10)" = drwx------
 output=$(mktemp -d /mnt/doorfast/inventory/snapshot-XXXXXXXX)
 failed=0
 capture() {
@@ -34,8 +35,12 @@ capture disk.txt df -Pk /mnt/doorfast
 capture mounts.txt mount
 capture status.json ubus call doorfast status
 capture passive.txt uci -q get doorfast.main.passive_only
-capture version.txt apk info doorfast
-capture preflight.json /usr/sbin/doorfast --preflight /etc/config/doorfast-deployment
+capture version.txt apk info -e doorfast
+if ! /usr/sbin/doorfast --preflight /etc/config/doorfast-deployment \
+        >"$output/preflight.json" 2>"$output/preflight.json.err"; then
+    # An unsafe deployment intentionally exits 2 but still yields useful JSON.
+    test -s "$output/preflight.json" || failed=1
+fi
 printf '{"schema_version":1,"query_failed":%s}\n' "$failed" >"$output/manifest.json"
 printf '%s\n' "$output"
 exit "$failed"

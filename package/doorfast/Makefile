@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=19
+PKG_RELEASE:=20
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -32,6 +32,9 @@ define Package/doorfast/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/doorfast $(1)/usr/sbin/doorfast
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/doorfast-recorder $(1)/usr/sbin/doorfast-recorder
+	$(INSTALL_BIN) ./files/doorfast-site-inventory.sh $(1)/usr/sbin/doorfast-site-inventory
+	$(INSTALL_DIR) $(1)/usr/libexec/doorfast
+	$(INSTALL_BIN) ./files/doorfast-site-inventory.impl.sh $(1)/usr/libexec/doorfast/doorfast-site-inventory.sh
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/doorfast.init $(1)/etc/init.d/doorfast
 	$(INSTALL_BIN) ./files/doorfast-recorder.init $(1)/etc/init.d/doorfast-recorder
