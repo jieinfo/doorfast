@@ -13,7 +13,8 @@ static struct df_deployment_config confirmed_config(void) {
         " option bridge 'br-door'\n"
         " option upstream 'door-up'\n"
         " option downstream 'door-down'\n"
-        " option management 'br-lan'\n";
+        " option management 'br-lan'\n"
+        " option observation 'door-up'\n";
     memset(&config, 0, sizeof(config));
     (void)df_deployment_config_parse(text, &config);
     return config;
@@ -128,6 +129,7 @@ void test_deployment_snapshot_treats_missing_evidence_as_unsafe(void) {
     TEST_ASSERT_INT_EQ(0, memcmp(&before, &snapshot, sizeof(snapshot)));
     config = confirmed_config();
     strcpy(config.upstream, "not-ethernet");
+    strcpy(config.observation, "not-ethernet");
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
         &config, "tests/fixtures/deployment-root", &snapshot));
     TEST_ASSERT_INT_EQ(0, snapshot.upstream_exists);

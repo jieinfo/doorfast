@@ -7,7 +7,7 @@ void test_deployment_preflight_evaluates_snapshot(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_config_parse(
         "config inline 'main'\n option enabled '1'\n option bridge 'br-door'\n"
         " option upstream 'door-up'\n option downstream 'door-down'\n"
-        " option management 'br-lan'\n", &c));
+        " option management 'br-lan'\n option observation 'door-up'\n", &c));
     struct df_deployment_snapshot good = {
         .bridge_exists = true, .upstream_exists = true,
         .downstream_exists = true, .management_exists = true,

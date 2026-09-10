@@ -114,7 +114,7 @@ int df_deployment_config_parse(const char *input, struct df_deployment_config *o
             strcpy(c.observation, value);
         }
     }
-    if (!c.observation[0] && c.bridge[0]) strcpy(c.observation, c.bridge);
+    if (c.enabled && !(seen & (1U << 11))) return DF_ERR_INVALID;
     if (!section || df_deployment_config_validate(&c)) return DF_ERR_INVALID;
     *out = c;
     return DF_OK;
