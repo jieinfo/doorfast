@@ -4,15 +4,18 @@ set -eu
 umask 077
 ulimit -f 2048
 test "$#" -eq 1
-test "$1" = /mnt/doorfast/inventory
-test -d /mnt/doorfast
-test ! -L /mnt/doorfast
-grep -q ' /mnt/doorfast ' /proc/mounts
-mkdir -p /mnt/doorfast/inventory
-test ! -L /mnt/doorfast/inventory
-chmod 700 /mnt/doorfast/inventory
-test "$(ls -ld /mnt/doorfast/inventory | cut -c1-10)" = drwx------
-output=$(mktemp -d /mnt/doorfast/inventory/snapshot-XXXXXXXX)
+root=${DOORFAST_INVENTORY_ROOT:-/mnt/doorfast}
+inventory=$root/inventory
+doorfast=${DOORFAST_INVENTORY_DOORFAST:-/usr/sbin/doorfast}
+test "$1" = "$inventory"
+test -d "$root"
+test ! -L "$root"
+mount | grep -Fq " on $root "
+mkdir -p "$inventory"
+test ! -L "$inventory"
+chmod 700 "$inventory"
+test "$(ls -ld "$inventory" | cut -c1-10)" = drwx------
+output=$(mktemp -d "$inventory/snapshot-XXXXXXXX")
 failed=0
 capture() {
     name=$1
@@ -31,12 +34,12 @@ capture addresses.json ip -j address show
 capture routes.json ip -j route show table all
 capture firewall.json nft -j list ruleset
 capture hashes.txt sha256sum /etc/config/network /etc/config/firewall /etc/config/dhcp /etc/config/doorfast /etc/config/doorfast-deployment
-capture disk.txt df -Pk /mnt/doorfast
+capture disk.txt df -Pk "$root"
 capture mounts.txt mount
 capture status.json ubus call doorfast status
 capture passive.txt uci -q get doorfast.main.passive_only
-capture version.txt apk info -e doorfast
-if ! /usr/sbin/doorfast --preflight /etc/config/doorfast-deployment \
+capture version.txt apk list --installed doorfast
+if ! "$doorfast" --preflight /etc/config/doorfast-deployment \
         >"$output/preflight.json" 2>"$output/preflight.json.err"; then
     # An unsafe deployment intentionally exits 2 but still yields useful JSON.
     test -s "$output/preflight.json" || failed=1

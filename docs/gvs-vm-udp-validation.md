@@ -24,4 +24,24 @@ It does not verify real peer recognition, outbound periodic maintenance, real co
 
 Local UDP unit tests bind port 18300 themselves, so stop the VM before running `python3 -B -m unittest tests/test_gvs_peer_udp.py`.
 
+## Disposable inline-bridge rehearsal
+
+The isolated bridge rehearsal additionally requires `ip-full`, `kmod-veth`, and
+`socat` in the VM test image. These are VM-only test dependencies and are not
+Doorfast APK runtime dependencies. The runner creates only the fixed
+`br-door-test`, `up-test`, `down-test`, `u-end-test`, and `d-end-test` objects,
+after first proving each name is absent. It restores the deployment profile and
+removes every disposable object in a `finally` path.
+
+Run it only in the isolated test VM:
+
+```sh
+python3 -B tests/run_doorfast_vm_inline_bridge.py /absolute/path/to/vm/ssh.sh
+```
+
+The runner requires bidirectional forwarding, a received 42-byte control frame,
+a received media-port packet, bounded evidence files, and continued forwarding
+after the recorder and Doorfast processes stop. It also compares routes and the
+network/firewall configuration hashes before and after cleanup.
+
 The r9 run used the short validation mode. The 60-second offline deadline and two-period takeover were previously verified with r4 and were not rerun for r9. The frame and transaction logs confirm receive-to-queue-to-frame-to-simulated-terminal flow; absence of transmission follows from the current source implementation, not from a dedicated outbound packet capture.

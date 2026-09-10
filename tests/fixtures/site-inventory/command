@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+name=${0##*/}
+{
+	printf '%s' "$name"
+	for argument in "$@"; do printf ' %s' "$argument"; done
+	printf '\n'
+} >>"$DOORFAST_INVENTORY_TEST_TRACE"
+
+if [ "${DOORFAST_INVENTORY_TEST_FAIL:-}" = "$name" ]; then
+	exit 1
+fi
+
+case "$name" in
+	ip)
+		case "$*" in
+			'-s -d -j link show')
+				printf '%s\n' '[{"ifname":"br-door","address":"02:00:00:00:00:10","flags":["BROADCAST","UP"]},{"ifname":"door-up","address":"02:00:00:00:00:01","flags":["BROADCAST","UP","LOWER_UP"],"master":"br-door","stats64":{"rx":{"packets":10,"errors":0,"dropped":0},"tx":{"packets":20,"errors":0,"dropped":0}}},{"ifname":"door-down","address":"02:00:00:00:00:02","flags":["BROADCAST","UP","LOWER_UP"],"master":"br-door","stats64":{"rx":{"packets":30,"errors":0,"dropped":0},"tx":{"packets":40,"errors":0,"dropped":0}}}]'
+				;;
+			'-j address show')
+				printf '%s\n' '[{"ifname":"br-lan","addr_info":[{"local":"192.0.2.1"}]}]'
+				;;
+			'-j route show table all')
+				printf '%s\n' '[{"dst":"default","dev":"br-lan","gateway":"192.0.2.254"}]'
+				;;
+			*)
+				exit 64
+				;;
+		esac
+		;;
+	nft)
+		printf '{"nftables":[]}\n'
+		;;
+	sha256sum)
+		for path in "$@"; do
+			printf '0000000000000000000000000000000000000000000000000000000000000000  %s\n' "$path"
+		done
+		;;
+	df)
+		printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+		printf '/dev/test 32768000 1024 32766976 1%% %s\n' "$DOORFAST_INVENTORY_ROOT"
+		;;
+	mount)
+		printf '/dev/test on %s type ext4 (rw)\n' "$DOORFAST_INVENTORY_ROOT"
+		;;
+	ubus)
+		printf '{"running":true,"mode":"passive"}\n'
+		;;
+	uci)
+		printf '1\n'
+		;;
+	apk)
+		printf 'doorfast-0.1.0-r20 x86_64 {feeds/base/doorfast} () [installed]\n'
+		;;
+	doorfast)
+		printf '{"safe":true,"failures":[]}\n'
+		;;
+	*)
+		exit 64
+		;;
+esac
