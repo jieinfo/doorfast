@@ -4,6 +4,7 @@ import json
 import pathlib
 import subprocess
 import sys
+import time
 
 if len(sys.argv) != 2:
     raise SystemExit("usage: run_doorfast_vm_inline_bridge.py VM_SSH_HELPER")
@@ -29,7 +30,7 @@ deployment = """config inline 'main'
  option log_budget_mib '1024'
  option reserve_mib '6144'
 """
-remote("test -x /usr/sbin/doorfast-recorder; "
+remote("test -x /usr/sbin/doorfast-recorder; command -v socat >/dev/null; "
        "grep -q '^/dev/vdb /mnt/doorfast ' /proc/mounts; "
        "test \"$(ls -ld /mnt/doorfast | cut -c1-10)\" = drwx------")
 for name in interfaces:
@@ -73,21 +74,36 @@ try:
     remote("sleep 1; kill -0 " + recorder_pid)
     remote("ip netns exec df-up-test ping -c 1 -W 2 192.0.2.2")
     listener_pids.append(remote(
-        "ip netns exec df-down-test nc -u -l -p 8300 >/tmp/df-8300-test 2>/dev/null & echo $!").stdout.strip())
+        "ip netns exec df-down-test socat -u UDP4-RECVFROM:8300,reuseaddr - "
+        ">/tmp/df-8300-test 2>/tmp/df-8300-test.err & echo $!").stdout.strip())
     listener_pids.append(remote(
-        "ip netns exec df-up-test nc -u -l -p 8303 >/tmp/df-8303-test 2>/dev/null & echo $!").stdout.strip())
+        "ip netns exec df-up-test socat -u UDP4-RECVFROM:8303,reuseaddr - "
+        ">/tmp/df-8303-test 2>/tmp/df-8303-test.err & echo $!").stdout.strip())
     remote("sleep 1")
     frame = "GVSGVS\\245\\245\\245\\245" + "\\000" * 28 + "\\003\\001\\000\\000"
     remote("ip netns exec df-up-test sh -c \"printf '" + frame +
-           "' | nc -u -w 1 192.0.2.2 8300\"", check=False)
-    remote("ip netns exec df-down-test sh -c \"printf media | nc -u -w 1 192.0.2.1 8303\"",
-           check=False)
-    remote("sleep 1; kill -0 " + recorder_pid)
-    status = json.loads(remote("cat /var/run/doorfast-recorder.status").stdout)
+           "' | socat -u - UDP4-DATAGRAM:192.0.2.2:8300\"")
+    remote("ip netns exec df-down-test sh -c \"printf media | "
+           "socat -u - UDP4-DATAGRAM:192.0.2.1:8303\"")
+    deadline = time.monotonic() + 5
+    while True:
+        remote("kill -0 " + recorder_pid)
+        status = json.loads(remote("cat /var/run/doorfast-recorder.status").stdout)
+        if status.get("recent_packets", 0) >= 2 and status.get("control_packets", 0) >= 1:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
     if status.get("recent_packets", 0) < 2 or status.get("control_packets", 0) < 1:
-        raise RuntimeError(f"unexpected recorder counters: {status}")
+        diagnostics = remote(
+            "ip -s link show up-test; ip -s link show down-test; "
+            "wc -c /tmp/df-8300-test /tmp/df-8303-test 2>/dev/null; "
+            "cat /tmp/df-8300-test.err /tmp/df-8303-test.err 2>/dev/null; "
+            "cat /tmp/doorfast-recorder-test.log 2>/dev/null",
+            check=False).stdout
+        raise RuntimeError(f"unexpected recorder counters: {status}\n{diagnostics}")
     remote("kill -TERM " + recorder_pid + "; while kill -0 " + recorder_pid +
-           " 2>/dev/null; do sleep 0.1; done")
+           " 2>/dev/null; do sleep 0.1; done; :")
     recorder_pid = None
     remote("ip netns exec df-up-test ping -c 2 -W 2 192.0.2.2")
     remote("test -n \"$(find /mnt/doorfast/recent -name 'recent-*.pcap' -size +24c)\"; "
