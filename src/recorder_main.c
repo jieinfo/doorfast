@@ -32,11 +32,14 @@ static int private_directory(const char *path) {
         (s.st_mode & 0777) != 0700) return DF_ERR_INVALID;
     return DF_OK;
 }
-static int write_status(const struct df_evidence_recorder *r, const char *state) {
+static int write_status(const struct df_evidence_recorder *r,
+                        const struct df_evidence_log *log, const char *state) {
     char temporary[] = "/var/run/doorfast-recorder.status.XXXXXX";
     struct df_pcap_ring_status recent, control;
-    if (df_pcap_ring_status(r->recent, &recent) ||
-        df_pcap_ring_status(r->control, &control)) return DF_ERR_IO;
+    struct df_evidence_log_status log_status;
+    if (!log || df_pcap_ring_status(r->recent, &recent) ||
+        df_pcap_ring_status(r->control, &control) ||
+        df_evidence_log_status(log, &log_status)) return DF_ERR_IO;
     int fd = mkstemp(temporary);
     if (fd < 0) return DF_ERR_IO;
     FILE *output = fdopen(fd, "w");
@@ -46,11 +49,15 @@ static int write_status(const struct df_evidence_recorder *r, const char *state)
         "\"updated_wall_seconds\":%" PRIu64 ","
         "\"packets_seen\":%" PRIu64 ",\"recent_packets\":%" PRIu64 ","
         "\"control_packets\":%" PRIu64 ",\"invalid_packets\":%" PRIu64 ","
+        "\"last_packet_wall_seconds\":%" PRIu64 ","
+        "\"last_rotation_wall_seconds\":%" PRIu64 ","
         "\"recent_bytes\":%" PRIu64 ",\"control_bytes\":%" PRIu64 ","
+        "\"log_bytes\":%" PRIu64 ","
         "\"available_bytes\":%" PRIu64 ",\"reserve_bytes\":%" PRIu64 "}\n",
         (long)getpid(), state, (uint64_t)time(NULL), r->packets_seen,
         r->recent_packets, r->control_packets, r->invalid_packets,
-        recent.bytes_written, control.bytes_written,
+        r->last_packet_wall_seconds, r->last_rotation_wall_seconds,
+        recent.bytes_written, control.bytes_written, log_status.bytes_written,
         r->available_bytes, r->reserve_bytes) < 0;
     if (fflush(output)) failed = 1;
     if (fclose(output)) failed = 1;
@@ -117,14 +124,14 @@ int main(int argc, char **argv) {
         df_capture_set_filter(capture, df_capture_default_filter())) goto done;
     signal(SIGTERM, stop_recording); signal(SIGINT, stop_recording);
     if (available_space(config.evidence_root, &recorder.available_bytes) ||
-        write_status(&recorder, "recording")) goto done;
+        write_status(&recorder, &log, "recording")) goto done;
     result = 0;
     time_t last_status = time(NULL);
     while (!stopping) {
         time_t now = time(NULL);
         if (now != last_status) {
             if (available_space(config.evidence_root, &recorder.available_bytes) ||
-                write_status(&recorder, "recording")) { result = 1; break; }
+                write_status(&recorder, &log, "recording")) { result = 1; break; }
             last_status = now;
         }
         struct df_capture_record packet;
@@ -156,7 +163,7 @@ int main(int argc, char **argv) {
             break;
         }
     }
-    if (write_status(&recorder, result ? "io_error" :
+    if (write_status(&recorder, &log, result ? "io_error" :
         recorder.state == DF_RECORDER_SPACE_GUARD ? "space_guard" : "stopped"))
         result = 1;
 done:

@@ -31,6 +31,8 @@ int df_evidence_recorder_accept(struct df_evidence_recorder *r,
         return DF_OK;
     }
     if (!classification.recent) return DF_OK;
+    uint32_t recent_slot = r->recent->active_slot;
+    uint32_t control_slot = r->control->active_slot;
     /* Include possible new global headers. Never credit space from a future
      * replacement: the old completed file coexists with the active partial. */
     needed = 40 + (record->captured_length < 256 ? record->captured_length : 256);
@@ -50,6 +52,7 @@ int df_evidence_recorder_accept(struct df_evidence_recorder *r,
         return DF_ERR_IO;
     }
     r->recent_packets++;
+    r->last_packet_wall_seconds = record->wall_seconds;
     if (classification.valid_control) {
         if (df_pcap_ring_write(r->control, record) != DF_OK) {
             r->state = DF_RECORDER_IO_ERROR;
@@ -57,5 +60,8 @@ int df_evidence_recorder_accept(struct df_evidence_recorder *r,
         }
         r->control_packets++;
     }
+    if (recent_slot != r->recent->active_slot ||
+        control_slot != r->control->active_slot)
+        r->last_rotation_wall_seconds = record->wall_seconds;
     return DF_OK;
 }

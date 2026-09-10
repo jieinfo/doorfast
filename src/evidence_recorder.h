@@ -11,6 +11,7 @@ struct df_evidence_recorder {
     void *space_context;
     uint64_t reserve_bytes, available_bytes;
     uint64_t packets_seen, recent_packets, control_packets, invalid_packets;
+    uint64_t last_packet_wall_seconds, last_rotation_wall_seconds;
     enum df_recorder_state state;
 };
 /* Rings remain caller-owned. A guarded or failed recorder stays stopped until

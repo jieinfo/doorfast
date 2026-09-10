@@ -57,6 +57,7 @@ static void df_ubus_deployment_health(struct blob_buf *b) {
             blobmsg_add_string(b, "state", h.recorder_state);
             blobmsg_add_u64(b, "recent_bytes", h.recent_bytes);
             blobmsg_add_u64(b, "control_bytes", h.control_bytes);
+            blobmsg_add_u64(b, "log_bytes", h.log_bytes);
             blobmsg_add_u64(b, "available_bytes", h.available_bytes);
             blobmsg_add_u64(b, "reserve_bytes", h.reserve_bytes);
         }

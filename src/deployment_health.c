@@ -33,7 +33,7 @@ static void recorder_health(const char *root, struct df_deployment_health *out) 
     if (failed || n == sizeof(buffer) - 1) return;
     buffer[n] = 0;
     const char *p = buffer;
-    uint64_t pid, values[9];
+    uint64_t pid, values[12];
     if (!literal(&p, "{\"schema_version\":1,\"pid\":") || !decimal(&p, &pid) || !pid ||
         !literal(&p, ",\"state\":\"")) return;
     size_t s = 0;
@@ -41,9 +41,10 @@ static void recorder_health(const char *root, struct df_deployment_health *out) 
     if (!literal(&p, "\"") || (strcmp(state, "recording") &&
         strcmp(state, "space_guard") && strcmp(state, "io_error") && strcmp(state, "stopped"))) return;
     const char *keys[] = {"updated_wall_seconds", "packets_seen", "recent_packets",
-        "control_packets", "invalid_packets", "recent_bytes", "control_bytes",
+        "control_packets", "invalid_packets", "last_packet_wall_seconds",
+        "last_rotation_wall_seconds", "recent_bytes", "control_bytes", "log_bytes",
         "available_bytes", "reserve_bytes"};
-    for (unsigned i = 0; i < 9; ++i) {
+    for (unsigned i = 0; i < 12; ++i) {
         char key[80];
         snprintf(key, sizeof(key), ",\"%s\":", keys[i]);
         if (!literal(&p, key) || !decimal(&p, &values[i])) return;
@@ -54,8 +55,9 @@ static void recorder_health(const char *root, struct df_deployment_health *out) 
     if (!strcmp(state, "recording") && (values[0] > now || now - values[0] > 10))
         strcpy(state, "stale");
     strcpy(out->recorder_state, state);
-    out->recent_bytes = values[5]; out->control_bytes = values[6];
-    out->available_bytes = values[7]; out->reserve_bytes = values[8];
+    out->recent_bytes = values[7]; out->control_bytes = values[8];
+    out->log_bytes = values[9]; out->available_bytes = values[10];
+    out->reserve_bytes = values[11];
 }
 
 static int number(const char *path, uint64_t *out) {

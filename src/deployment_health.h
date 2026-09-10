@@ -12,7 +12,7 @@ struct df_deployment_health {
     char observation_interface[DF_DEPLOYMENT_IFNAME_MAX];
     bool recorder_present;
     char recorder_state[24];
-    uint64_t recent_bytes, control_bytes, available_bytes, reserve_bytes;
+    uint64_t recent_bytes, control_bytes, log_bytes, available_bytes, reserve_bytes;
 };
 int df_deployment_health_load(struct df_deployment_health *);
 int df_deployment_health_collect(const struct df_deployment_config *,
