@@ -22,6 +22,7 @@ jobs:
       - run: node tests/test_luci_status.js
       - run: sh tests/test_main_cli.sh
       - run: sh tests/test_recorder_cli.sh
+      - run: sh tests/test_site_inventory.sh
       - run: sh tests/test_package_manifest.sh
 
   apk:
