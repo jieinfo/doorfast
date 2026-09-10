@@ -1,0 +1,12 @@
+config device 'door_bridge'
+	option name 'br-door'
+	option type 'bridge'
+	list ports 'door-up'
+	list ports 'door-down'
+
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+
+config interface 'br-managed'
+	option proto 'none'

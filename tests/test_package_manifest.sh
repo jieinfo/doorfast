@@ -5,6 +5,7 @@ test -f package/doorfast/Makefile
 test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-sync.config
+test -f package/doorfast/files/doorfast-deployment.config
 test -f scripts/prepare-sdk-package.sh
 test -f package/luci-app-doorfast/Makefile
 test -f package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.json
@@ -43,6 +44,13 @@ grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
 grep -F "config state 'sync'" package/doorfast/files/doorfast-sync.config
 grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
+grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
+grep -F "config inline 'main'" package/doorfast/files/doorfast-deployment.config
+grep -F "option enabled '0'" package/doorfast/files/doorfast-deployment.config
+grep -F "option recording_enabled '0'" package/doorfast/files/doorfast-deployment.config
+grep -F "option evidence_root '/mnt/doorfast'" package/doorfast/files/doorfast-deployment.config
+grep -F "option reserve_mib '6144'" package/doorfast/files/doorfast-deployment.config
+! grep -q -- '--preflight' package/doorfast/files/doorfast.init
 grep -q 'define Package/doorfast/postinst' package/doorfast/Makefile
 grep -Fq '[ -z "$${IPKG_INSTROOT}" ]' package/doorfast/Makefile
 grep -Fq '[ "$${PKG_UPGRADE}" = "1" ]' package/doorfast/Makefile

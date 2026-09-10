@@ -1,0 +1,2 @@
+config zone 'unsafe_fixture'
+	option device 'br-firewall'

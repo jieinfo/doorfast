@@ -42,6 +42,20 @@ config gvs 'main'
 Doorfast 不会修改网络、路由或防火墙；本阶段也不会发送 GVS 控制报文。
 修改 `/etc/config/doorfast` 后执行 `/etc/init.d/doorfast reload` 会停止旧实例并按新配置启动。
 
+## 透明串联部署预检查
+
+APK 会安装一份默认关闭的 `/etc/config/doorfast-deployment`。填写实际的无地址网桥、
+门禁上联口、MT8157 下联口和独立管理口后，运行：
+
+```sh
+doorfast --preflight /etc/config/doorfast-deployment
+```
+
+检查通过时输出 `"safe":true` 的 JSON 并返回 0；配置有效但现场条件不安全时输出全部
+失败原因并返回 2；无法读取或计算状态时返回 1。检查只读取 sysfs、进程、UCI、挂载和
+接口地址，不创建网桥，不修改接口、路由、防火墙或 DHCP/RA，也不会自动启动记录。
+`/mnt/doorfast` 必须是独立持久挂载，首次部署需至少 30 GiB 总容量和 29 GiB 可用空间。
+
 ## 不会做的事
 
 - 不包含 Doorlink 的程序代码、激活机制、激活码、供应商云部署或远程脚本执行。
