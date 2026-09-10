@@ -28,9 +28,11 @@ TEST_SOURCES += tests/test_gvs_call_control.c src/gvs_call_control.c
 TEST_SOURCES += tests/test_deployment_config.c src/deployment_config.c
 TEST_SOURCES += tests/test_deployment_preflight.c src/deployment_preflight.c
 TEST_SOURCES += tests/test_deployment_snapshot.c src/deployment_snapshot.c
+TEST_SOURCES += tests/test_pcap_ring.c src/pcap_ring.c
 DAEMON_SOURCES += src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/deployment_report.c
 build/doorfast-tests: src/deployment_preflight.h
 build/doorfast-tests: src/deployment_snapshot.h
+build/doorfast-tests: src/pcap_ring.h
 build/doorfast: src/deployment_config.h src/deployment_preflight.h src/deployment_snapshot.h src/deployment_report.h
 DAEMON_SOURCES += src/gvs_call_runtime.c
 DAEMON_SOURCES += src/gvs_call_control.c

@@ -57,6 +57,7 @@ void test_deployment_preflight_evaluates_snapshot(void);
 void test_deployment_snapshot_reads_safe_fixture(void);
 void test_deployment_snapshot_exposes_unsafe_evidence(void);
 void test_deployment_snapshot_treats_missing_evidence_as_unsafe(void);
+void test_pcap_ring_rotates_and_recovers_oldest_slot(void);
 void test_deployment_config_rejects_unsafe_profile(void);
 void test_deployment_config_rejects_ambiguous_input(void);
 
@@ -119,7 +120,7 @@ void test_gvs_call_runtime_swallows_wrong_answer(void);
 void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 int test_suite_count(void) {
-    return 106;
+    return 107;
 }
 
 int main(void) {
@@ -128,7 +129,8 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(106, test_suite_count());
+    TEST_ASSERT_INT_EQ(107, test_suite_count());
+    test_pcap_ring_rotates_and_recovers_oldest_slot();
     test_deployment_snapshot_reads_safe_fixture();
     test_deployment_snapshot_exposes_unsafe_evidence();
     test_deployment_snapshot_treats_missing_evidence_as_unsafe();
