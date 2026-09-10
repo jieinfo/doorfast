@@ -61,6 +61,7 @@ void test_pcap_ring_rotates_and_recovers_oldest_slot(void);
 void test_gvs_udp_prefix_handles_vlan_and_truncation(void);
 void test_evidence_classifier_separates_recent_and_control(void);
 void test_evidence_log_preserves_fixed_fields_and_rotates(void);
+void test_evidence_recorder_guards_and_classifies(void);
 void test_deployment_config_rejects_unsafe_profile(void);
 void test_deployment_config_rejects_ambiguous_input(void);
 
@@ -123,7 +124,7 @@ void test_gvs_call_runtime_swallows_wrong_answer(void);
 void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 int test_suite_count(void) {
-    return 110;
+    return 111;
 }
 
 int main(void) {
@@ -132,7 +133,8 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(110, test_suite_count());
+    TEST_ASSERT_INT_EQ(111, test_suite_count());
+    test_evidence_recorder_guards_and_classifies();
     test_evidence_log_preserves_fixed_fields_and_rotates();
     test_gvs_udp_prefix_handles_vlan_and_truncation();
     test_evidence_classifier_separates_recent_and_control();

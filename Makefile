@@ -31,6 +31,8 @@ TEST_SOURCES += tests/test_deployment_snapshot.c src/deployment_snapshot.c
 TEST_SOURCES += tests/test_pcap_ring.c src/pcap_ring.c
 TEST_SOURCES += tests/test_gvs_packet.c tests/test_evidence_classifier.c src/evidence_classifier.c
 TEST_SOURCES += tests/test_evidence_log.c src/evidence_log.c
+TEST_SOURCES += tests/test_evidence_recorder.c src/evidence_recorder.c
+build/doorfast-tests: src/evidence_recorder.h
 build/doorfast-tests: src/evidence_classifier.h
 build/doorfast-tests: src/evidence_log.h
 DAEMON_SOURCES += src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/deployment_report.c
