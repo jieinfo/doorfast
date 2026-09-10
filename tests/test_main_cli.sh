@@ -19,3 +19,17 @@ printf '%s\n' "$output" | grep -q "option enabled '0'"
 printf '%s\n' "$output" | grep -q "option unlock '-1'"
 ! printf '%s\n' "$output" | grep -q 'license-is-never-exported'
 ! printf '%s\n' "$output" | grep -q 'token-is-never-exported'
+
+fixture_digest_before=$(find tests/fixtures/deployment-root -type f -exec cksum {} \; | sort | cksum)
+output=$(./build/doorfast --preflight tests/fixtures/doorfast-deployment-valid.conf \
+    --root tests/fixtures/deployment-root)
+printf '%s' "$output" | python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["safe"] is True; assert value["bridge"] == "br-door"; assert value["failures"] == []'
+set +e
+output=$(./build/doorfast --preflight tests/fixtures/doorfast-deployment-addressed.conf \
+    --root tests/fixtures/deployment-root)
+status=$?
+set -e
+test "$status" -eq 2
+printf '%s' "$output" | python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["safe"] is False; assert value["failures"] == ["bridge_has_address"]'
+fixture_digest_after=$(find tests/fixtures/deployment-root -type f -exec cksum {} \; | sort | cksum)
+test "$fixture_digest_before" = "$fixture_digest_after"

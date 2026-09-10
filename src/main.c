@@ -1,4 +1,8 @@
 #include "config.h"
+#include "deployment_config.h"
+#include "deployment_preflight.h"
+#include "deployment_report.h"
+#include "deployment_snapshot.h"
 #include "gvs_identity.h"
 #include "gvs_replay.h"
 #include "runtime_config.h"
@@ -11,7 +15,55 @@
 #define DF_MAX_LEGACY_CONFIG_BYTES 65536
 
 static void df_print_usage(FILE *stream) {
-    (void)fputs("Usage: doorfast --help | --config <path> | --import-legacy <path> | --inspect-pcap <path> <IS-address>\n", stream);
+    (void)fputs("Usage: doorfast --help | --config <path> | --preflight <path> | --import-legacy <path> | --inspect-pcap <path> <IS-address>\n", stream);
+}
+
+static int df_read_deployment_config(const char *path,
+                                     struct df_deployment_config *config) {
+    char *contents;
+    FILE *file;
+    size_t length;
+    int result;
+
+    file = fopen(path, "rb");
+    if (file == NULL) return DF_ERR_IO;
+    contents = calloc(65537, 1);
+    if (contents == NULL) {
+        (void)fclose(file);
+        return DF_ERR_IO;
+    }
+    length = fread(contents, 1, 65536, file);
+    if (ferror(file) || (length == 65536 && fgetc(file) != EOF) ||
+        fclose(file) != 0) {
+        free(contents);
+        return DF_ERR_IO;
+    }
+    result = df_deployment_config_parse(contents, config);
+    free(contents);
+    return result;
+}
+
+static int df_run_preflight(const char *path, const char *root) {
+    struct df_deployment_config config;
+    struct df_deployment_snapshot snapshot;
+    struct df_deployment_report report;
+    int result = df_read_deployment_config(path, &config);
+
+    if (result == DF_ERR_INVALID) {
+        (void)fputs("doorfast: invalid deployment configuration\n", stderr);
+        return 2;
+    }
+    if (result != DF_OK ||
+        df_deployment_snapshot_collect(&config, root, &snapshot) != DF_OK) {
+        (void)fputs("doorfast: cannot collect deployment state\n", stderr);
+        return 1;
+    }
+    if (df_deployment_preflight_evaluate(&config, &snapshot, &report) != DF_OK ||
+        df_deployment_report_write_json(stdout, &config, &report) != DF_OK) {
+        (void)fputs("doorfast: cannot evaluate deployment state\n", stderr);
+        return 1;
+    }
+    return report.safe ? 0 : 2;
 }
 
 static int df_run_config(const char *path) {
@@ -83,6 +135,11 @@ static int df_import_legacy_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
+#ifdef DF_ALLOW_TEST_ROOT
+    if (argc == 5 && strcmp(argv[1], "--preflight") == 0 &&
+        strcmp(argv[3], "--root") == 0)
+        return df_run_preflight(argv[2], argv[4]);
+#endif
     if (argc == 4 && strcmp(argv[1], "--inspect-pcap") == 0) {
         uint8_t identity[6];
         struct df_gvs_session session = {0};
@@ -114,6 +171,9 @@ int main(int argc, char **argv) {
     }
     if (argc == 3 && strcmp(argv[1], "--config") == 0) {
         return df_run_config(argv[2]);
+    }
+    if (argc == 3 && strcmp(argv[1], "--preflight") == 0) {
+        return df_run_preflight(argv[2], "/");
     }
     df_print_usage(stderr);
     return 2;
