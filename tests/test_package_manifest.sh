@@ -3,6 +3,9 @@ set -eu
 
 test -f package/doorfast/Makefile
 test -f package/doorfast/files/doorfast.init
+test -f package/doorfast/files/doorfast-recorder.init
+grep -q 'doorfast-recorder.*usr/sbin/doorfast-recorder' package/doorfast/Makefile
+! grep -q 'respawn' package/doorfast/files/doorfast-recorder.init
 test -f package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-sync.config
 test -f package/doorfast/files/doorfast-deployment.config

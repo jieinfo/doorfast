@@ -51,6 +51,13 @@ build/doorfast-tests build/doorfast: src/gvs_call_dispatch.h
 
 .PHONY: test doorfast peer-sim peer-udp-inject clean
 
+RECORDER_SOURCES := src/recorder_main.c src/evidence_recorder.c src/pcap_ring.c src/evidence_classifier.c src/capture.c src/gvs_packet.c src/gvs_frame.c src/event.c src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/runtime_config.c src/config.c src/gvs_identity.c
+recorder: build/doorfast-recorder
+RECORDER_SOURCES += src/recorder_selftest.c
+RECORDER_SOURCES += src/evidence_metadata.c src/evidence_log.c
+build/doorfast-recorder: $(RECORDER_SOURCES) | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(RECORDER_SOURCES) -o $@ $(PCAP_LIBS)
+
 test: build/doorfast-tests
 
 doorfast: build/doorfast

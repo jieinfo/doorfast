@@ -14,6 +14,7 @@ jobs:
       - run: python3 -m unittest tests/test_gvs_peer_udp.py
       - run: python3 -B -m unittest tests/test_vm_preflight_state.py
       - run: sh tests/test_main_cli.sh
+      - run: sh tests/test_recorder_cli.sh
       - run: sh tests/test_package_manifest.sh
 
   apk:
@@ -58,6 +59,8 @@ jobs:
           test -n "$doorfast_list"
           test -n "$luci_list"
           grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
+          grep -Fxq '/usr/sbin/doorfast-recorder' "$doorfast_list"
+          grep -Fxq '/etc/init.d/doorfast-recorder' "$doorfast_list"
           grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"
           ! grep -Fq 'gvs-peer-' "$doorfast_list" "$luci_list"
       - uses: actions/upload-artifact@v4
