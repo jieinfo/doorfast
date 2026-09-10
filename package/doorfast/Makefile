@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=17
+PKG_RELEASE:=18
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -34,6 +34,7 @@ define Package/doorfast/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/doorfast.config $(1)/etc/config/doorfast
 	$(INSTALL_CONF) ./files/doorfast-sync.config $(1)/etc/config/doorfast-sync
+	$(INSTALL_CONF) ./files/doorfast-deployment.config $(1)/etc/config/doorfast-deployment
 endef
 
 define Package/doorfast/postinst
