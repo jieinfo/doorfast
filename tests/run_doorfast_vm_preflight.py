@@ -35,6 +35,8 @@ def state():
     volatile = {
         "packets", "bytes", "expires", "used", "age",
         "valid_life_time", "preferred_life_time", "cacheinfo",
+        "gc_timer", "hello_timer", "tcn_timer", "topology_change_timer",
+        "forward_delay_timer", "hold_timer", "message_age_timer",
     }
 
     def stable(value):
