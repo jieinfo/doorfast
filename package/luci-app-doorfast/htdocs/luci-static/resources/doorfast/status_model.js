@@ -1,4 +1,5 @@
 'use strict';
+'require baseclass';
 
 function requireObject(value, name) {
     if (value === null || typeof value !== 'object' || Array.isArray(value))
@@ -190,7 +191,9 @@ var statusModel = {
     staleLabel: '陈旧'
 };
 
-if (typeof module === 'object' && module.exports)
+if (typeof module === 'object' && module.exports) {
     module.exports = statusModel;
+    return statusModel;
+}
 
-return statusModel;
+return baseclass.extend(statusModel);

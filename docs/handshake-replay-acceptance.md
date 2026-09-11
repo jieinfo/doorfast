@@ -1,6 +1,6 @@
 # 保活状态查询与离线回放验收（r27）
 
-真实 UDP 发送保持关闭。LuCI 新增“保活模拟（仅内存发送）”，展示启动状态、未回复次数、距下次探测的最近采样值、事务状态和进程生命周期内累计丢弃次数。旧服务不返回这些字段时不显示该区块。
+真实 UDP 发送保持关闭。LuCI r5 新增“保活模拟（仅内存发送）”，展示启动状态、未回复次数、距下次探测的最近采样值、事务状态和进程生命周期内累计丢弃次数。旧服务不返回这些字段时不显示该区块。r5 同时让状态模型继承 LuCI `baseclass`；r4 的纯对象导出会被 ImmortalWrt 25.12.1 的 LuCI 加载器拒绝，Node 单元测试此前没有覆盖这个浏览器加载契约。
 
 ubus 现有状态响应的 `call` 表新增 `handshake_mode`、`handshake_active`、`handshake_missed`、`handshake_next_ms`、`handshake_dispatch`、`handshake_dropped`。只读 ACL 沿用现有状态接口；没有新增控制动作。`handshake_next_ms` 为相对最近采样时刻的毫秒值，不是墙钟时间。丢弃计数饱和于 UINT64_MAX，重启清零。
 
