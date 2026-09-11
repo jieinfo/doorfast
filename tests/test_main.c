@@ -11,6 +11,10 @@ void test_runtime_ubus_validates_and_routes_call_requests(void);
 void test_gvs_incoming_reply_matches_observed_0381(void);
 void test_gvs_incoming_reply_tracks_each_retransmission_without_new_session(void);
 void test_gvs_incoming_reply_rejects_stale_or_non_call_observation(void);
+void test_gvs_handshake_sends_five_probes_then_disconnects(void);
+void test_gvs_handshake_reply_resets_misses_without_moving_schedule(void);
+void test_gvs_handshake_ask_prepares_reply_and_restarts_schedule(void);
+void test_gvs_handshake_rejects_wrong_peer_stale_generation_and_clock_limit(void);
 void test_gvs_pick_exchange(void);
 void test_gvs_presence_receives_sync_replies(void);
 void test_gvs_presence_receives_peer_online_replies(void);
@@ -129,7 +133,7 @@ void test_gvs_call_runtime_swallows_wrong_answer(void);
 void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 int test_suite_count(void) {
-    return 114;
+    return 118;
 }
 
 int main(void) {
@@ -138,7 +142,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(114, test_suite_count());
+    TEST_ASSERT_INT_EQ(118, test_suite_count());
     test_evidence_recorder_guards_and_classifies();
     test_evidence_log_preserves_fixed_fields_and_rotates();
     test_gvs_udp_prefix_handles_vlan_and_truncation();
@@ -191,6 +195,10 @@ int main(void) {
     test_gvs_incoming_reply_matches_observed_0381();
     test_gvs_incoming_reply_tracks_each_retransmission_without_new_session();
     test_gvs_incoming_reply_rejects_stale_or_non_call_observation();
+    test_gvs_handshake_sends_five_probes_then_disconnects();
+    test_gvs_handshake_reply_resets_misses_without_moving_schedule();
+    test_gvs_handshake_ask_prepares_reply_and_restarts_schedule();
+    test_gvs_handshake_rejects_wrong_peer_stale_generation_and_clock_limit();
     test_gvs_sync_updates_version_and_registered_values();
     test_gvs_sync_serializes_periodic_chunks_and_json_escaping();
     test_gvs_sync_serializes_normal_update_and_rejects_oversize();
