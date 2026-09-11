@@ -77,6 +77,26 @@ void test_deployment_snapshot_exposes_unsafe_evidence(void) {
     struct df_deployment_config config = confirmed_config();
     struct df_deployment_snapshot snapshot;
 
+    const char *managed[] = {"br-static", "br-missing-proto", "br-duplicate-proto", "br-address-option"};
+    for (size_t i = 0; i < DF_ARRAY_LEN(managed); ++i) {
+        set_bridge(&config, managed[i]);
+        TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
+            &config, "tests/fixtures/deployment-root", &snapshot));
+        TEST_ASSERT_INT_EQ(1, snapshot.network_interface_reference);
+    }
+    set_bridge(&config, "br-double-quoted");
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
+        &config, "tests/fixtures/deployment-root", &snapshot));
+    TEST_ASSERT_INT_EQ(0, snapshot.network_interface_reference);
+    set_bridge(&config, "br-alias-firewall");
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
+        &config, "tests/fixtures/deployment-root", &snapshot));
+    TEST_ASSERT_INT_EQ(1, snapshot.firewall_reference);
+    set_bridge(&config, "br-alias-dhcp");
+    TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
+        &config, "tests/fixtures/deployment-root", &snapshot));
+    TEST_ASSERT_INT_EQ(1, snapshot.dhcp_ra_reference);
+
     set_bridge(&config, "br-extra");
     TEST_ASSERT_INT_EQ(DF_OK, df_deployment_snapshot_collect(
         &config, "tests/fixtures/deployment-root", &snapshot));

@@ -1,2 +1,4 @@
 config zone 'unsafe_fixture'
 	option device 'br-firewall'
+config zone 'alias_fixture'
+	list network 'firewall_alias'

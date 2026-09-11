@@ -1,3 +1,6 @@
 config dhcp 'unsafe_fixture'
 	option interface 'br-dhcp'
 	option ra 'server'
+config dhcp 'alias_fixture'
+	option interface 'dhcp_alias'
+	option ra 'server'
