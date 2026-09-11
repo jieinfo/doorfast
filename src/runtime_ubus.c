@@ -124,6 +124,7 @@ static int df_runtime_ubus_status_handler(
         df_gvs_session_state_name(call_status.session_state) == NULL ||
         df_gvs_call_command_type_name(call_status.command_type) == NULL ||
         df_gvs_call_dispatch_state_name(call_status.dispatch_state) == NULL ||
+        df_gvs_call_dispatch_state_name(call_status.handshake_dispatch) == NULL ||
         df_gvs_call_ack_state_name(call_status.acknowledgement_state) == NULL) {
         blob_buf_free(&platform->response);
         return UBUS_STATUS_UNKNOWN_ERROR;
@@ -140,6 +141,13 @@ static int df_runtime_ubus_status_handler(
     blobmsg_add_string(&platform->response, "confirmation",
         df_gvs_call_ack_state_name(call_status.acknowledgement_state));
     blobmsg_add_u32(&platform->response, "attempts", call_status.attempts);
+    blobmsg_add_string(&platform->response, "handshake_mode", "simulated");
+    blobmsg_add_u8(&platform->response, "handshake_active", call_status.handshake_active);
+    blobmsg_add_u32(&platform->response, "handshake_missed", call_status.handshake_missed);
+    blobmsg_add_u64(&platform->response, "handshake_next_ms", call_status.handshake_next_ms);
+    blobmsg_add_u64(&platform->response, "handshake_dropped", call_status.handshake_dropped);
+    blobmsg_add_string(&platform->response, "handshake_dispatch",
+        df_gvs_call_dispatch_state_name(call_status.handshake_dispatch));
     blobmsg_close_table(&platform->response, call_table);
     df_ubus_deployment_health(&platform->response);
     result = ubus_send_reply(context, request, platform->response.head);

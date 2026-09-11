@@ -246,3 +246,29 @@ void test_gvs_replay_reads_an_offline_control_packet_without_transmitting(void) 
     }
     (void)remove(path);
 }
+
+void test_gvs_replay_handshake_gap_and_eof(void) {
+    char path[] = "/tmp/doorfast-hand-replay-XXXXXX";
+    const uint8_t local[6]={0x61,2,1,1,1,1};
+    const uint8_t peer[6]={0x32,2,1,0,1,0};
+    int fd=mkstemp(path);
+    TEST_ASSERT_INT_EQ(1,fd>=0);
+    if(fd<0)return;
+    close(fd);
+    for(int gap=0;gap<2;++gap) {
+        pcap_t *dead=pcap_open_dead(DLT_EN10MB,2048);
+        pcap_dumper_t *dump=pcap_dump_open(dead,path);
+        TEST_ASSERT_INT_EQ(1,dump!=NULL);
+        if(dump==NULL){pcap_close(dead);break;}
+        dump_preemption_packet(dump,0,peer,1,15);
+        if(gap)dump_preemption_packet(dump,11,peer,0xff,0);
+        pcap_dump_close(dump);pcap_close(dead);
+        struct df_gvs_session session={0};
+        struct df_gvs_replay_stats stats;
+        TEST_ASSERT_INT_EQ(DF_OK,df_gvs_replay_handshake_file(path,local,&session,&stats));
+        TEST_ASSERT_INT_EQ(gap?5:1,stats.simulated_frames);
+        TEST_ASSERT_INT_EQ(gap,stats.simulated_disconnects);
+        TEST_ASSERT_INT_EQ(gap?DF_GVS_ENDED:DF_GVS_RINGING,session.state);
+    }
+    remove(path);
+}

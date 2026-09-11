@@ -42,6 +42,19 @@ const payload = {
     }
 };
 
+const handshakePayload = JSON.parse(JSON.stringify(payload));
+Object.assign(handshakePayload.call, {handshake_mode: 'simulated',
+    handshake_active: true, handshake_missed: 2, handshake_next_ms: 1800,
+    handshake_dispatch: 'retry', handshake_dropped: 3});
+assert.deepEqual(model.formatStatus(handshakePayload).at(-1), {
+    title: '保活模拟（仅内存发送）', rows: [
+        ['已启动', '是'], ['未回复次数', '2'],
+        ['距下次探测（毫秒，最近采样）', '1800'],
+        ['发送事务', '等待重试'], ['累计丢弃动作', '3']
+    ]});
+handshakePayload.call.handshake_missed = -1;
+assert.throws(() => model.formatStatus(handshakePayload), TypeError);
+
 assert.deepEqual(model.formatStatus(payload), [
     {
         title: '服务',

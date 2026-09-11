@@ -86,6 +86,12 @@ void test_gvs_call_control_handshake_receive_and_retry(void) {
     TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_receive(&control,packet,
         length,local,&session,&deadline,200,&result));
     TEST_ASSERT_INT_EQ(1,result.handshake_action_dropped);
+    struct df_gvs_call_control_status status;
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_status(&control,&session,&status));
+    TEST_ASSERT_INT_EQ(1,status.handshake_active);
+    TEST_ASSERT_INT_EQ(1,status.handshake_dropped);
+    TEST_ASSERT_INT_EQ(2000,status.handshake_next_ms);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_QUEUED,status.handshake_dispatch);
     TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_step(&control,&session,
         local,&deadline,200,&result));
     TEST_ASSERT_INT_EQ(1,result.handshake_frame_ready);

@@ -22,10 +22,13 @@ struct df_gvs_replay_stats {
     size_t invalid_timestamps;
     size_t time_sync_updates;
     size_t rejected_time_sync;
+    size_t simulated_frames, simulated_disconnects, handshake_received;
 };
 
 int df_gvs_replay_file(const char *path, const uint8_t identity[6],
                        struct df_gvs_session *session,
                        struct df_gvs_replay_stats *stats);
+int df_gvs_replay_handshake_file(const char *path, const uint8_t identity[6],
+    struct df_gvs_session *session, struct df_gvs_replay_stats *stats);
 
 #endif

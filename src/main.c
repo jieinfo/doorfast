@@ -17,7 +17,7 @@
 #define DF_MAX_LEGACY_CONFIG_BYTES 65536
 
 static void df_print_usage(FILE *stream) {
-    (void)fputs("Usage: doorfast --help | --config <path> | --preflight <path> | --import-legacy <path> | --inspect-pcap <path> <IS-address>\n", stream);
+    (void)fputs("Usage: doorfast --help | --config <path> | --preflight <path> | --import-legacy <path> | --inspect-pcap <path> <IS-address> | --simulate-handshake-pcap <path> <IS-address>\n", stream);
 }
 
 static int df_read_deployment_config(const char *path,
@@ -142,7 +142,9 @@ int main(int argc, char **argv) {
         strcmp(argv[3], "--root") == 0)
         return df_run_preflight(argv[2], argv[4]);
 #endif
-    if (argc == 4 && strcmp(argv[1], "--inspect-pcap") == 0) {
+    if (argc == 4 && (strcmp(argv[1], "--inspect-pcap") == 0 ||
+                     strcmp(argv[1], "--simulate-handshake-pcap") == 0)) {
+        bool simulate = strcmp(argv[1], "--simulate-handshake-pcap") == 0;
         uint8_t identity[6];
         struct df_gvs_session session = {0};
         struct df_gvs_replay_stats stats = {0};
@@ -150,7 +152,8 @@ int main(int argc, char **argv) {
             (void)fputs("doorfast: invalid indoor address\n", stderr);
             return 2;
         }
-        if (df_gvs_replay_file(argv[2], identity, &session, &stats) != DF_OK) {
+        if ((simulate ? df_gvs_replay_handshake_file(argv[2], identity, &session, &stats)
+                      : df_gvs_replay_file(argv[2], identity, &session, &stats)) != DF_OK) {
             (void)fputs("doorfast: cannot inspect capture\n", stderr);
             return 2;
         }
@@ -162,6 +165,9 @@ int main(int argc, char **argv) {
                      stats.observed_hangups, stats.preempted_sessions,
                      stats.timed_out_sessions, stats.invalid_timestamps,
                      stats.time_sync_updates, stats.rejected_time_sync);
+        if (simulate)
+            (void)printf("mode=simulated transport=memory frames=%zu disconnects=%zu received=%zu\n",
+                stats.simulated_frames, stats.simulated_disconnects, stats.handshake_received);
         return 0;
     }
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
