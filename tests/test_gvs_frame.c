@@ -89,6 +89,48 @@ void test_gvs_frame_reads_payload_length_as_little_endian(void) {
     TEST_ASSERT_INT_EQ(2, frame.payload_length);
 }
 
+void test_gvs_frame_accepts_observed_incoming_call_length_bias(void) {
+    uint8_t packet[52] = {0};
+    const uint8_t payload[] = {0x01, 0x20, 0x6f, 0x00, 0x20, 0x6e, 0x1e, 0x00, 0x00};
+    struct df_gvs_frame frame = {0};
+    struct df_event event = {0};
+    size_t length = make_frame(packet, 0x03, 0x01, payload, sizeof(payload));
+
+    /* Three independent field calls declared 15 while carrying 9 bytes. */
+    packet[40] = 15;
+    packet[41] = 0;
+    TEST_ASSERT_INT_EQ(DF_OK,
+                       df_gvs_frame_parse(packet, length, &frame, &event));
+    TEST_ASSERT_INT_EQ(DF_EVENT_INCOMING_CALL, event.type);
+    TEST_ASSERT_INT_EQ(9, frame.payload_length);
+    TEST_ASSERT_INT_EQ(1, frame.payload != NULL);
+    if (frame.payload != NULL)
+        TEST_ASSERT_INT_EQ(0, memcmp(frame.payload, payload, sizeof(payload)));
+
+    /* The exception is exact: nearby biases and extra bytes remain invalid. */
+    packet[40] = 14;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, length, &frame, &event));
+    packet[40] = 16;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, length, &frame, &event));
+    packet[40] = 15;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, length - 1, &frame, &event));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, length + 1, &frame, &event));
+
+    /* No other family/opcode may use the compatibility rule. */
+    packet[38] = 0x03;
+    packet[39] = 0x04;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, length, &frame, &event));
+    packet[38] = 0x04;
+    packet[39] = 0x01;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_frame_parse(packet, length, &frame, &event));
+}
+
 void test_gvs_frame_exposes_payload_from_synthetic_control_frame(void) {
     uint8_t packet[49] = {0};
     const uint8_t expected_payload[] = {1, 2, 3, 4, 5, 6, 7};

@@ -58,3 +58,27 @@ void test_evidence_classifier_separates_recent_and_control(void) {
     TEST_ASSERT_INT_EQ(0, classification.recent);
     TEST_ASSERT_INT_EQ(0, classification.valid_control);
 }
+
+void test_evidence_classifier_keeps_observed_incoming_call(void) {
+    uint8_t packet[512];
+    struct df_capture_record record = {.data = packet};
+    struct df_evidence_classification classification;
+    const uint8_t payload[9] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    size_t length = make_packet(packet, 8300, 51, 51);
+
+    memcpy(packet + 42, "GVSGVS\xa5\xa5\xa5\xa5", 10);
+    memset(packet + 52, 0, 28);
+    packet[80] = 0x03;
+    packet[81] = 0x01;
+    packet[82] = 15;
+    packet[83] = 0;
+    memcpy(packet + 84, payload, sizeof(payload));
+    record.captured_length = record.original_length = length;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_evidence_classify(&record, &classification));
+    TEST_ASSERT_INT_EQ(1, classification.recent);
+    TEST_ASSERT_INT_EQ(1, classification.valid_control);
+    TEST_ASSERT_INT_EQ(0x03, classification.family);
+    TEST_ASSERT_INT_EQ(0x01, classification.opcode);
+    TEST_ASSERT_INT_EQ(51, (int)classification.control_length);
+}

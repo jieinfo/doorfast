@@ -36,6 +36,8 @@ static enum df_event_type df_gvs_event_type(uint8_t family, uint8_t opcode) {
 
 int df_gvs_frame_parse(const uint8_t *data, size_t length,
                        struct df_gvs_frame *frame, struct df_event *event) {
+    size_t actual_payload_length;
+    uint16_t declared_payload_length;
     if (data == NULL || frame == NULL || event == NULL || length < DF_GVS_MINIMUM_LENGTH) {
         return DF_ERR_INVALID;
     }
@@ -49,11 +51,17 @@ int df_gvs_frame_parse(const uint8_t *data, size_t length,
     memcpy(frame->source, data + DF_GVS_SOURCE_OFFSET, sizeof(frame->source));
     frame->family = data[DF_GVS_FAMILY_OFFSET];
     frame->opcode = data[DF_GVS_OPCODE_OFFSET];
-    frame->payload_length = (uint16_t)(data[DF_GVS_PAYLOAD_LENGTH_OFFSET] |
-                                       ((uint16_t)data[DF_GVS_PAYLOAD_LENGTH_OFFSET + 1] << 8));
-    if (length != (size_t)DF_GVS_PAYLOAD_OFFSET + (size_t)frame->payload_length) {
+    declared_payload_length =
+        (uint16_t)(data[DF_GVS_PAYLOAD_LENGTH_OFFSET] |
+                   ((uint16_t)data[DF_GVS_PAYLOAD_LENGTH_OFFSET + 1] << 8));
+    actual_payload_length = length - DF_GVS_PAYLOAD_OFFSET;
+    if (actual_payload_length != declared_payload_length &&
+        !(frame->family == 0x03 && frame->opcode == 0x01 &&
+          declared_payload_length >= 6 &&
+          actual_payload_length == (size_t)declared_payload_length - 6)) {
         return DF_ERR_INVALID;
     }
+    frame->payload_length = (uint16_t)actual_payload_length;
     frame->payload = data + DF_GVS_PAYLOAD_OFFSET;
     event->type = df_gvs_event_type(frame->family, frame->opcode);
     if (frame->family == 0x03 && frame->opcode == 0x83 &&
