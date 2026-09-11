@@ -4,6 +4,30 @@
 #include "gvs_memory_sender.h"
 #include "test.h"
 
+void test_gvs_call_control_handshake_memory_lifecycle(void) {
+    const uint8_t local[6] = {0x61,2,1,1,1,1};
+    struct df_gvs_session session = {.state=DF_GVS_RINGING,.generation=9,
+        .peer={0x32,2,1,0,1,0}};
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control,0,df_gvs_placeholder_header_fields,NULL));
+    for (unsigned i=0; i<5; ++i) {
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
+            &control,&session,local,&deadline,i*2000,&result));
+        TEST_ASSERT_INT_EQ(1,result.handshake_frame_ready);
+        TEST_ASSERT_INT_EQ(42,control.handshake_sender.length);
+        TEST_ASSERT_INT_EQ(0x51,control.handshake_sender.bytes[39]);
+        TEST_ASSERT_INT_EQ(DF_GVS_CALL_SENT,control.handshake_dispatch.state);
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
+        &control,&session,local,&deadline,10000,&result));
+    TEST_ASSERT_INT_EQ(1,result.handshake.disconnected);
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED,session.state);
+    TEST_ASSERT_INT_EQ(0,deadline.armed);
+}
+
 static size_t control_reply(uint8_t out[64], const uint8_t destination[6],
     const uint8_t source[6], uint8_t opcode, const uint8_t *payload,
     size_t payload_length) {
@@ -33,6 +57,66 @@ static int reject_control_header(
     (void)encryption_code;
     (void)context;
     return DF_ERR_INVALID;
+}
+
+void test_gvs_call_control_handshake_receive_and_retry(void) {
+    const uint8_t local[6] = {0x61,2,1,1,1,1};
+    struct df_gvs_session session = {.state=DF_GVS_RINGING,.generation=9,
+        .peer={0x32,2,1,0,1,0}};
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_control control, before;
+    struct df_gvs_call_control_result result;
+    uint8_t packet[64];
+    size_t length;
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_init(&control,0,
+        df_gvs_placeholder_header_fields,NULL));
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_step(&control,&session,
+        local,&deadline,0,&result));
+    length=control_reply(packet,local,session.peer,0x52,NULL,0);
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_receive(&control,packet,
+        length,local,&session,&deadline,100,&result));
+    TEST_ASSERT_INT_EQ(1,result.handshake.accepted_reply);
+    TEST_ASSERT_INT_EQ(0,control.handshake.missed_replies);
+    TEST_ASSERT_INT_EQ(2000,control.handshake.next_probe_ms);
+    length=control_reply(packet,local,session.peer,0x51,NULL,0);
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_receive(&control,packet,
+        length,local,&session,&deadline,200,&result));
+    TEST_ASSERT_INT_EQ(1,result.handshake.accepted_ask);
+    TEST_ASSERT_INT_EQ(2200,control.handshake.next_probe_ms);
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_receive(&control,packet,
+        length,local,&session,&deadline,200,&result));
+    TEST_ASSERT_INT_EQ(1,result.handshake_action_dropped);
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_step(&control,&session,
+        local,&deadline,200,&result));
+    TEST_ASSERT_INT_EQ(1,result.handshake_frame_ready);
+    TEST_ASSERT_INT_EQ(0x52,control.handshake_sender.bytes[39]);
+    before=control;
+    packet[16]^=1;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,df_gvs_call_control_receive(&control,
+        packet,length,local,&session,&deadline,201,&result));
+    TEST_ASSERT_INT_EQ(0,memcmp(&before,&control,sizeof(control)));
+    control.handshake_sender.provide_fields=reject_control_header;
+    for(unsigned i=0;i<3;++i) {
+        TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_step(&control,&session,
+            local,&deadline,2200+i*100,&result));
+    }
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAILED,control.handshake_dispatch.state);
+    TEST_ASSERT_INT_EQ(3,control.handshake_dispatch.attempts);
+    TEST_ASSERT_INT_EQ(DF_GVS_RINGING,session.state);
+    session.generation++;
+    session.peer[4]=2;
+    control.handshake_sender.provide_fields=df_gvs_placeholder_header_fields;
+    TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_control_step(&control,&session,
+        local,&deadline,2500,&result));
+    TEST_ASSERT_INT_EQ(1,result.handshake_frame_ready);
+    TEST_ASSERT_INT_EQ(2,control.handshake_sender.bytes[14]);
+    TEST_ASSERT_INT_EQ(1,control.handshake.missed_replies);
+    TEST_ASSERT_INT_EQ(4500,control.handshake.next_probe_ms);
+    before=control;
+    length=control_reply(packet,local,session.peer,0x51,NULL,0);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,df_gvs_call_control_receive(&control,
+        packet,length,local,&session,&deadline,2499,&result));
+    TEST_ASSERT_INT_EQ(0,memcmp(&before,&control,sizeof(control)));
 }
 
 void test_gvs_call_control_answer_reaches_confirmation(void) {

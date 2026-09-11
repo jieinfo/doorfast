@@ -2,6 +2,7 @@
 #define DOORFAST_GVS_CALL_CONTROL_H
 
 #include "gvs_call_runtime.h"
+#include "gvs_handshake.h"
 
 #define DF_GVS_CALL_CONFIRM_TIMEOUT_MS 1000U
 
@@ -9,10 +10,16 @@ struct df_gvs_call_control {
     struct df_gvs_call_dispatch dispatch;
     struct df_gvs_call_ack acknowledgement;
     struct df_gvs_call_memory_sender sender;
+    struct df_gvs_handshake handshake;
+    struct df_gvs_call_dispatch handshake_dispatch;
+    struct df_gvs_call_memory_sender handshake_sender;
 };
 
 struct df_gvs_call_control_result {
     struct df_gvs_call_runtime_result runtime;
+    struct df_gvs_handshake_result handshake;
+    bool handshake_frame_ready;
+    bool handshake_action_dropped;
     bool frame_ready;
     bool confirmation_started;
     bool dispatch_failed;

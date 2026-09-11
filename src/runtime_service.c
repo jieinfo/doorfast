@@ -343,6 +343,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 goto done;
             }
             timed_out = tick_result.runtime.session_timed_out;
+            if (tick_result.handshake_frame_ready)
+                (void)fprintf(stdout, "doorfast: event=handshake_frame opcode=%02x mode=simulated transport=memory\n",
+                              call_control.handshake_sender.bytes[39]);
+            if (tick_result.handshake.disconnected)
+                (void)fputs("doorfast: event=handshake_disconnected mode=simulated\n", stdout);
+            if (tick_result.handshake_action_dropped)
+                (void)fputs("doorfast: event=handshake_action_dropped mode=simulated\n", stdout);
             if (tick_result.runtime.acknowledgement_expired) {
                 (void)fputs("doorfast: event=call_ack_expired mode=passive\n", stdout);
             } else if (tick_result.runtime.acknowledgement_cancelled) {
@@ -485,6 +492,11 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 const struct df_gvs_receive_result *result =
                     &call_result.runtime.receive;
                 unsigned i;
+                if (call_result.handshake.accepted_ask || call_result.handshake.accepted_reply)
+                    (void)fprintf(stdout, "doorfast: event=handshake_received opcode=%02x mode=passive\n",
+                        call_result.handshake.accepted_ask ? 0x51 : 0x52);
+                if (call_result.handshake_action_dropped)
+                    (void)fputs("doorfast: event=handshake_action_dropped mode=simulated\n", stdout);
                 if (call_result.runtime.acknowledgement_confirmed) {
                     (void)fputs("doorfast: event=call_ack_confirmed mode=passive\n", stdout);
                 } else if (call_result.runtime.acknowledgement_rejected) {

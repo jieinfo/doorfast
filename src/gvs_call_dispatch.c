@@ -1,4 +1,5 @@
 #include "gvs_call_dispatch.h"
+#include "gvs_memory_sender.h"
 #include <string.h>
 
 enum df_gvs_send_attempt_result df_gvs_call_memory_attempt(
@@ -77,6 +78,13 @@ int df_gvs_call_dispatch_enqueue(struct df_gvs_call_dispatch *d,
     } else if (c->type == DF_GVS_CALL_COMMAND_HANGUP && c->payload_length == 1) {
         status = df_gvs_call_command_prepare_hangup(&s, s.generation,
             c->source, c->payload[0], &checked);
+    } else if (c->type == DF_GVS_CALL_COMMAND_HAND_ASK ||
+               c->type == DF_GVS_CALL_COMMAND_HAND_REPLY) {
+        uint8_t bytes[DF_GVS_CALL_COMMAND_MAX_FRAME_SIZE];
+        size_t length;
+        status = df_gvs_call_command_serialize(c, bytes, sizeof(bytes),
+            &length, df_gvs_placeholder_header_fields, NULL);
+        checked = *c;
     } else return DF_ERR_INVALID;
     if (status != DF_OK || checked.opcode != c->opcode ||
         memcmp(checked.payload, c->payload, c->payload_length) != 0)

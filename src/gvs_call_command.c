@@ -1,4 +1,5 @@
 #include "gvs_call_command.h"
+#include "gvs_handshake.h"
 
 #include <string.h>
 
@@ -86,6 +87,22 @@ int df_gvs_call_command_serialize(
     df_gvs_header_provider_fn provide_fields, void *fields_context) {
     if (output_length != NULL) {
         *output_length = 0U;
+    }
+    if (command != NULL && command->valid &&
+        (command->type == DF_GVS_CALL_COMMAND_HAND_ASK ||
+         command->type == DF_GVS_CALL_COMMAND_HAND_REPLY)) {
+        struct df_gvs_handshake_action action = {0};
+        if (command->payload_length != 0 || command->opcode !=
+            (command->type == DF_GVS_CALL_COMMAND_HAND_ASK ? 0x51 : 0x52))
+            return DF_ERR_INVALID;
+        action.valid = true;
+        action.type = command->type == DF_GVS_CALL_COMMAND_HAND_ASK
+            ? DF_GVS_HANDSHAKE_ASK : DF_GVS_HANDSHAKE_REPLY;
+        action.session_generation = command->session_generation;
+        memcpy(action.destination, command->destination, 6);
+        memcpy(action.source, command->source, 6);
+        return df_gvs_handshake_action_serialize(&action, output, capacity,
+            output_length, provide_fields, fields_context);
     }
     if (command == NULL || !command->valid || output_length == NULL ||
         command->session_generation == 0U ||

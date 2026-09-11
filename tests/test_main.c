@@ -136,7 +136,11 @@ int test_suite_count(void) {
     return 118;
 }
 
+void test_gvs_call_control_handshake_memory_lifecycle(void);
+void test_gvs_call_control_handshake_receive_and_retry(void);
 int main(void) {
+    test_gvs_call_control_handshake_memory_lifecycle();
+    test_gvs_call_control_handshake_receive_and_retry();
     test_gvs_observer_batch_preemption();
     test_gvs_replay_preemption_deadline();
     test_gvs_session_preemption_transaction();
