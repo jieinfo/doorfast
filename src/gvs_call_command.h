@@ -16,6 +16,8 @@ enum df_gvs_call_command_type {
     DF_GVS_CALL_COMMAND_NONE = 0,
     DF_GVS_CALL_COMMAND_ANSWER = 1,
     DF_GVS_CALL_COMMAND_HANGUP,
+    DF_GVS_CALL_COMMAND_HAND_ASK,
+    DF_GVS_CALL_COMMAND_HAND_REPLY,
 };
 
 struct df_gvs_call_command {

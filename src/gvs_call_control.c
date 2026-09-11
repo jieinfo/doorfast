@@ -19,7 +19,25 @@ int df_gvs_call_control_init(struct df_gvs_call_control *control,
     df_gvs_call_ack_init(&control->acknowledgement, now_ms);
     control->sender.provide_fields = provide_fields;
     control->sender.fields_context = fields_context;
+    control->handshake_sender = control->sender;
+    df_gvs_call_dispatch_init(&control->handshake_dispatch, now_ms);
+    control->handshake.last_now_ms = now_ms;
     return DF_OK;
+}
+
+static int handshake_enqueue(struct df_gvs_call_control *control,
+    const struct df_gvs_handshake_action *action, uint64_t now) {
+    struct df_gvs_call_command command = {0};
+    if (!action->valid) return DF_OK;
+    command.valid = true;
+    command.type = action->type == DF_GVS_HANDSHAKE_ASK
+        ? DF_GVS_CALL_COMMAND_HAND_ASK : DF_GVS_CALL_COMMAND_HAND_REPLY;
+    command.opcode = action->type == DF_GVS_HANDSHAKE_ASK ? 0x51 : 0x52;
+    command.session_generation = action->session_generation;
+    memcpy(command.destination, action->destination, 6);
+    memcpy(command.source, action->source, 6);
+    return df_gvs_call_dispatch_enqueue(&control->handshake_dispatch,
+                                       &command, now);
 }
 
 static int df_gvs_call_control_enqueue(
@@ -90,10 +108,42 @@ int df_gvs_call_control_step(
     next = *control;
     next_session = *session;
     next_deadline = *deadline;
+    if (df_gvs_handshake_tick(&next.handshake, &next_session, local, now_ms,
+                              &next_result.handshake) != DF_OK)
+        return DF_ERR_INVALID;
+    if (next_result.handshake.disconnected)
+        df_gvs_deadline_cancel(&next_deadline);
     if (df_gvs_call_runtime_tick(
             &next.acknowledgement, local, &next_session, &next_deadline,
             now_ms, &next_result.runtime) != DF_OK) {
         return DF_ERR_INVALID;
+    }
+    if (!next.handshake.active &&
+        (next_session.state == DF_GVS_RINGING ||
+         next_session.state == DF_GVS_TALKING ||
+         next_session.state == DF_GVS_PREVIEW)) {
+        if (df_gvs_handshake_start(&next.handshake, &next_session, local,
+                                   now_ms) != DF_OK ||
+            df_gvs_handshake_tick(&next.handshake, &next_session, local,
+                now_ms, &next_result.handshake) != DF_OK)
+            return DF_ERR_INVALID;
+    }
+    previous = next.handshake_dispatch.state;
+    if (df_gvs_call_dispatch_step(&next.handshake_dispatch, &next_session,
+            local, now_ms, df_gvs_call_memory_attempt,
+            &next.handshake_sender) != DF_OK)
+        return DF_ERR_INVALID;
+    next_result.handshake_frame_ready = previous != DF_GVS_CALL_SENT &&
+        next.handshake_dispatch.state == DF_GVS_CALL_SENT;
+    if (handshake_enqueue(&next, &next_result.handshake.action, now_ms) != DF_OK)
+        next_result.handshake_action_dropped = true;
+    if (next_result.handshake.action.valid && !next_result.handshake_action_dropped) {
+        if (df_gvs_call_dispatch_step(&next.handshake_dispatch, &next_session,
+                local, now_ms, df_gvs_call_memory_attempt,
+                &next.handshake_sender) != DF_OK)
+            return DF_ERR_INVALID;
+        next_result.handshake_frame_ready =
+            next.handshake_dispatch.state == DF_GVS_CALL_SENT;
     }
     previous = next.dispatch.state;
     if (df_gvs_call_dispatch_step(
@@ -146,14 +196,31 @@ int df_gvs_call_control_receive(
     struct df_gvs_deadline next_deadline;
     struct df_gvs_call_control_result next_result = {0};
 
+    struct df_gvs_frame frame;
+    struct df_event event;
+
     if (control == NULL || data == NULL || local == NULL || session == NULL ||
         deadline == NULL || result == NULL ||
-        now_ms < control->dispatch.last_now_ms) {
+        now_ms < control->dispatch.last_now_ms ||
+        now_ms < control->handshake.last_now_ms ||
+        now_ms < control->handshake_dispatch.last_now_ms) {
         return DF_ERR_INVALID;
     }
     next = *control;
     next_session = *session;
     next_deadline = *deadline;
+    if (df_gvs_frame_parse(data, length, &frame, &event) != DF_OK)
+        return DF_ERR_INVALID;
+    if (frame.family == 3 && (frame.opcode == 0x51 || frame.opcode == 0x52)) {
+        if (df_gvs_handshake_receive(&next.handshake, data, length,
+                &next_session, local, now_ms, &next_result.handshake) != DF_OK)
+            return DF_ERR_INVALID;
+        if (handshake_enqueue(&next, &next_result.handshake.action, now_ms) != DF_OK)
+            next_result.handshake_action_dropped = true;
+        *control = next;
+        *result = next_result;
+        return DF_OK;
+    }
     if (df_gvs_call_runtime_receive(
             &next.acknowledgement, data, length, local, &next_session,
             &next_deadline, now_ms, &next_result.runtime) != DF_OK) {
@@ -182,6 +249,8 @@ const char *df_gvs_call_command_type_name(enum df_gvs_call_command_type type) {
     case DF_GVS_CALL_COMMAND_NONE: return "none";
     case DF_GVS_CALL_COMMAND_ANSWER: return "answer";
     case DF_GVS_CALL_COMMAND_HANGUP: return "hangup";
+    case DF_GVS_CALL_COMMAND_HAND_ASK: return "hand_ask";
+    case DF_GVS_CALL_COMMAND_HAND_REPLY: return "hand_reply";
     default: return NULL;
     }
 }
