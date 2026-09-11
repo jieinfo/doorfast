@@ -606,3 +606,59 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 当前实现只接受 `TYPE`、`COUNT`、`INFO` 及其内部字段按旧发送方法的生成顺序出现；真实设备若改变 JSON 成员顺序，需要将解析器扩展为顺序无关。同步版本已经持久化，首批字段已经登记但缺少合法值来源，因此保持默认禁用。本地模拟已经覆盖选举、维护者失联接管、候选在线维护、`07/01` 待回复生成、离线发送事务、公共头提供器契约和来电目标选择，但没有创建网络发送路径。只读状态入口已在 ImmortalWrt 25.12.1 x86_64 虚拟机完成安装、启停、冷启动、卸载重装、升级、备份恢复式回滚及 `07/81` 在线超时验收；正式签名、未来配置迁移、长期运行与真实门口机流量仍未完成。真实公共头兼容性和门口机接受性仍是进入主动网络阶段的主要关口；本阶段不证明完整主机模式。
 
 2026-09-09 目标验收追加：r5 完成 r4 → r5 升级、07/01 待回复接收、07/81 独立接收、同步版本持久化及来电事件验收（E-014）。`r6` 的远程主机与 APK 构建检查已经通过；`r7` 已完成离线发送事务测试（E-016），并在目标虚拟机验证两个探测请求从抓包入口进入独立模拟成功终态（E-017）。`r8` 已完成内存构帧实现、本地验证及目标 APK 验收（E-018、E-019）；`r9` 已完成公共头提供器契约、本地测试及 r8 → r9 目标升级回归（E-020、E-021）。真实设备认可仍未验证。
+
+## 7. 2026-09-11 来电回执追加
+
+### Evidence E-022
+
+- `title`: MT8157 对每次来电通告生成固定布局的 `03/81`
+- `observed_at`: 2026-09-11
+- `source_type`: file
+- `source_ref`: `TalkBackBusiness.smali`, `com/gvs/general/protocol/c.smali`
+- `content_hash`: `TalkBackBusiness.smali=e9dd4327e7dd378cc17324bb3fa6155c6f4e065c6f312fe24ccda573630c657c; protocol/c.smali=f00c40bf2e45511d6e55ed5903d2231877073d43a2d78f1485d306eeb8a20196`
+- `artifact_path`: 本机授权分析目录，不纳入公开仓库
+- `repro_command`: `sed -n '1760,1840p' <decoded>/smali_classes3/com/gvs/vdp/talkback_is/TalkBackBusiness.smali && sed -n '1020,1140p' <decoded>/smali_classes3/com/gvs/general/protocol/c.smali`
+- `raw_excerpt`: `TalkBackBusiness` 在接受 `03/01` 后调用 `sendCallReply`；构造函数写入 `03/81` 和 `01 00 02 <port-be> 1e 01`。相同来源的重复来电再次调用回执，但不重新初始化会话。
+- `linked_workitem`: M3
+- `supersedes`: none
+
+### Evidence E-023
+
+- `title`: Doorfast 按每次已接受来电生成代际绑定的 `03/81` 内存帧
+- `observed_at`: 2026-09-11
+- `source_type`: command
+- `source_ref`: `src/gvs_incoming_reply.c`, `tests/test_gvs_incoming_reply.c`
+- `content_hash`: `gvs_incoming_reply.c=fbe732df45e443c3fd9ebbc533ac3ede12903eea932a18280a0cd82955445593; gvs_incoming_reply.h=4932a03ee02b9382ae0e3501ee575b4b69115c5e21c2abe936a88f0e37b2c952; test_gvs_incoming_reply.c=51850578b9e9026bc9fe18a5b7e774c9adec25a630877b8d9df65b5eeaa248c1`
+- `artifact_path`: `src/gvs_incoming_reply.c`, `src/gvs_incoming_reply.h`, `tests/test_gvs_incoming_reply.c`
+- `repro_command`: `make -B test doorfast && sh tests/test_main_cli.sh && sh tests/test_gvs_peer_sim_cli.sh && sh tests/test_package_manifest.sh && node tests/test_luci_status.js`
+- `raw_excerpt`: 114 项 C 测试通过；三次声明 15、实载 9 的 `03/01` 各生成 49 字节 `03/81`，会话代次和首次振铃期限不变，`03/02` 后拒绝继续生成。
+- `linked_workitem`: M3
+- `supersedes`: none
+
+### Finding F-015
+
+- `title`: 来电回执与用户接听已经在 Doorfast 中分离
+- `severity`: n/a_re
+- `category`: reverse_algo
+- `status`: validated
+- `evidence_ids`: E-022, E-023
+- `location`: `TalkBackBusiness`, `protocol.c sendCallReply`, `src/gvs_incoming_reply.c`
+- `impact`: Doorfast 可以离线复现来电振铃回执，而不会把它误当成 `03/03` 用户接听或重复创建会话；这补齐了独立主机呼叫信令的首个自动响应环节。
+- `confidence`: high
+- `repro_steps`: 执行 E-022 静态定位命令核对构造链，再执行 E-023 测试命令核对重复回执、代次和期限。
+- `remediation`: 继续保持生产网络零发送；先实现并验证 `03/51`/`03/52` 两秒保活及连续丢失终态，再接入统一模拟事务。
+
+### Path P-004
+
+- `title`: 门口机来电通告到室内机振铃回执
+- `path_type`: callflow
+- `start`: 发往本户逻辑身份的 `03/01`
+- `goal`: 生成与当前会话代次绑定的 `03/81` 内存帧
+- `steps`:
+  1. 完整公共头与 `03/01` 字段长度兼容规则解析报文。evidence: E-023 — finding: F-015
+  2. 地址过滤和优先级状态机接受来电；同源重传保留当前代次与首次振铃期限。evidence: E-022, E-023 — finding: F-015
+  3. 每个已接受通告生成目标、来源、代次和媒体端口快照。evidence: E-022, E-023 — finding: F-015
+  4. 公共序列化器生成 `03/81` 与七字节固定布局，并由生产解析器回读。evidence: E-023 — finding: F-015
+- `residual_risks`: 公共头仍使用测试占位提供器；尚未接入模拟发送事务或真实网络；`03/51`/`03/52` 保活和 `03/55` 视频请求不在本次实现范围。
+
+Timeline 追加：2026-09-11 完成 `03/81` 静态构造链核对、三重传离线回执实现与 114 项 C 测试；生产路径继续保持零发送。
