@@ -144,11 +144,13 @@ static int df_references_role(const char *text,
 }
 
 static int df_network_interface_reference(
-    const char *text, const struct df_deployment_config *config) {
+    const char *text, const struct df_deployment_config *config,
+    char *alias, size_t alias_size) {
     const char *line = text;
-    int in_interface = 0;
+    int in_interface = 0, referenced = 0, device = 0, proto = 0, bad = 0;
+    char section[128] = "";
 
-    while (*line) {
+    for (;;) {
         size_t length = strcspn(line, "\n");
         char copy[512];
         if (length >= sizeof(copy)) return 1;
@@ -156,11 +158,49 @@ static int df_network_interface_reference(
         copy[length] = '\0';
         const char *p = copy;
         while (isspace((unsigned char)*p)) p++;
-        if (strncmp(p, "config ", 7) == 0) {
+        if (!*line || strncmp(p, "config ", 7) == 0) {
+            if (in_interface && referenced) {
+                /* Only one explicitly unnumbered bridge alias is allowed. */
+                if (bad || device != 1 || proto != 1 || !section[0] || alias[0] ||
+                    strlen(section) >= alias_size) return 1;
+                strcpy(alias, section);
+            }
+            if (!*line) break;
             in_interface = df_token_match(p + 7, "interface");
-            if (in_interface && df_references_role(p + 7, config)) return 1;
-        } else if (in_interface && df_references_role(p, config))
-            return 1;
+            referenced = in_interface && df_references_role(p + 7, config);
+            device = proto = bad = 0;
+            section[0] = '\0';
+            char type[128], raw[128], extra;
+            if (in_interface) {
+                if (sscanf(p, "config %127s %127s %c", type, raw, &extra) != 2)
+                    bad = 1;
+                else {
+                    size_t n = strlen(raw);
+                    if (n >= 2 && (raw[0] == '\'' || raw[0] == '"') && raw[n-1] == raw[0]) {
+                        raw[n-1] = '\0';
+                        memmove(raw, raw + 1, n - 1);
+                    }
+                    strcpy(section, raw);
+                }
+            }
+        } else if (in_interface && *p && *p != '#') {
+            char key[128], raw[128], extra;
+            referenced |= df_references_role(p, config);
+            if (sscanf(p, "option %127s %127s %c", key, raw, &extra) != 2) bad = 1;
+            else {
+                size_t n = strlen(raw);
+                if (n >= 2 && (raw[0] == '\'' || raw[0] == '"') && raw[n-1] == raw[0]) {
+                    raw[n-1] = '\0';
+                    memmove(raw, raw + 1, n - 1);
+                }
+                if (!strcmp(key, "device") && !strcmp(raw, config->bridge)) device++;
+                else if (!strcmp(key, "proto") && !strcmp(raw, "none")) proto++;
+                else if ((!strcmp(key, "multipath") && !strcmp(raw, "off")) ||
+                         (!strcmp(key, "ipv6") && !strcmp(raw, "0")) ||
+                         (!strcmp(key, "auto") && !strcmp(raw, "1"))) { }
+                else bad = 1;
+            }
+        }
         line += length;
         if (*line == '\n') line++;
     }
@@ -312,6 +352,7 @@ int df_deployment_snapshot_collect(const struct df_deployment_config *config,
                                    struct df_deployment_snapshot *out) {
     struct df_deployment_snapshot snapshot = {0};
     char text[DF_SNAPSHOT_FILE_MAX];
+    char alias[128] = "";
 
     if (out == NULL || !df_root_valid(root) ||
         df_deployment_config_validate(config) != DF_OK) return DF_ERR_INVALID;
@@ -330,13 +371,15 @@ int df_deployment_snapshot_collect(const struct df_deployment_config *config,
         snapshot.network_interface_reference = true;
     else
         snapshot.network_interface_reference =
-            df_network_interface_reference(text, config) != 0;
+            df_network_interface_reference(text, config, alias, sizeof(alias)) != 0;
     if (df_read_config(root, "firewall", text, sizeof(text)) != DF_OK)
         snapshot.firewall_reference = true;
-    else snapshot.firewall_reference = df_references_role(text, config) != 0;
+    else snapshot.firewall_reference = df_references_role(text, config) != 0 ||
+        (alias[0] && df_token_match(text, alias));
     if (df_read_config(root, "dhcp", text, sizeof(text)) != DF_OK)
         snapshot.dhcp_ra_reference = true;
-    else snapshot.dhcp_ra_reference = df_references_role(text, config) != 0;
+    else snapshot.dhcp_ra_reference = df_references_role(text, config) != 0 ||
+        (alias[0] && df_token_match(text, alias));
     snapshot.doorfast_passive_only = df_read_passive(root);
     df_collect_lldp(root, &snapshot);
     df_collect_mount(config, root, &snapshot);

@@ -10,3 +10,37 @@ config interface 'lan'
 
 config interface 'br-managed'
 	option proto 'none'
+
+config interface 'door'
+	option proto 'none'
+	option device 'br-door'
+	option multipath 'off'
+
+config interface 'static_alias'
+	option device 'br-static'
+	option proto 'static'
+
+config interface 'missing_proto'
+	option device 'br-missing-proto'
+
+config interface 'duplicate_proto'
+	option device 'br-duplicate-proto'
+	option proto 'none'
+	option proto 'none'
+
+config interface 'address_option'
+	option device 'br-address-option'
+	option proto 'none'
+	option ipaddr '192.0.2.1'
+
+config interface 'firewall_alias'
+	option device 'br-alias-firewall'
+	option proto 'none'
+
+config interface 'dhcp_alias'
+	option device 'br-alias-dhcp'
+	option proto 'none'
+
+config interface "double_alias"
+	option device "br-double-quoted"
+	option proto "none"
