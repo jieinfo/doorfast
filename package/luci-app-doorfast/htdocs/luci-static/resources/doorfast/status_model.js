@@ -191,9 +191,14 @@ var statusModel = {
     staleLabel: '陈旧'
 };
 
+/* LuCI's class loader wins if the host page also exposes a CommonJS global. */
+if (typeof baseclass !== 'undefined' && baseclass !== null &&
+    typeof baseclass.extend === 'function')
+    return baseclass.extend(statusModel);
+
 if (typeof module === 'object' && module.exports) {
     module.exports = statusModel;
     return statusModel;
 }
 
-return baseclass.extend(statusModel);
+return statusModel;

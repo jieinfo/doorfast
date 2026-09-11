@@ -20,16 +20,20 @@ const modelPath = path.join(__dirname, '..', 'package',
     'luci-app-doorfast', 'htdocs', 'luci-static', 'resources',
     'doorfast', 'status_model.js');
 const source = fs.readFileSync(modelPath, 'utf8');
-const fakeBaseclass = { extend: function(properties) {
+function fakeBaseclass() {}
+fakeBaseclass.extend = function(properties) {
     function LuCIClass() {}
     Object.assign(LuCIClass.prototype, properties);
     return LuCIClass;
-} };
+};
 const luciFactory = new Function('window', 'document', 'L', 'baseclass',
     'module', source);
 const LuCIModel = luciFactory({}, {}, {}, fakeBaseclass, undefined);
 assert.equal(typeof LuCIModel, 'function');
 assert.equal(typeof new LuCIModel().formatStatus, 'function');
+const LuCIModelWithCommonJsGlobal = luciFactory({}, {}, {}, fakeBaseclass,
+    { exports: {} });
+assert.equal(typeof LuCIModelWithCommonJsGlobal, 'function');
 
 const payload = {
     running: true,

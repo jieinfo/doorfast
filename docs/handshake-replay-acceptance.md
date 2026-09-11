@@ -1,6 +1,8 @@
 # 保活状态查询与离线回放验收（r27）
 
-真实 UDP 发送保持关闭。LuCI r5 新增“保活模拟（仅内存发送）”，展示启动状态、未回复次数、距下次探测的最近采样值、事务状态和进程生命周期内累计丢弃次数。旧服务不返回这些字段时不显示该区块。r5 同时让状态模型继承 LuCI `baseclass`；r4 的纯对象导出会被 ImmortalWrt 25.12.1 的 LuCI 加载器拒绝，Node 单元测试此前没有覆盖这个浏览器加载契约。
+真实 UDP 发送保持关闭。LuCI r6 新增“保活模拟（仅内存发送）”，展示启动状态、未回复次数、距下次探测的最近采样值、事务状态和进程生命周期内累计丢弃次数。旧服务不返回这些字段时不显示该区块。r4 的纯对象导出会被 ImmortalWrt 25.12.1 的 LuCI 加载器拒绝。r5 加入 `baseclass` 后的首次页面复验仍命中浏览器旧资源；清除缓存后的现场类型诊断确认 `baseclass=function`、`baseclass.extend=function`、`module=undefined`。r6 按 `extend` 能力识别 LuCI 类，不再错误限定 `baseclass` 必须为对象；测试替身使用与现场一致的函数类型，并覆盖存在/不存在 CommonJS 全局的两种工厂环境。
+
+2026-09-12 的目标机验收使用 ImmortalWrt 25.12.1 x86_64、Doorfast r27。LuCI r6 修正资源临时覆盖到 r5 安装目录后，`/admin/services/doorfast` 成功显示服务、在线同步、通话控制、最近同步报文、保活模拟和串联部署六个区块；页面显示核心服务运行、被动观察、预检通过、`eth2`/`eth3` 已连接、记录器运行中。CDP 在 6.2 秒观察窗口记录到新的 `/ubus/` 请求，验证五秒轮询执行。正式软件包状态须在 Actions 生成并安装 LuCI r6 APK 后重新对齐。
 
 ubus 现有状态响应的 `call` 表新增 `handshake_mode`、`handshake_active`、`handshake_missed`、`handshake_next_ms`、`handshake_dispatch`、`handshake_dropped`。只读 ACL 沿用现有状态接口；没有新增控制动作。`handshake_next_ms` 为相对最近采样时刻的毫秒值，不是墙钟时间。丢弃计数饱和于 UINT64_MAX，重启清零。
 
