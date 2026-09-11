@@ -147,6 +147,15 @@ function formatStatus(payload) {
             ]
         }
     ];
+    if (call.handshake_mode === 'simulated') {
+        sections.push({title: '保活模拟（仅内存发送）', rows: [
+            ['已启动', yesNo(call.handshake_active)],
+            ['未回复次数', unsignedText(call.handshake_missed, 'handshake_missed')],
+            ['距下次探测（毫秒，最近采样）', unsignedText(call.handshake_next_ms, 'handshake_next_ms')],
+            ['发送事务', callDispatchLabel(call.handshake_dispatch)],
+            ['累计丢弃动作', unsignedText(call.handshake_dropped, 'handshake_dropped')]
+        ]});
+    }
     if (root.deployment && root.deployment.schema_version === 1) {
         var deployment = root.deployment;
         var rows = [['部署配置', deployment.configured === true ? '已启用' : '未启用或不可读取']];

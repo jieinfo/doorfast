@@ -13,6 +13,7 @@ struct df_gvs_call_control {
     struct df_gvs_handshake handshake;
     struct df_gvs_call_dispatch handshake_dispatch;
     struct df_gvs_call_memory_sender handshake_sender;
+    uint64_t handshake_dropped;
 };
 
 struct df_gvs_call_control_result {
@@ -34,6 +35,10 @@ struct df_gvs_call_control_status {
     enum df_gvs_call_dispatch_state dispatch_state;
     enum df_gvs_call_ack_state acknowledgement_state;
     unsigned attempts;
+    bool handshake_active;
+    unsigned handshake_missed;
+    uint64_t handshake_next_ms, handshake_dropped;
+    enum df_gvs_call_dispatch_state handshake_dispatch;
 };
 
 int df_gvs_call_control_init(struct df_gvs_call_control *, uint64_t,

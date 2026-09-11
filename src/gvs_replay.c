@@ -7,6 +7,8 @@
 #include "gvs_deadline.h"
 #include "gvs_packet.h"
 #include "gvs_receive.h"
+#include "gvs_call_control.h"
+#include "gvs_memory_sender.h"
 
 static void df_gvs_replay_count_result(const struct df_gvs_receive_result *result,
                                        struct df_gvs_replay_stats *stats) {
@@ -28,9 +30,9 @@ static void df_gvs_replay_count_result(const struct df_gvs_receive_result *resul
     }
 }
 
-int df_gvs_replay_file(const char *path, const uint8_t identity[6],
+static int replay_file(const char *path, const uint8_t identity[6],
                        struct df_gvs_session *session,
-                       struct df_gvs_replay_stats *stats) {
+                       struct df_gvs_replay_stats *stats, bool simulate) {
     char error_buffer[PCAP_ERRBUF_SIZE] = {0};
     pcap_t *handle;
     const uint8_t *packet;
@@ -39,6 +41,8 @@ int df_gvs_replay_file(const char *path, const uint8_t identity[6],
     struct df_gvs_deadline deadline = {0};
     uint64_t last_ms = 0;
     bool have_time = false;
+    struct df_gvs_call_control control;
+    df_gvs_call_control_init(&control, 0, df_gvs_placeholder_header_fields, NULL);
 
     if (path == NULL || path[0] == '\0' || identity == NULL || session == NULL || stats == NULL) {
         return DF_ERR_INVALID;
@@ -75,6 +79,24 @@ int df_gvs_replay_file(const char *path, const uint8_t identity[6],
             stats->invalid_timestamps++;
             continue;
         }
+        if (simulate && have_time) {
+            /* Drain offline ticks across gaps; inactive sessions skip the gap. */
+            while (last_ms < now_ms) {
+                struct df_gvs_call_control_result tick;
+                uint64_t step = now_ms;
+                if (control.handshake.active && now_ms - last_ms > 100)
+                    step = last_ms + 100;
+                if (df_gvs_call_control_step(&control, session, identity,
+                        &deadline, step, &tick) != DF_OK) {
+                    pcap_close(handle);
+                    return DF_ERR_INVALID;
+                }
+                stats->simulated_frames += tick.handshake_frame_ready;
+                stats->simulated_disconnects += tick.handshake.disconnected;
+                stats->timed_out_sessions += tick.runtime.session_timed_out;
+                last_ms = step;
+            }
+        }
         have_time = true;
         last_ms = now_ms;
         {
@@ -96,8 +118,26 @@ int df_gvs_replay_file(const char *path, const uint8_t identity[6],
             continue;
         }
         stats->control_datagrams++;
-        if (df_gvs_receive_datagram(payload, payload_length, identity, session,
-                                    &deadline, now_ms, &result) != DF_OK) {
+        int received;
+        if (simulate) {
+            struct df_gvs_call_control_result call;
+            received = df_gvs_call_control_receive(&control, payload,
+                payload_length, identity, session, &deadline, now_ms, &call);
+            if (received == DF_OK) {
+                result = call.runtime.receive;
+                stats->handshake_received += call.handshake.accepted_ask || call.handshake.accepted_reply;
+                if (df_gvs_call_control_step(&control, session, identity,
+                        &deadline, now_ms, &call) != DF_OK) {
+                    pcap_close(handle);
+                    return DF_ERR_INVALID;
+                }
+                stats->simulated_frames += call.handshake_frame_ready;
+                stats->simulated_disconnects += call.handshake.disconnected;
+                stats->timed_out_sessions += call.runtime.session_timed_out;
+            }
+        } else received = df_gvs_receive_datagram(payload, payload_length, identity, session,
+                                    &deadline, now_ms, &result);
+        if (received != DF_OK) {
             stats->invalid_datagrams++;
             continue;
         }
@@ -105,4 +145,14 @@ int df_gvs_replay_file(const char *path, const uint8_t identity[6],
     }
     pcap_close(handle);
     return next_result == -1 ? DF_ERR_IO : DF_OK;
+}
+
+int df_gvs_replay_file(const char *path, const uint8_t identity[6],
+    struct df_gvs_session *session, struct df_gvs_replay_stats *stats) {
+    return replay_file(path, identity, session, stats, false);
+}
+
+int df_gvs_replay_handshake_file(const char *path, const uint8_t identity[6],
+    struct df_gvs_session *session, struct df_gvs_replay_stats *stats) {
+    return replay_file(path, identity, session, stats, true);
 }

@@ -179,6 +179,8 @@ int df_gvs_call_control_step(
         next_result.frame_ready = true;
         next_result.confirmation_started = true;
     }
+    if (next_result.handshake_action_dropped && next.handshake_dropped < UINT64_MAX)
+        next.handshake_dropped++;
     *control = next;
     *session = next_session;
     *deadline = next_deadline;
@@ -217,6 +219,8 @@ int df_gvs_call_control_receive(
             return DF_ERR_INVALID;
         if (handshake_enqueue(&next, &next_result.handshake.action, now_ms) != DF_OK)
             next_result.handshake_action_dropped = true;
+        if (next_result.handshake_action_dropped && next.handshake_dropped < UINT64_MAX)
+            next.handshake_dropped++;
         *control = next;
         *result = next_result;
         return DF_OK;
@@ -291,6 +295,7 @@ int df_gvs_call_control_status(
         df_gvs_session_state_name(session->state) == NULL ||
         df_gvs_call_command_type_name(control->dispatch.command.type) == NULL ||
         df_gvs_call_dispatch_state_name(control->dispatch.state) == NULL ||
+        df_gvs_call_dispatch_state_name(control->handshake_dispatch.state) == NULL ||
         df_gvs_call_ack_state_name(control->acknowledgement.state) == NULL) {
         return DF_ERR_INVALID;
     }
@@ -301,6 +306,13 @@ int df_gvs_call_control_status(
     next.dispatch_state = control->dispatch.state;
     next.acknowledgement_state = control->acknowledgement.state;
     next.attempts = control->dispatch.attempts;
+    next.handshake_active = control->handshake.active;
+    next.handshake_missed = control->handshake.missed_replies;
+    next.handshake_next_ms = control->handshake.active &&
+        control->handshake.next_probe_ms > control->handshake.last_now_ms
+        ? control->handshake.next_probe_ms - control->handshake.last_now_ms : 0;
+    next.handshake_dropped = control->handshake_dropped;
+    next.handshake_dispatch = control->handshake_dispatch.state;
     *status = next;
     return DF_OK;
 }
