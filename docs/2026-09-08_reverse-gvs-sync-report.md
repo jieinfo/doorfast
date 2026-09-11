@@ -662,3 +662,59 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `residual_risks`: 公共头仍使用测试占位提供器；尚未接入模拟发送事务或真实网络；`03/51`/`03/52` 保活和 `03/55` 视频请求不在本次实现范围。
 
 Timeline 追加：2026-09-11 完成 `03/81` 静态构造链核对、三重传离线回执实现与 114 项 C 测试；生产路径继续保持零发送。
+
+## 8. 2026-09-11 通话保活追加
+
+### Evidence E-024
+
+- `title`: MT8157 的 `03/51`/`03/52` 保活计时和接收分支
+- `observed_at`: 2026-09-11
+- `source_type`: file
+- `source_ref`: `TalkBackBusiness.smali`, `TalkBackBusiness$9.smali`, `protocol/c.smali`, `extimer/a.smali`, `extimer/c.smali`
+- `content_hash`: `TalkBackBusiness.smali=e9dd4327e7dd378cc17324bb3fa6155c6f4e065c6f312fe24ccda573630c657c; TalkBackBusiness$9.smali=8d8e16b4f3e844eefe497ac6818de2ecf4c853dbad1e6233bf4c2056fad347bf; protocol/c.smali=f00c40bf2e45511d6e55ed5903d2231877073d43a2d78f1485d306eeb8a20196; extimer/a.smali=49ea8b6db347fd6945c609910035b7881c0163466bc08fd5f61b194de9f3edf2; extimer/c.smali=c0a681323113ab634b9698717aef21e42b241e906d21281ca889137c6dd5d221`
+- `artifact_path`: 本机授权分析目录，不纳入公开仓库
+- `repro_command`: `sed -n '1,220p' <decoded>/smali_classes3/com/gvs/vdp/talkback_is/TalkBackBusiness\$9.smali; sed -n '4660,5250p;10420,10520p' <decoded>/smali_classes3/com/gvs/vdp/talkback_is/TalkBackBusiness.smali; sed -n '6460,6880p' <decoded>/smali_classes3/com/gvs/general/protocol/c.smali`
+- `raw_excerpt`: 计时器以 0/2000/2000 注册；回调先增加 `y`，`y > 5` 时断开，否则发送 `03/51`。匹配 `03/52` 只清零 `y`；匹配 `03/51` 重排计时器、清零 `y` 并发送 `03/52`。两种帧均为零载荷。
+- `linked_workitem`: M3
+- `supersedes`: none
+
+### Evidence E-025
+
+- `title`: Doorfast 离线保活状态机和边界测试通过
+- `observed_at`: 2026-09-11
+- `source_type`: command
+- `source_ref`: `src/gvs_handshake.c`, `tests/test_gvs_handshake.c`
+- `content_hash`: `gvs_handshake.c=6f93330be8fc3d9a62c9b7e00b9a278d05287a2f2b03dd7879a5742bd8f785ad; gvs_handshake.h=84ac0b70db9e6c342353994a6174380f2527cf4247e13c911b16814128834205; test_gvs_handshake.c=4e593884fdac373a2818c2d68726f6ac50928afa76de76fd426fbbff2d5c5b50`
+- `artifact_path`: `src/gvs_handshake.c`, `src/gvs_handshake.h`, `tests/test_gvs_handshake.c`
+- `repro_command`: `make -B test doorfast`
+- `raw_excerpt`: 118 项 C 测试通过；五次 `03/51` 内存帧后第六周期结束会话，`03/52` 保留周期，`03/51` 重排周期并生成 `03/52`，错误对端和旧代次不能改变当前交换。
+- `linked_workitem`: M3
+- `supersedes`: none
+
+### Finding F-016
+
+- `title`: GVS 会话保活具有独立、代际绑定的离线实现
+- `severity`: n/a_re
+- `category`: reverse_algo
+- `status`: validated
+- `evidence_ids`: E-024, E-025
+- `location`: `TalkBackBusiness.startHand`, `TalkBackBusiness$9.run`, `src/gvs_handshake.c`
+- `impact`: Doorfast 已能离线复现对端探测、回复、周期重排和失联终态，且迟到帧不能跨会话代次生效；这补齐了主机模式呼叫信令中的连接存活判断。
+- `confidence`: high
+- `repro_steps`: 按 E-024 核对旧 APK 的定时和操作码分支，再运行 E-025 的完整测试。
+- `remediation`: 下一阶段把动作接入统一内存发送事务和守护进程接收分流；公共头兼容完成前继续禁止真实发送。
+
+### Path P-005
+
+- `title`: 活动会话的 GVS 保活调用路径
+- `path_type`: callflow
+- `start`: 已建立并绑定代次的振铃、预览或通话会话
+- `goal`: 持续确认当前对端，或在有界丢失后结束旧会话
+- `steps`:
+  1. 启动保活并立即安排首个 `03/51`。evidence: E-024, E-025 — finding: F-016
+  2. 每个 2 秒周期增加丢失计数，前五次生成零载荷探测。evidence: E-024, E-025 — finding: F-016
+  3. 匹配 `03/52` 清零计数；匹配 `03/51` 同时生成 `03/52` 并从接收时刻重排周期。evidence: E-024, E-025 — finding: F-016
+  4. 第六个未确认周期结束当前代次会话；代次或地址变化提前取消旧保活。evidence: E-025 — finding: F-016
+- `residual_risks`: 当前只有内存动作与占位公共头；尚未接入统一模拟事务、守护进程分流或真实设备发送验收。
+
+Timeline 追加：2026-09-11 完成 `03/51`/`03/52` 两秒保活、五次探测与第六周期断开规则的静态核对及 118 项 C 测试；生产网络仍为零发送。

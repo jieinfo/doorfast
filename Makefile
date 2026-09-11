@@ -26,6 +26,7 @@ TEST_SOURCES += tests/test_gvs_call_ack.c src/gvs_call_ack.c
 TEST_SOURCES += tests/test_gvs_call_runtime.c src/gvs_call_runtime.c
 TEST_SOURCES += tests/test_gvs_call_control.c src/gvs_call_control.c
 TEST_SOURCES += tests/test_gvs_incoming_reply.c src/gvs_incoming_reply.c
+TEST_SOURCES += tests/test_gvs_handshake.c src/gvs_handshake.c
 TEST_SOURCES += tests/test_deployment_config.c src/deployment_config.c
 TEST_SOURCES += tests/test_deployment_preflight.c src/deployment_preflight.c
 TEST_SOURCES += tests/test_deployment_snapshot.c src/deployment_snapshot.c
@@ -47,6 +48,7 @@ build/doorfast: src/deployment_config.h src/deployment_preflight.h src/deploymen
 DAEMON_SOURCES += src/gvs_call_runtime.c
 DAEMON_SOURCES += src/gvs_call_control.c
 DAEMON_SOURCES += src/gvs_incoming_reply.c
+DAEMON_SOURCES += src/gvs_handshake.c
 build/doorfast-tests build/doorfast: src/gvs_call_runtime.h
 build/doorfast-tests build/doorfast: src/gvs_call_control.h src/deployment_config.h
 DAEMON_SOURCES += src/gvs_call_ack.c
