@@ -132,6 +132,7 @@ void test_gvs_call_runtime_confirms_before_talking_transition(void);
 void test_gvs_call_runtime_swallows_wrong_answer(void);
 void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
+void test_gvs_transport_policy(void);
 int test_suite_count(void) {
     return 118;
 }
@@ -172,6 +173,7 @@ int main(void) {
     test_gvs_call_runtime_swallows_wrong_answer();
     test_gvs_call_runtime_confirms_hangup_reply_without_ending_session();
     test_gvs_call_runtime_cancels_ack_after_preemption();
+    test_gvs_transport_policy();
     test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue();
     test_gvs_peer_sim_builds_synthetic_call_frame();
     test_gvs_peer_sim_elects_maintainer_without_peers();
