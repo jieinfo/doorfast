@@ -1,20 +1,23 @@
 import json
+import os
 import socket
 import subprocess
 import unittest
 
 
 class GvsPeerUdpInjectorTest(unittest.TestCase):
+    port = int(os.environ.get("DF_GVS_TEST_PORT", "18300"))
     @classmethod
     def setUpClass(cls):
         subprocess.run(["make", "peer-udp-inject"], check=True)
 
     def receive_scenario(self, scenario):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
-            receiver.bind(("127.0.0.1", 18300))
+            receiver.bind(("127.0.0.1", self.port))
             receiver.settimeout(2)
             result = subprocess.run(
                 ["build/gvs-peer-udp-inject", "--scenario", scenario],
+                env={**os.environ, "DF_GVS_TEST_PORT": str(self.port)},
                 check=True,
                 capture_output=True,
                 text=True,
@@ -23,7 +26,7 @@ class GvsPeerUdpInjectorTest(unittest.TestCase):
         receipt = json.loads(result.stdout)
         self.assertEqual("127.0.0.1", peer[0])
         self.assertEqual(scenario, receipt["scenario"])
-        self.assertEqual("127.0.0.1:18300", receipt["target"])
+        self.assertEqual(f"127.0.0.1:{self.port}", receipt["target"])
         self.assertEqual(len(packet), receipt["bytes"])
         self.assertEqual(b"GVSGVS\xa5\xa5\xa5\xa5", packet[:10])
         self.assertEqual(len(packet) - 42, int.from_bytes(packet[40:42], "little"))

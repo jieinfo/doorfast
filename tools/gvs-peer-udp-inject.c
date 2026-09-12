@@ -1,13 +1,16 @@
 #include <arpa/inet.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include "gvs_peer_sim.h"
 
+#ifndef DF_GVS_TEST_PORT
 #define DF_GVS_TEST_PORT 18300
+#endif
 
 static int make_frame(const char *scenario, struct df_gvs_peer_sim **sim,
                       const uint8_t **frame, size_t *length) {
@@ -61,13 +64,25 @@ static int make_frame(const char *scenario, struct df_gvs_peer_sim **sim,
 }
 
 static int send_local(const uint8_t *frame, size_t length) {
-    const struct sockaddr_in target = {
+    unsigned long port = DF_GVS_TEST_PORT;
+    const char *override = getenv("DF_GVS_TEST_PORT");
+    struct sockaddr_in target = {
         .sin_family = AF_INET,
-        .sin_port = htons(DF_GVS_TEST_PORT),
+        .sin_port = 0,
         .sin_addr = {.s_addr = htonl(INADDR_LOOPBACK)},
     };
     ssize_t sent;
-    int socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    int socket_fd;
+
+    if (override != NULL && override[0] != '\0') {
+        char *end = NULL;
+        port = strtoul(override, &end, 10);
+        if (end == override || *end != '\0' || port == 0U || port > 65535U) {
+            return DF_ERR_INVALID;
+        }
+    }
+    target.sin_port = htons((uint16_t)port);
+    socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
 
     if (socket_fd < 0) {
         return DF_ERR_IO;
@@ -104,8 +119,12 @@ int main(int argc, char **argv) {
         df_gvs_peer_sim_destroy(sim);
         return 1;
     }
-    printf("{\"scenario\":\"%s\",\"target\":\"127.0.0.1:18300\","
-           "\"bytes\":%zu}\n", argv[2], length);
+    {
+        const char *port = getenv("DF_GVS_TEST_PORT");
+        printf("{\"scenario\":\"%s\",\"target\":\"127.0.0.1:%s\","
+               "\"bytes\":%zu}\n", argv[2],
+               port == NULL || port[0] == '\0' ? "18300" : port, length);
+    }
     df_gvs_peer_sim_destroy(sim);
     return 0;
 }
