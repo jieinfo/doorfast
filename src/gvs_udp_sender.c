@@ -21,6 +21,26 @@ static const struct df_gvs_observed_route *df_gvs_udp_find_route(
     return NULL;
 }
 
+static int df_gvs_udp_resolve_destination(
+    const struct df_gvs_udp_sender *sender, const uint8_t peer[6],
+    struct sockaddr_in *destination) {
+    const struct df_gvs_observed_route *route;
+    char host[INET_ADDRSTRLEN];
+
+    if (sender == NULL || peer == NULL || destination == NULL)
+        return DF_ERR_INVALID;
+    *destination = sender->peer;
+    route = df_gvs_udp_find_route(sender, peer);
+    if (route != NULL) {
+        destination->sin_addr.s_addr = route->ipv4;
+        return DF_OK;
+    }
+    if (df_gvs_identity_unicast_ip(peer, host) != DF_OK ||
+        inet_pton(AF_INET, host, &destination->sin_addr) != 1)
+        return DF_ERR_INVALID;
+    return DF_OK;
+}
+
 int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
     uint16_t port, df_gvs_header_provider_fn provider, void *context) {
     if (sender == NULL || host == NULL || provider == NULL || port == 0U)
@@ -59,14 +79,9 @@ enum df_gvs_send_attempt_result df_gvs_udp_send_attempt(
         return DF_GVS_SEND_ATTEMPT_FAILURE;
     }
     {
-        char host[INET_ADDRSTRLEN];
-        const struct df_gvs_observed_route *route =
-            df_gvs_udp_find_route(sender, command->destination);
-        struct sockaddr_in destination = sender->peer;
-        if (route != NULL) {
-            destination.sin_addr.s_addr = route->ipv4;
-        } else if (df_gvs_identity_unicast_ip(command->destination, host) != DF_OK ||
-                   inet_pton(AF_INET, host, &destination.sin_addr) != 1) {
+        struct sockaddr_in destination;
+        if (df_gvs_udp_resolve_destination(
+                sender, command->destination, &destination) != DF_OK) {
             if (sender->failed < UINT_MAX) sender->failed++;
             return DF_GVS_SEND_ATTEMPT_FAILURE;
         }
@@ -79,6 +94,31 @@ enum df_gvs_send_attempt_result df_gvs_udp_send_attempt(
     }
     if (sender->sent < UINT_MAX) sender->sent++;
     return DF_GVS_SEND_ATTEMPT_SUCCESS;
+}
+
+int df_gvs_udp_incoming_reply_emit(const struct df_gvs_incoming_reply *reply,
+    struct df_gvs_udp_sender *sender) {
+    uint8_t frame[DF_GVS_INCOMING_REPLY_FRAME_SIZE];
+    struct sockaddr_in destination;
+    size_t length = 0;
+    ssize_t written;
+
+    if (reply == NULL || sender == NULL || sender->fd < 0 ||
+        df_gvs_incoming_reply_serialize(reply, frame, sizeof(frame), &length,
+            sender->provide_fields, sender->fields_context) != DF_OK ||
+        df_gvs_udp_resolve_destination(
+            sender, reply->destination, &destination) != DF_OK) {
+        if (sender != NULL && sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_INVALID;
+    }
+    written = sendto(sender->fd, frame, length, 0,
+        (const struct sockaddr *)&destination, sizeof(destination));
+    if (written != (ssize_t)length) {
+        if (sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_IO;
+    }
+    if (sender->sent < UINT_MAX) sender->sent++;
+    return DF_OK;
 }
 
 int df_gvs_udp_sender_observe_peer(struct df_gvs_udp_sender *sender,

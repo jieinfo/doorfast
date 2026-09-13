@@ -73,6 +73,8 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void) {
         .generation = 7,
     };
     struct df_gvs_call_command command;
+    struct df_gvs_incoming_reply incoming_reply;
+    struct df_gvs_receive_result observed = {.accepted_call = true};
     struct sockaddr_in address;
     socklen_t address_length = sizeof(address);
     struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
@@ -105,6 +107,14 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void) {
                                       loopback);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
         &sender, packet, packet_length, local));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_incoming_reply_prepare(
+        &observed, &session, 7, local, 8303, &incoming_reply));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_incoming_reply_emit(
+        &incoming_reply, &sender));
+    received_length = recv(receiver, received, sizeof(received), 0);
+    TEST_ASSERT_INT_EQ(49, (int)received_length);
+    TEST_ASSERT_INT_EQ(0x81, received[39]);
+    TEST_ASSERT_INT_EQ(0, memcmp(received + 10, door, sizeof(door)));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_command_prepare_answer(
         &session, 7, local, 8303, 8302, 120, &command));
     TEST_ASSERT_INT_EQ(DF_GVS_SEND_ATTEMPT_SUCCESS, df_gvs_udp_send_attempt(

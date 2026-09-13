@@ -10,6 +10,7 @@
 #include "event.h"
 #include "gvs_deadline.h"
 #include "gvs_identity.h"
+#include "gvs_incoming_reply.h"
 #include "gvs_memory_sender.h"
 #include "gvs_call_control.h"
 #include "gvs_packet.h"
@@ -564,6 +565,21 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 }
                 for (i = 0; i < result->transition.count; ++i) {
                     df_log_transition(&result->transition.events[i]);
+                }
+                if (runtime->config.active_host && result->accepted_call) {
+                    struct df_gvs_incoming_reply incoming_reply;
+                    int reply_status = df_gvs_incoming_reply_prepare(
+                        result, &session, session.generation, identity, 8303,
+                        &incoming_reply);
+
+                    if (reply_status == DF_OK)
+                        reply_status = df_gvs_udp_incoming_reply_emit(
+                            &incoming_reply, &udp_sender);
+                    (void)printf(
+                        "doorfast: event=incoming_call_reply generation=%llu "
+                        "sent=%u transport=udp\n",
+                        (unsigned long long)session.generation,
+                        reply_status == DF_OK ? 1U : 0U);
                 }
                 if (result->talking_transition) {
                     (void)printf("doorfast: event=session_established generation=%llu\n",
