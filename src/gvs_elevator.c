@@ -103,3 +103,61 @@ int df_gvs_elevator_serialize(
     *output_length = next_length;
     return DF_OK;
 }
+
+static enum df_gvs_elevator_motion df_gvs_elevator_motion(uint8_t state) {
+    switch (state) {
+    case 0: return DF_GVS_ELEVATOR_FAULT;
+    case 1: return DF_GVS_ELEVATOR_MOVING_UP;
+    case 2: return DF_GVS_ELEVATOR_MOVING_DOWN;
+    case 3: return DF_GVS_ELEVATOR_STOPPED;
+    default: return DF_GVS_ELEVATOR_OTHER;
+    }
+}
+
+int df_gvs_elevator_parse_status(
+    const struct df_gvs_frame *frame, const uint8_t local[6],
+    struct df_gvs_elevator_status *status) {
+    struct df_gvs_elevator_status next = {0};
+    uint8_t target[6];
+    size_t required;
+    size_t index;
+
+    if (status != NULL)
+        *status = next;
+    if (frame == NULL || local == NULL || status == NULL ||
+        df_gvs_elevator_target(local, target) != DF_OK ||
+        frame->family != 0x08 || frame->opcode != 0x83 ||
+        frame->payload == NULL || frame->payload_length < 1U ||
+        memcmp(frame->source, target, sizeof(target)) != 0 ||
+        memcmp(frame->destination, local, 6) != 0 ||
+        frame->payload[0] > DF_GVS_ELEVATOR_MAX_ENTRIES)
+        return DF_ERR_INVALID;
+    next.count = frame->payload[0];
+    required = 1U + next.count * 2U;
+    if (frame->payload_length < required)
+        return DF_ERR_INVALID;
+    for (index = 0; index < next.count; index++) {
+        struct df_gvs_elevator_entry *entry = &next.entries[index];
+        int raw = (int)(int8_t)frame->payload[1U + index * 2U];
+
+        entry->raw_floor = (int8_t)raw;
+        entry->floor = (int16_t)(raw < 0 ? -(raw + 128) : raw);
+        entry->raw_state = frame->payload[2U + index * 2U];
+        entry->motion = df_gvs_elevator_motion(entry->raw_state);
+    }
+    next.extension_length = frame->payload_length - required;
+    next.valid = true;
+    *status = next;
+    return DF_OK;
+}
+
+const char *df_gvs_elevator_motion_name(enum df_gvs_elevator_motion motion) {
+    switch (motion) {
+    case DF_GVS_ELEVATOR_FAULT: return "fault";
+    case DF_GVS_ELEVATOR_MOVING_UP: return "moving_up";
+    case DF_GVS_ELEVATOR_MOVING_DOWN: return "moving_down";
+    case DF_GVS_ELEVATOR_STOPPED: return "stopped";
+    case DF_GVS_ELEVATOR_OTHER: return "other";
+    }
+    return "unknown";
+}

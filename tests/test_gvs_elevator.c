@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "gvs_elevator.h"
+#include "gvs_frame.h"
 #include "gvs_memory_sender.h"
 
 static int elevator_failing_header(
@@ -118,4 +119,114 @@ void test_gvs_elevator_serialize_failure_is_output_atomic(void) {
         elevator_failing_header, NULL));
     TEST_ASSERT_INT_EQ(0, wire_length);
     TEST_ASSERT_INT_EQ(0, memcmp(wire, expected, sizeof(wire)));
+}
+
+static struct df_gvs_frame elevator_status_frame(
+    const uint8_t local[6], uint8_t *payload, size_t payload_length) {
+    struct df_gvs_frame frame = {
+        .family = 0x08,
+        .opcode = 0x83,
+        .payload = payload,
+        .payload_length = payload_length,
+    };
+
+    frame.source[0] = 0x35;
+    frame.source[1] = local[1];
+    frame.source[2] = local[2];
+    frame.source[4] = 1;
+    memcpy(frame.destination, local, 6);
+    return frame;
+}
+
+void test_gvs_elevator_status_parses_entries_and_extensions(void) {
+    const uint8_t local[6] = {0x61, 0x02, 0x01, 0x16, 0x01, 0x01};
+    uint8_t payload[] = {2, 5, 1, 6, 3, 0xaa};
+    struct df_gvs_frame frame = elevator_status_frame(
+        local, payload, sizeof(payload));
+    struct df_gvs_elevator_status status;
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    TEST_ASSERT_INT_EQ(1, status.valid);
+    TEST_ASSERT_INT_EQ(2, (int)status.count);
+    TEST_ASSERT_INT_EQ(1, (int)status.extension_length);
+    TEST_ASSERT_INT_EQ(5, status.entries[0].floor);
+    TEST_ASSERT_INT_EQ(1, status.entries[0].raw_state);
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_MOVING_UP,
+        status.entries[0].motion);
+    TEST_ASSERT_INT_EQ(6, status.entries[1].floor);
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_STOPPED,
+        status.entries[1].motion);
+    TEST_ASSERT_INT_EQ(0, strcmp("moving_up",
+        df_gvs_elevator_motion_name(status.entries[0].motion)));
+}
+
+void test_gvs_elevator_status_decodes_vendor_negative_floors(void) {
+    const uint8_t local[6] = {0x61, 0x02, 0x01, 0x16, 0x01, 0x01};
+    uint8_t payload[] = {3, 0x80, 0, 0x81, 2, 0xff, 0x7f};
+    struct df_gvs_frame frame = elevator_status_frame(
+        local, payload, sizeof(payload));
+    struct df_gvs_elevator_status status;
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    TEST_ASSERT_INT_EQ(0, status.entries[0].floor);
+    TEST_ASSERT_INT_EQ(-1, status.entries[1].floor);
+    TEST_ASSERT_INT_EQ(-127, status.entries[2].floor);
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_FAULT,
+        status.entries[0].motion);
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_MOVING_DOWN,
+        status.entries[1].motion);
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_OTHER,
+        status.entries[2].motion);
+    TEST_ASSERT_INT_EQ(0, strcmp("other",
+        df_gvs_elevator_motion_name(status.entries[2].motion)));
+}
+
+void test_gvs_elevator_status_rejects_malformed_counts(void) {
+    const uint8_t local[6] = {0x61, 0x02, 0x01, 0x16, 0x01, 0x01};
+    uint8_t truncated[] = {2, 1, 0};
+    uint8_t too_many[] = {9, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0};
+    struct df_gvs_frame frame = elevator_status_frame(local, NULL, 0);
+    struct df_gvs_elevator_status status;
+    static const struct df_gvs_elevator_status empty = {0};
+
+    memset(&status, 0xa5, sizeof(status));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    TEST_ASSERT_INT_EQ(0, memcmp(&status, &empty, sizeof(status)));
+    frame = elevator_status_frame(local, truncated, sizeof(truncated));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    frame = elevator_status_frame(local, too_many, sizeof(too_many));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+}
+
+void test_gvs_elevator_status_rejects_wrong_frame_or_route(void) {
+    const uint8_t local[6] = {0x61, 0x02, 0x01, 0x16, 0x01, 0x01};
+    uint8_t payload[] = {1, 5, 1};
+    struct df_gvs_frame frame = elevator_status_frame(
+        local, payload, sizeof(payload));
+    struct df_gvs_elevator_status status;
+    static const struct df_gvs_elevator_status empty = {0};
+
+    frame.family = 0x03;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    frame.family = 0x08;
+    frame.opcode = 0x82;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    frame.opcode = 0x83;
+    frame.source[1]++;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    frame.source[1]--;
+    frame.destination[5]++;
+    memset(&status, 0xa5, sizeof(status));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_gvs_elevator_parse_status(&frame, local, &status));
+    TEST_ASSERT_INT_EQ(0, memcmp(&status, &empty, sizeof(status)));
 }
