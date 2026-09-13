@@ -2,6 +2,7 @@
 void test_gvs_call_runtime_idle_deadlines(void);
 void test_gvs_call_runtime_tick_is_atomic(void);
 void test_gvs_call_control_answer_reaches_confirmation(void);
+void test_gvs_call_control_tracks_answer_sent_by_external_transport(void);
 void test_gvs_call_control_reports_confirmation_timeout_once(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
 void test_gvs_call_control_bounds_failed_simulated_delivery(void);
@@ -135,7 +136,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 119;
+    return 120;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -150,7 +151,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(119, test_suite_count());
+    TEST_ASSERT_INT_EQ(120, test_suite_count());
     test_evidence_recorder_guards_and_classifies();
     test_evidence_log_preserves_fixed_fields_and_rotates();
     test_gvs_udp_prefix_handles_vlan_and_truncation();
@@ -271,6 +272,7 @@ int main(void) {
     test_gvs_call_runtime_idle_deadlines();
     test_gvs_call_runtime_tick_is_atomic();
     test_gvs_call_control_answer_reaches_confirmation();
+    test_gvs_call_control_tracks_answer_sent_by_external_transport();
     test_gvs_call_control_reports_confirmation_timeout_once();
     test_gvs_call_control_rejects_busy_and_stale_submission();
     test_gvs_call_control_bounds_failed_simulated_delivery();

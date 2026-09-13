@@ -387,8 +387,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             }
             timed_out = tick_result.runtime.session_timed_out;
             if (tick_result.handshake_frame_ready)
-                (void)fprintf(stdout, "doorfast: event=handshake_frame opcode=%02x mode=simulated transport=memory\n",
-                              call_control.handshake_sender.bytes[39]);
+                (void)fprintf(stdout,
+                    "doorfast: event=handshake_frame opcode=%02x mode=%s "
+                    "transport=%s\n",
+                    call_control.handshake_dispatch.command.opcode,
+                    runtime->config.active_host ? "active_host" : "simulated",
+                    runtime->config.active_host ? "udp" : "memory");
             if (tick_result.handshake.disconnected)
                 (void)fputs("doorfast: event=handshake_disconnected mode=simulated\n", stdout);
             if (tick_result.handshake_action_dropped)
