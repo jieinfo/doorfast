@@ -35,6 +35,7 @@ struct df_runtime_ubus {
     uint64_t last_now_ms;
     uint64_t next_reconnect_ms;
     bool started;
+    bool active_host;
 };
 
 int df_runtime_ubus_start(struct df_runtime_ubus *service,
@@ -44,6 +45,7 @@ int df_runtime_ubus_process(struct df_runtime_ubus *service,
                             uint64_t now_ms);
 int df_runtime_ubus_bind_call(struct df_runtime_ubus *,
     df_runtime_call_status_provider_fn, df_runtime_call_submit_fn, void *);
+void df_runtime_ubus_set_active_host(struct df_runtime_ubus *, bool);
 int df_runtime_ubus_read_call_status(struct df_runtime_ubus *,
     struct df_gvs_call_control_status *);
 int df_runtime_ubus_submit_call(struct df_runtime_ubus *,
