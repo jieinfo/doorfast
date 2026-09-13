@@ -1,0 +1,91 @@
+#include "gvs_udp_sender.h"
+#include "gvs_identity.h"
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <limits.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
+    uint16_t port, df_gvs_header_provider_fn provider, void *context) {
+    if (sender == NULL || host == NULL || provider == NULL || port == 0U)
+        return DF_ERR_INVALID;
+    memset(sender, 0, sizeof(*sender));
+    sender->fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sender->fd < 0) return DF_ERR_IO;
+    sender->peer.sin_family = AF_INET;
+    sender->peer.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &sender->peer.sin_addr) != 1) {
+        close(sender->fd); sender->fd = -1; return DF_ERR_INVALID;
+    }
+    sender->provide_fields = provider;
+    sender->fields_context = context;
+    return DF_OK;
+}
+
+void df_gvs_udp_sender_close(struct df_gvs_udp_sender *sender) {
+    if (sender == NULL) return;
+    if (sender->fd >= 0) close(sender->fd);
+    sender->fd = -1;
+}
+
+enum df_gvs_send_attempt_result df_gvs_udp_send_attempt(
+    const struct df_gvs_call_command *command, unsigned attempt,
+    uint64_t completion_id, void *context) {
+    struct df_gvs_udp_sender *sender = context;
+    uint8_t frame[DF_GVS_CALL_COMMAND_MAX_FRAME_SIZE];
+    size_t length = 0;
+    ssize_t written;
+    if (sender == NULL || command == NULL || sender->fd < 0 || attempt == 0U ||
+        completion_id == 0U || df_gvs_call_command_serialize(command, frame,
+        sizeof(frame), &length, sender->provide_fields,
+        sender->fields_context) != DF_OK) {
+        if (sender != NULL && sender->failed < UINT_MAX) sender->failed++;
+        return DF_GVS_SEND_ATTEMPT_FAILURE;
+    }
+    {
+        char host[INET_ADDRSTRLEN];
+        struct sockaddr_in destination = sender->peer;
+        if (df_gvs_identity_unicast_ip(command->destination, host) != DF_OK ||
+            inet_pton(AF_INET, host, &destination.sin_addr) != 1) {
+            if (sender->failed < UINT_MAX) sender->failed++;
+            return DF_GVS_SEND_ATTEMPT_FAILURE;
+        }
+        written = sendto(sender->fd, frame, length, 0,
+            (const struct sockaddr *)&destination, sizeof(destination));
+    }
+    if (written != (ssize_t)length) {
+        if (sender->failed < UINT_MAX) sender->failed++;
+        return DF_GVS_SEND_ATTEMPT_FAILURE;
+    }
+    if (sender->sent < UINT_MAX) sender->sent++;
+    return DF_GVS_SEND_ATTEMPT_SUCCESS;
+}
+
+int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *action,
+    void *context) {
+    struct df_gvs_udp_presence_context *ctx = context;
+    uint8_t frame[DF_GVS_CONTROL_HEADER_SIZE + 3U];
+    size_t length = 0;
+    char host[DF_GVS_IPV4_TEXT_SIZE];
+    struct sockaddr_in destination;
+    ssize_t written;
+    if (action == NULL || ctx == NULL || ctx->sender == NULL ||
+        ctx->sender->fd < 0 || ctx->source == NULL ||
+        df_gvs_presence_action_serialize(action, ctx->source, ctx->sync_version,
+            frame, sizeof(frame), &length, ctx->sender->provide_fields,
+            ctx->sender->fields_context) != DF_OK ||
+        df_gvs_identity_unicast_ip(action->target, host) != DF_OK ||
+        inet_pton(AF_INET, host, &destination.sin_addr) != 1) {
+        return DF_ERR_INVALID;
+    }
+    memset(&destination, 0, sizeof(destination));
+    destination.sin_family = AF_INET;
+    destination.sin_port = htons(8300);
+    (void)inet_pton(AF_INET, host, &destination.sin_addr);
+    written = sendto(ctx->sender->fd, frame, length, 0,
+        (const struct sockaddr *)&destination, sizeof(destination));
+    return written == (ssize_t)length ? DF_OK : DF_ERR_IO;
+}

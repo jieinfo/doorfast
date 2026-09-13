@@ -17,6 +17,7 @@
 #include "gvs_reply_queue.h"
 #include "gvs_runtime_sync.h"
 #include "gvs_send_transaction.h"
+#include "gvs_udp_sender.h"
 #include "gvs_sync_state.h"
 #include "runtime_ubus.h"
 
@@ -58,12 +59,20 @@ static const char *df_sync_action_name(enum df_gvs_presence_action_type type) {
 
 static int df_runtime_sync_action(
     const struct df_gvs_presence_action *action, void *context) {
-    (void)context;
+    struct df_gvs_udp_presence_context *udp = context;
     if (action == NULL) {
         return DF_ERR_INVALID;
     }
-    (void)printf("doorfast: event=sync_action action=%s round=%u mode=passive\n",
-                 df_sync_action_name(action->type), action->round);
+    if (udp != NULL) {
+        if (df_gvs_udp_presence_emit(action, udp) != DF_OK) {
+            (void)printf("doorfast: event=sync_action action=%s round=%u sent=0\n",
+                         df_sync_action_name(action->type), action->round);
+            return DF_ERR_IO;
+        }
+    }
+    (void)printf("doorfast: event=sync_action action=%s round=%u sent=%u\n",
+                 df_sync_action_name(action->type), action->round,
+                 udp != NULL ? 1U : 0U);
     return DF_OK;
 }
 
@@ -224,6 +233,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_send_transaction send_transaction = {0};
     struct df_gvs_memory_sender memory_sender = {0};
     struct df_gvs_call_control call_control = {0};
+    struct df_gvs_udp_sender udp_sender = {.fd = -1};
+    struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
@@ -265,7 +276,18 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                                   started_ms) != DF_OK) {
         return DF_ERR_IO;
     }
+    if (!runtime->config.passive_only || runtime->config.active_host) {
+        if (df_gvs_udp_sender_open(&udp_sender, "0.0.0.0", 8300,
+                df_gvs_placeholder_header_fields, NULL) != DF_OK) {
+            return DF_ERR_IO;
+        }
+        df_gvs_call_control_set_sender(&call_control,
+            df_gvs_udp_send_attempt, &udp_sender);
+        presence_context.sender = &udp_sender;
+        presence_context.source = identity;
+    }
     if (df_runtime_capture_open(runtime, &capture) != DF_OK) {
+        df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
     }
@@ -287,8 +309,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     (void)setvbuf(stdout, NULL, _IOLBF, 0);
-    (void)printf("doorfast: observing interface=%s mode=passive\n",
-                 runtime->config.gvs_interface);
+    (void)printf("doorfast: observing interface=%s mode=%s\n",
+                 runtime->config.gvs_interface,
+                 (runtime->config.passive_only && !runtime->config.active_host)
+                     ? "passive" : "active_host");
     while (!df_runtime_stopping) {
         struct df_capture_record capture_record;
         const uint8_t *packet = NULL;
@@ -330,8 +354,11 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             logged_frame_generation = memory_sender.record.generation;
         }
         df_runtime_send_log(&send_trace);
+        presence_context.sync_version = sync.presence.sync_version;
         if (df_gvs_runtime_sync_tick(&sync, now_ms, df_runtime_sync_action,
-                                     NULL) != DF_OK) {
+                                     runtime->config.passive_only &&
+                                     !runtime->config.active_host ? NULL :
+                                     &presence_context) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
         }
@@ -442,7 +469,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 bool coalesced = false;
                 int peer_status = df_gvs_presence_receive_peer_request(
                     &sync.presence, payload, payload_length, now_ms, &reply,
-                    df_runtime_sync_action, NULL);
+                    df_runtime_sync_action,
+                    runtime->config.passive_only && !runtime->config.active_host ?
+                        NULL : &presence_context);
                 int queue_status = peer_status == DF_OK
                     ? df_gvs_reply_queue_enqueue(&reply_queue, &reply, now_ms,
                                                  &coalesced)
@@ -463,7 +492,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 payload[39] == 0x81) {
                 int peer_status = df_gvs_presence_receive_peer(
                     &sync.presence, payload, payload_length, now_ms,
-                    df_runtime_sync_action, NULL);
+                    df_runtime_sync_action,
+                    runtime->config.passive_only && !runtime->config.active_host ?
+                        NULL : &presence_context);
                 (void)printf("doorfast: event=peer_reply accepted=%u mode=passive\n",
                              peer_status == DF_OK ? 1U : 0U);
                 continue;
@@ -528,6 +559,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     status = DF_OK;
 
 done:
+    df_gvs_udp_sender_close(&udp_sender);
     df_runtime_ubus_stop(&ubus);
     df_gvs_runtime_sync_stop(&sync);
     df_capture_close(capture);

@@ -25,6 +25,13 @@ int df_gvs_call_control_init(struct df_gvs_call_control *control,
     return DF_OK;
 }
 
+void df_gvs_call_control_set_sender(struct df_gvs_call_control *control,
+    df_gvs_call_attempt_fn send, void *context) {
+    if (control == NULL) return;
+    control->call_attempt = send != NULL ? send : df_gvs_call_memory_attempt;
+    control->call_attempt_context = send != NULL ? context : &control->sender;
+}
+
 static int handshake_enqueue(struct df_gvs_call_control *control,
     const struct df_gvs_handshake_action *action, uint64_t now) {
     struct df_gvs_call_command command = {0};
@@ -148,7 +155,8 @@ int df_gvs_call_control_step(
     previous = next.dispatch.state;
     if (df_gvs_call_dispatch_step(
             &next.dispatch, &next_session, local, now_ms,
-            df_gvs_call_memory_attempt, &next.sender) != DF_OK) {
+            next.call_attempt != NULL ? next.call_attempt : df_gvs_call_memory_attempt,
+            next.call_attempt_context != NULL ? next.call_attempt_context : &next.sender) != DF_OK) {
         return DF_ERR_INVALID;
     }
     if (df_gvs_call_control_dispatch_active(previous)) {

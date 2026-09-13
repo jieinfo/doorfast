@@ -1,0 +1,29 @@
+#ifndef DOORFAST_GVS_UDP_SENDER_H
+#define DOORFAST_GVS_UDP_SENDER_H
+
+#include <netinet/in.h>
+#include "gvs_call_dispatch.h"
+#include "gvs_presence.h"
+
+struct df_gvs_udp_sender {
+    int fd;
+    struct sockaddr_in peer;
+    df_gvs_header_provider_fn provide_fields;
+    void *fields_context;
+    unsigned sent;
+    unsigned failed;
+};
+
+int df_gvs_udp_sender_open(struct df_gvs_udp_sender *, const char *, uint16_t,
+    df_gvs_header_provider_fn, void *);
+void df_gvs_udp_sender_close(struct df_gvs_udp_sender *);
+enum df_gvs_send_attempt_result df_gvs_udp_send_attempt(
+    const struct df_gvs_call_command *, unsigned, uint64_t, void *);
+struct df_gvs_udp_presence_context {
+    struct df_gvs_udp_sender *sender;
+    const uint8_t *source;
+    uint16_t sync_version;
+};
+int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *, void *);
+
+#endif

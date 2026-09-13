@@ -7,13 +7,13 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的原生门禁网络观察与集�
 它以透明抓包、GVS 会话归一化、脱敏审计和事件通知为起点，替代旧 Doorlink
 部署中的非开源、MIPS 专用和授权依赖部分。
 
-> 当前版本是基础阶段，默认不发送开门、挂断、召梯或楼层控制报文。没有实体设备
+> 默认保持被动观察；启用 `active_host` 后可发送已进入事务队列的控制、在线和同步报文。没有实体设备
 > 的开发环境可以完整验证配置、PCAP 回放、解析和策略，但不能凭空证明现场控制兼容性。
 
 ## 当前能力
 
 最终目标和阶段验收见[完整主机模式与 APK 项目规划](docs/doorfast-host-mode-roadmap.md)。
-当前主程序已具备只读常驻服务入口；独立上线、主动信令和媒体尚需按规划实现。
+当前主程序已具备常驻服务入口、主动 UDP 控制和同步发送；门禁、电梯字段和媒体仍需逐项现场验收。
 
 - 已有 x86_64 ImmortalWrt 25.12.1 APK 构建配方与 CI；当前代码的目标安装运行仍需阶段验证。
 - 读取并校验 Doorfast 的基础配置模型。
@@ -36,13 +36,15 @@ config gvs 'main'
 	option gvs_local_address 'IS:2-1-101-1'
 	option uplink_interface 'br-lan'
 	option passive_only '1'
+	option active_host '0'
 	option capture_promiscuous '0'
 ```
 
-当前常驻服务要求填写 `gvs_interface`、`gvs_local_address`、保持 `passive_only '1'` 并将
-`enabled` 改为 `1`。`gvs_local_address` 使用
+被动观察时保持 `passive_only '1'`。P1 离线/受控主机模式可设置 `active_host '1'`，并将
+`enabled` 改为 `1`；该模式会启用 UDP/8300 主动发送，但仍使用占位头字段，必须在隔离网络
+和目标设备逐项验收后再接入生产。`gvs_local_address` 使用
 `IS:楼栋-单元-房间-分机` 格式，例如 `IS:2-1-101-1`；它仅用于本机入站帧筛选。
-Doorfast 不会修改网络、路由或防火墙；本阶段也不会发送 GVS 控制报文。
+Doorfast 不会修改网络、路由或防火墙；主动发送仅针对由会话状态机提交的控制事务。
 修改 `/etc/config/doorfast` 后执行 `/etc/init.d/doorfast reload` 会停止旧实例并按新配置启动。
 
 ## 透明串联部署预检查
