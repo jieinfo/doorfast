@@ -114,6 +114,11 @@ void test_gvs_access_serializes_vendor_direct_unlock_shape(void);
 void test_gvs_access_rejects_stale_session_and_invalid_target(void);
 void test_gvs_access_result_tracks_protocol_reply_without_physical_claim(void);
 void test_gvs_access_result_rejects_failure_and_expires_unanswered(void);
+void test_gvs_elevator_call_matches_two_digit_floor_capture(void);
+void test_gvs_elevator_call_matches_single_digit_capture_directions(void);
+void test_gvs_elevator_query_has_exact_empty_shape(void);
+void test_gvs_elevator_rejects_invalid_identity_and_direction(void);
+void test_gvs_elevator_serialize_failure_is_output_atomic(void);
 void test_gvs_observer_only_starts_a_session_for_the_configured_identity(void);
 void test_gvs_replay_reads_an_offline_control_packet_without_transmitting(void);
 void test_gvs_session_tracks_passive_lifecycle(void);
@@ -147,7 +152,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 128;
+    return 133;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -162,7 +167,12 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(128, test_suite_count());
+    TEST_ASSERT_INT_EQ(133, test_suite_count());
+    test_gvs_elevator_call_matches_two_digit_floor_capture();
+    test_gvs_elevator_call_matches_single_digit_capture_directions();
+    test_gvs_elevator_query_has_exact_empty_shape();
+    test_gvs_elevator_rejects_invalid_identity_and_direction();
+    test_gvs_elevator_serialize_failure_is_output_atomic();
     test_runtime_ubus_access_requires_active_host();
     test_gvs_access_failed_send_and_late_reply();
     test_gvs_access_control_sends_once_and_requires_material();
