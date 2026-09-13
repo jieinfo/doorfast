@@ -47,6 +47,10 @@ payload[3] = local[4]
 非法 BCD、解码楼层超过 99、非室内机来源或零地址均拒绝构帧。此规则同时满足全部
 五个 PCAP 样本，并纠正了静态汇总中容易被理解为再次 BCD 编码的歧义。
 
+同一静态汇总还把 `08/02` 总长记为 48 字节，但其字段定义为 42 字节公共头加 4 字节
+payload，五个 PCAP 样本也全部为 46 字节。Doorfast 采用逐字节证据支持的 46 字节，
+不为满足汇总中的算术错误补入两个零字节。
+
 ## 方案选择
 
 评估过三种组织方式：
@@ -133,7 +137,7 @@ transaction id、防重复槽位和 active-host 门控控制并发。
 协议测试至少覆盖：
 
 - `0x16` BCD 楼层产生 `0x10 0x16` 两个 payload 字节；全部五个 PCAP 请求可重建；
-- 上下行、目标地址、42/48 字节长度和厂商公共头提供器失败原子性；
+- 上下行、目标地址、42/46 字节长度和厂商公共头提供器失败原子性；
 - 非法 BCD、方向、来源类型、目标与缓冲区容量；
 - 立即发送、1000 ms 第二次发送、2000 ms 到期及倒退时间；
 - 重复提交、一次/两次发送失败、匹配与迟到 `08/82`；
@@ -167,7 +171,7 @@ ubus 和线上布局；用户自有电梯现场验证证明设备接受与物理
 - content_hash: `c2a1ad01474665c430232e86083cd939ef2aa5c9fad28e6856ffb85a506ad2a7`
 - artifact_path: n/a
 - repro_command: `tcpdump -nn -XX -r /Users/shenwenjie/Documents/PVE/mt8157/docs/doorfast-disconnect-20260911.pcap 'udp port 8300'`（需要本地厂商数据集；按 GVS 偏移 38/39 筛选 `08/02`、`08/03`）
-- raw_excerpt: 5 个 `08/02`、2 个 `08/03`；`61:02:01:16:01:01` 对应 `00 10 16 01`
+- raw_excerpt: 5 个 46 字节 `08/02`、2 个 42 字节 `08/03`；`61:02:01:16:01:01` 对应 `00 10 16 01`
 - linked_workitem: n/a
 - supersedes: none
 
@@ -199,6 +203,20 @@ ubus 和线上布局；用户自有电梯现场验证证明设备接受与物理
 - remediation: 保留原始状态和证据等级，等待用户自有设备闭环
 - optional_attack: n/a
 
+### F-003
+
+- title: `08/02` 线上总长为 46 字节
+- severity: n/a_re
+- category: reverse_algo
+- status: validated
+- evidence_ids: [E-001, E-002]
+- location: GVS `08/02` datagram
+- impact: 按静态汇总的 48 字节发送会增加两个未经证实的尾随字节
+- confidence: high
+- repro_steps: 核对公共头 42 字节、声明 payload 4 字节，并读取五个 PCAP 样本实际长度
+- remediation: 序列化固定输出 46 字节，并用五个现场样本做黄金测试
+- optional_attack: n/a
+
 ### P-001
 
 - title: 从本机身份到有界召梯事务
@@ -206,7 +224,7 @@ ubus 和线上布局；用户自有电梯现场验证证明设备接受与物理
 - start: 已校验的 GVS 室内机六字节身份和方向
 - goal: 可审计的召梯协议结果
 - steps:
-  1. 解码 BCD 楼层并生成 `08/02` payload — evidence: E-001, E-002 — finding: F-001
+  1. 解码 BCD 楼层并生成 46 字节 `08/02` — evidence: E-001, E-002 — finding: F-001, F-003
   2. 立即发送并在 1000 ms 最多重发一次 — evidence: E-001 — finding: none
   3. 匹配 `08/82` 或在 2000 ms 结束事务 — evidence: E-001, E-002 — finding: F-002
 - residual_risks: 响应字段和实体动作仍需现场验证；`08/01` 保持未知
