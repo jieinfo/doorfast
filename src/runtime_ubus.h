@@ -6,6 +6,7 @@
 
 #include "doorfast.h"
 #include "gvs_access.h"
+#include "gvs_elevator_control.h"
 #include "gvs_runtime_sync.h"
 #include "gvs_call_control.h"
 
@@ -26,6 +27,19 @@ struct df_runtime_call_request {
 typedef int (*df_runtime_call_submit_fn)(
     const struct df_runtime_call_request *, uint64_t, void *);
 
+struct df_runtime_elevator_status {
+    enum df_gvs_elevator_control_state state;
+    enum df_gvs_elevator_direction direction;
+    uint64_t transaction_id;
+    unsigned attempts;
+    unsigned successful_sends;
+    bool physical_result_confirmed;
+    bool status_valid;
+    size_t count;
+    uint64_t age_ms;
+    struct df_gvs_elevator_entry entries[DF_GVS_ELEVATOR_MAX_ENTRIES];
+};
+
 struct df_runtime_ubus {
     df_runtime_status_provider_fn provide_status;
     void *status_context;
@@ -35,6 +49,12 @@ struct df_runtime_ubus {
     struct df_gvs_access_control *access;
     const struct df_gvs_session *access_session;
     const uint8_t *access_identity;
+    struct df_gvs_elevator_control *elevator;
+    const uint8_t *elevator_identity;
+    uint64_t next_elevator_transaction_id;
+    struct df_gvs_elevator_status observed_elevator_status;
+    uint64_t elevator_status_observed_ms;
+    bool elevator_status_valid;
     void *platform;
     uint64_t last_now_ms;
     uint64_t next_reconnect_ms;
@@ -60,5 +80,13 @@ int df_runtime_ubus_bind_access(struct df_runtime_ubus *,
     struct df_gvs_access_control *, const struct df_gvs_session *,
     const uint8_t [6]);
 int df_runtime_ubus_unlock(struct df_runtime_ubus *, uint64_t);
+int df_runtime_ubus_bind_elevator(struct df_runtime_ubus *,
+    struct df_gvs_elevator_control *, const uint8_t [6]);
+int df_runtime_ubus_call_elevator(struct df_runtime_ubus *,
+    enum df_gvs_elevator_direction, uint64_t *);
+int df_runtime_ubus_update_elevator_status(struct df_runtime_ubus *,
+    const struct df_gvs_elevator_status *, uint64_t);
+int df_runtime_ubus_read_elevator_status(struct df_runtime_ubus *,
+    struct df_runtime_elevator_status *);
 
 #endif

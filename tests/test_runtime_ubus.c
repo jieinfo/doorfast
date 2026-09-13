@@ -151,3 +151,88 @@ void test_runtime_ubus_access_requires_active_host(void) {
     df_runtime_ubus_stop(&service);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 7));
 }
+
+static int submit_elevator(
+    const struct df_gvs_elevator_request *request, void *context) {
+    unsigned *calls = context;
+
+    TEST_ASSERT_INT_EQ(0x02, request->opcode);
+    (*calls)++;
+    return DF_OK;
+}
+
+void test_runtime_ubus_elevator_requires_active_host_and_owns_ids(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 0x16, 1, 1};
+    struct df_runtime_ubus service = {0};
+    struct df_gvs_elevator_control elevator;
+    uint64_t transaction_id = 99;
+    unsigned calls = 0;
+    unsigned sync_calls = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_elevator_control_init(
+        &elevator, 10, submit_elevator, &calls));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_elevator(
+        &service, &elevator, local));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_call_elevator(
+        &service, DF_GVS_ELEVATOR_UP, &transaction_id));
+    TEST_ASSERT_INT_EQ(99, (int)transaction_id);
+    TEST_ASSERT_INT_EQ(0, (int)calls);
+    df_runtime_ubus_set_active_host(&service, true);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_call_elevator(
+        &service, DF_GVS_ELEVATOR_DOWN, &transaction_id));
+    TEST_ASSERT_INT_EQ(1, (int)transaction_id);
+    TEST_ASSERT_INT_EQ(1, (int)calls);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_call_elevator(
+        &service, DF_GVS_ELEVATOR_UP, &transaction_id));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_elevator_control_tick(
+        &elevator, local, 2010));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 2010));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_call_elevator(
+        &service, DF_GVS_ELEVATOR_UP, &transaction_id));
+    TEST_ASSERT_INT_EQ(2, (int)transaction_id);
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_UP, elevator.request.payload[0]);
+    df_runtime_ubus_stop(&service);
+}
+
+void test_runtime_ubus_elevator_status_is_bounded_and_aged(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 0x16, 1, 1};
+    struct df_runtime_ubus service = {0};
+    struct df_gvs_elevator_control elevator;
+    struct df_gvs_elevator_status observed = {
+        .valid = true,
+        .count = 1,
+        .entries = {{
+            .raw_floor = -126,
+            .floor = -2,
+            .raw_state = 3,
+            .motion = DF_GVS_ELEVATOR_STOPPED,
+        }},
+    };
+    struct df_runtime_elevator_status status;
+    unsigned calls = 0;
+    unsigned sync_calls = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_elevator_control_init(
+        &elevator, 10, submit_elevator, &calls));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_elevator(
+        &service, &elevator, local));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_update_elevator_status(
+        &service, &observed, 20));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 30));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_read_elevator_status(
+        &service, &status));
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_CONTROL_IDLE, status.state);
+    TEST_ASSERT_INT_EQ(1, status.status_valid);
+    TEST_ASSERT_INT_EQ(1, (int)status.count);
+    TEST_ASSERT_INT_EQ(-2, status.entries[0].floor);
+    TEST_ASSERT_INT_EQ(10, (int)status.age_ms);
+    TEST_ASSERT_INT_EQ(0, status.physical_result_confirmed);
+    observed.count = DF_GVS_ELEVATOR_MAX_ENTRIES + 1U;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_update_elevator_status(&service, &observed, 31));
+    df_runtime_ubus_stop(&service);
+}
