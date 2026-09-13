@@ -126,6 +126,21 @@ assert.equal(model.callDispatchLabel('failed'), '发送失败');
 assert.equal(model.callConfirmationLabel('expired'), '确认超时');
 assert.equal(model.unavailableLabel, 'Doorfast 服务未运行或状态接口不可用');
 assert.equal(model.staleLabel, '陈旧');
+const elevatorPayload = JSON.parse(JSON.stringify(payload));
+elevatorPayload.mode = 'active_host';
+elevatorPayload.elevator = {
+    state: 'protocol_completed', direction: 'up', transaction_id: 3,
+    attempts: 2, successful_sends: 2, physical_result_confirmed: false,
+    status_valid: true, status_age_ms: 12, entries: [{floor: 1}]
+};
+assert.equal(model.formatStatus(elevatorPayload)[0].rows[1][1], '主机模式');
+assert.deepEqual(model.formatStatus(elevatorPayload).at(-1), {
+    title: '电梯控制', rows: [
+        ['事务状态', '协议完成'], ['方向', '上行'], ['事务编号', '3'],
+        ['发送次数', '2'], ['成功发送', '2'], ['实体动作已确认', '否'],
+        ['状态数据', '是'], ['状态年龄（毫秒）', '12'], ['电梯数量', '1']
+    ]
+});
 assert.throws(() => model.formatStatus({running: true, mode: 'passive'}));
 assert.equal(JSON.stringify(model.formatStatus(payload)).includes('secretkey'),
              false);

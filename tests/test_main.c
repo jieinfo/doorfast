@@ -68,6 +68,7 @@ void test_deployment_snapshot_treats_missing_evidence_as_unsafe(void);
 void test_pcap_ring_rotates_and_recovers_oldest_slot(void);
 void test_gvs_udp_prefix_handles_vlan_and_truncation(void);
 void test_gvs_udp_sender_replies_to_observed_peer_route(void);
+void test_gvs_udp_sender_emits_elevator_request_to_observed_route(void);
 void test_evidence_classifier_separates_recent_and_control(void);
 void test_evidence_classifier_keeps_observed_incoming_call(void);
 void test_evidence_log_preserves_fixed_fields_and_rotates(void);
@@ -108,6 +109,8 @@ void test_gvs_vendor_header_serializes_random_and_transformed_fields(void);
 void test_gvs_vendor_header_clears_fields_when_random_source_fails(void);
 void test_gvs_vendor_header_reads_system_random(void);
 void test_runtime_ubus_access_requires_active_host(void);
+void test_runtime_ubus_elevator_requires_active_host_and_owns_ids(void);
+void test_runtime_ubus_elevator_status_is_bounded_and_aged(void);
 void test_gvs_access_failed_send_and_late_reply(void);
 void test_gvs_access_control_sends_once_and_requires_material(void);
 void test_gvs_access_serializes_vendor_direct_unlock_shape(void);
@@ -161,7 +164,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 142;
+    return 145;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -176,7 +179,10 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(142, test_suite_count());
+    TEST_ASSERT_INT_EQ(145, test_suite_count());
+    test_gvs_udp_sender_emits_elevator_request_to_observed_route();
+    test_runtime_ubus_elevator_requires_active_host_and_owns_ids();
+    test_runtime_ubus_elevator_status_is_bounded_and_aged();
     test_gvs_elevator_control_sends_twice_then_expires();
     test_gvs_elevator_control_completes_matching_reply_without_physical_claim();
     test_gvs_elevator_control_rejects_duplicate_wrong_and_late_results();

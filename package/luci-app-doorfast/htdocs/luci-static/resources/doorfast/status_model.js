@@ -99,7 +99,8 @@ function formatStatus(payload) {
     var sync = requireObject(root.sync, 'sync');
     var call = requireObject(root.call, 'call');
 
-    if (typeof root.running !== 'boolean' || root.mode !== 'passive')
+    if (typeof root.running !== 'boolean' ||
+        (root.mode !== 'passive' && root.mode !== 'active_host'))
         throw new TypeError('invalid service status');
 
     var sections = [
@@ -107,7 +108,7 @@ function formatStatus(payload) {
             title: '服务',
             rows: [
                 ['运行状态', root.running ? '运行中' : '已停止'],
-                ['模式', '被动观察']
+                ['模式', root.mode === 'active_host' ? '主机模式' : '被动观察']
             ]
         },
         {
@@ -148,6 +149,32 @@ function formatStatus(payload) {
             ]
         }
     ];
+    if (root.elevator) {
+        var elevator = requireObject(root.elevator, 'elevator');
+        var direction = enumLabel(elevator.direction,
+            {up: '上行', down: '下行'}, 'elevator direction');
+        var elevatorRows = [
+            ['事务状态', enumLabel(elevator.state, {
+                idle: '空闲', waiting: '等待回包',
+                protocol_completed: '协议完成', expired: '已超时',
+                send_failed: '发送失败', cancelled: '已取消'
+            }, 'elevator state')],
+            ['方向', direction],
+            ['事务编号', unsignedText(elevator.transaction_id, 'transaction_id')],
+            ['发送次数', unsignedText(elevator.attempts, 'attempts')],
+            ['成功发送', unsignedText(elevator.successful_sends, 'successful_sends')],
+            ['实体动作已确认', yesNo(elevator.physical_result_confirmed)],
+            ['状态数据', yesNo(elevator.status_valid)],
+            ['状态年龄（毫秒）', unsignedText(elevator.status_age_ms, 'status_age_ms')]
+        ];
+        if (elevator.status_valid) {
+            if (!Array.isArray(elevator.entries) || elevator.entries.length > 8)
+                throw new TypeError('invalid elevator entries');
+            elevatorRows.push(['电梯数量', unsignedText(elevator.entries.length,
+                'elevator entries')]);
+        }
+        sections.push({title: '电梯控制', rows: elevatorRows});
+    }
     if (call.handshake_mode === 'simulated') {
         sections.push({title: '保活模拟（仅内存发送）', rows: [
             ['已启动', yesNo(call.handshake_active)],

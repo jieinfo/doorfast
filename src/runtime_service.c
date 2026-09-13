@@ -237,6 +237,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_memory_sender memory_sender = {0};
     struct df_gvs_call_control call_control = {0};
     struct df_gvs_access_control access = {0};
+    struct df_gvs_elevator_control elevator = {0};
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
     struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
@@ -253,6 +254,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     uint16_t persisted_version;
     uint64_t started_ms;
     uint64_t logged_frame_generation = 0;
+    enum df_gvs_elevator_control_state logged_elevator_state =
+        DF_GVS_ELEVATOR_CONTROL_IDLE;
     int status;
 
     if (runtime == NULL || df_config_validate(&runtime->config) != DF_OK ||
@@ -281,6 +284,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     started_ms = df_monotonic_ms();
     if (df_gvs_access_control_init(&access, runtime->config.access_material,
             started_ms, df_gvs_udp_access_emit, &udp_sender) != DF_OK)
+        return DF_ERR_INVALID;
+    if (df_gvs_elevator_control_init(&elevator, started_ms,
+            df_gvs_udp_elevator_emit, &udp_sender) != DF_OK)
         return DF_ERR_INVALID;
     if (df_gvs_reply_queue_init(&reply_queue, started_ms) != DF_OK ||
         df_gvs_send_transaction_init(&send_transaction, started_ms) != DF_OK ||
@@ -316,7 +322,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_ubus_bind_call(
             &ubus, df_runtime_call_status_provider, df_runtime_call_submit,
             &call_binding) == DF_OK &&
-        df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK) {
+        df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK &&
+        df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
@@ -355,6 +362,21 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
 
         now_ms = df_monotonic_ms();
         (void)df_gvs_access_result_tick(&access.result, &session, identity, now_ms);
+        if (df_gvs_elevator_control_tick(&elevator, identity, now_ms) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
+        if (elevator.state != logged_elevator_state) {
+            (void)printf("doorfast: event=elevator_control state=%s "
+                         "transaction_id=%llu attempts=%u successful_sends=%u "
+                         "physical_result_confirmed=%u mode=%s\n",
+                         df_gvs_elevator_control_state_name(elevator.state),
+                         (unsigned long long)elevator.transaction_id,
+                         elevator.attempts, elevator.successful_sends,
+                         elevator.physical_result_confirmed ? 1U : 0U,
+                         runtime->config.active_host ? "active_host" : "passive");
+            logged_elevator_state = elevator.state;
+        }
         if (df_gvs_reply_queue_expire(&reply_queue, now_ms,
                                       &expired_replies) != DF_OK) {
             status = DF_ERR_IO;
@@ -560,6 +582,29 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         (void)fprintf(stdout, "doorfast: event=access_result state=%s raw_status=%u\n",
                             df_gvs_access_state_name(access.result.state),
                             (unsigned)access.result.raw_status);
+                    continue;
+                }
+            }
+            {
+                struct df_gvs_frame elevator_frame;
+                struct df_event elevator_event;
+                if (df_gvs_frame_parse(payload, payload_length, &elevator_frame,
+                        &elevator_event) == DF_OK && elevator_frame.family == 0x08) {
+                    if (elevator_frame.opcode == 0x82) {
+                        if (df_gvs_elevator_control_observe(&elevator, identity,
+                                &elevator_frame, now_ms) == DF_OK)
+                            (void)printf("doorfast: event=elevator_result state=protocol_completed "
+                                         "transaction_id=%llu physical_result_confirmed=0\n",
+                                         (unsigned long long)elevator.transaction_id);
+                    } else if (elevator_frame.opcode == 0x83) {
+                        struct df_gvs_elevator_status elevator_status;
+                        if (df_gvs_elevator_parse_status(&elevator_frame, identity,
+                                &elevator_status) == DF_OK &&
+                            df_runtime_ubus_update_elevator_status(&ubus,
+                                &elevator_status, now_ms) == DF_OK)
+                            (void)printf("doorfast: event=elevator_status count=%zu "
+                                         "status_valid=1\n", elevator_status.count);
+                    }
                     continue;
                 }
             }
