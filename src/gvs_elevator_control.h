@@ -18,9 +18,6 @@ enum df_gvs_elevator_control_state {
     DF_GVS_ELEVATOR_CONTROL_CANCELLED,
 };
 
-typedef int (*df_gvs_elevator_send_fn)(
-    const struct df_gvs_elevator_request *, void *);
-
 struct df_gvs_elevator_control {
     enum df_gvs_elevator_control_state state;
     struct df_gvs_elevator_request request;

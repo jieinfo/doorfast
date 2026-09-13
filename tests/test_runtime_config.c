@@ -27,6 +27,7 @@ void test_runtime_config_parses_main_gvs_section(void) {
                                  runtime.config.sync_state_path));
     TEST_ASSERT_INT_EQ(1, runtime.config.passive_only);
     TEST_ASSERT_INT_EQ(0, runtime.config.capture_promiscuous);
+    TEST_ASSERT_INT_EQ(0, runtime.config.call_elev);
     TEST_ASSERT_INT_EQ(-1, runtime.config.unlock_delay_seconds);
     TEST_ASSERT_INT_EQ(-1, runtime.config.hangup_delay_seconds);
 }
@@ -75,6 +76,14 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption passive_only '1'\n"
         "\toption access_material 'not-hex'\n";
+    const char automatic_without_direction[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'eth9'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption active_host '1'\n"
+        "\toption passive_only '0'\n"
+        "\toption call_elev '1'\n";
     struct df_runtime_config runtime;
 
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(duplicate, &runtime));
@@ -85,5 +94,26 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_config_parse(malformed_access_material,
                                                &runtime));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_config_parse(automatic_without_direction,
+                                               &runtime));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse("", &runtime));
+}
+
+void test_runtime_config_parses_explicit_elevator_direction(void) {
+    const char input[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'eth9'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption passive_only '0'\n"
+        "\toption active_host '1'\n"
+        "\toption call_elev '1'\n"
+        "\toption call_elev_direction 'up'\n";
+    struct df_runtime_config runtime;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
+    TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
+    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_UP, runtime.config.call_elev_direction);
+    TEST_ASSERT_INT_EQ(1, runtime.config.call_elev_direction_configured);
 }

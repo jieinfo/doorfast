@@ -19,6 +19,7 @@
 #include "gvs_runtime_sync.h"
 #include "gvs_send_transaction.h"
 #include "gvs_udp_sender.h"
+#include "gvs_elevator_query.h"
 #include "gvs_vendor_header.h"
 #include "gvs_transport_policy.h"
 #include "gvs_sync_state.h"
@@ -238,6 +239,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_call_control call_control = {0};
     struct df_gvs_access_control access = {0};
     struct df_gvs_elevator_control elevator = {0};
+    struct df_gvs_elevator_query elevator_query = {0};
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
     struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
@@ -254,6 +256,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     uint16_t persisted_version;
     uint64_t started_ms;
     uint64_t logged_frame_generation = 0;
+    uint64_t auto_elevator_generation = 0;
     enum df_gvs_elevator_control_state logged_elevator_state =
         DF_GVS_ELEVATOR_CONTROL_IDLE;
     int status;
@@ -312,6 +315,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         presence_context.sender = &udp_sender;
         presence_context.source = identity;
     }
+    if (df_gvs_elevator_query_init(&elevator_query, identity,
+            runtime->config.active_host, started_ms,
+            df_gvs_udp_elevator_emit, &udp_sender) != DF_OK) {
+        df_gvs_udp_sender_close(&udp_sender);
+        df_gvs_runtime_sync_stop(&sync);
+        return DF_ERR_INVALID;
+    }
     if (df_runtime_capture_open(runtime, &capture) != DF_OK) {
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
@@ -361,8 +371,16 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
 
         now_ms = df_monotonic_ms();
+        if (wait_context.ubus_started &&
+            df_runtime_ubus_process(&ubus, now_ms) != DF_OK) {
+            (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
+        }
         (void)df_gvs_access_result_tick(&access.result, &session, identity, now_ms);
         if (df_gvs_elevator_control_tick(&elevator, identity, now_ms) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
+        if (df_gvs_elevator_query_tick(&elevator_query, now_ms) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
         }
@@ -432,10 +450,6 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             } else if (tick_result.runtime.acknowledgement_cancelled) {
                 (void)fputs("doorfast: event=call_ack_cancelled mode=passive\n", stdout);
             }
-        }
-        if (wait_context.ubus_started &&
-            df_runtime_ubus_process(&ubus, now_ms) != DF_OK) {
-            (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
         }
         if (timed_out) {
             (void)printf("doorfast: event=session_timeout generation=%llu\n",
@@ -646,6 +660,26 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         "sent=%u transport=udp\n",
                         (unsigned long long)session.generation,
                         reply_status == DF_OK ? 1U : 0U);
+                }
+                if (runtime->config.active_host && runtime->config.call_elev &&
+                    result->accepted_call &&
+                    session.generation != auto_elevator_generation) {
+                    uint64_t transaction_id = 0;
+                    if (df_runtime_ubus_call_elevator(&ubus,
+                            DF_GVS_ELEVATOR_UP,
+                            &transaction_id) == DF_OK) {
+                        auto_elevator_generation = session.generation;
+                        (void)printf(
+                            "doorfast: event=automatic_elevator_call "
+                            "generation=%llu transaction_id=%llu direction=%s\n",
+                            (unsigned long long)session.generation,
+                            (unsigned long long)transaction_id,
+                                     "up");
+                    } else {
+                        (void)fputs(
+                            "doorfast: event=automatic_elevator_call "
+                            "submitted=0\n", stdout);
+                    }
                 }
                 if (result->talking_transition) {
                     (void)printf("doorfast: event=session_established generation=%llu\n",
