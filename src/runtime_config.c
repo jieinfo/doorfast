@@ -20,7 +20,8 @@ enum df_runtime_option {
     DF_SEEN_UNLOCK_DELAY = 1U << 8,
     DF_SEEN_HANGUP_DELAY = 1U << 9,
     DF_SEEN_CALL_ELEV = 1U << 10,
-    DF_SEEN_SYNC_STATE_PATH = 1U << 11
+    DF_SEEN_SYNC_STATE_PATH = 1U << 11,
+    DF_SEEN_ACTIVE_HOST = 1U << 12
 };
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
@@ -35,6 +36,7 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
                    "%s", "/etc/config/doorfast-sync");
     runtime->config.passive_only = true;
+    runtime->config.active_host = false;
     runtime->config.unlock_delay_seconds = -1;
     runtime->config.hangup_delay_seconds = -1;
 }
@@ -191,6 +193,11 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         option = DF_SEEN_PASSIVE_ONLY;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_parse_boolean(value, &runtime->config.passive_only);
+    }
+    if (strcmp(name, "active_host") == 0) {
+        option = DF_SEEN_ACTIVE_HOST;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_boolean(value, &runtime->config.active_host);
     }
     if (strcmp(name, "capture_promiscuous") == 0) {
         option = DF_SEEN_PROMISCUOUS;

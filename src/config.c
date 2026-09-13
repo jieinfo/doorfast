@@ -28,7 +28,7 @@ int df_config_validate(const struct df_config *config) {
                 sizeof("/etc/config/doorfast-") - 1U) != 0 ||
         config->sync_state_path[sizeof("/etc/config/doorfast-") - 1U] == '\0' ||
         strstr(config->sync_state_path, "..") != NULL ||
-        !config->passive_only ||
+        (!config->passive_only && !config->active_host) ||
         df_gvs_identity_parse(config->gvs_local_address, identity) != DF_OK) {
         return DF_ERR_INVALID;
     }
