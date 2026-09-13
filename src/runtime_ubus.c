@@ -95,7 +95,8 @@ static int df_runtime_ubus_status_handler(
 
     blob_buf_init(&platform->response, 0);
     blobmsg_add_u8(&platform->response, "running", 1);
-    blobmsg_add_string(&platform->response, "mode", "passive");
+    blobmsg_add_string(&platform->response, "mode",
+        platform->owner->active_host ? "active_host" : "passive");
     sync_table = blobmsg_open_table(&platform->response, "sync");
     blobmsg_add_string(&platform->response, "phase", phase_name);
     blobmsg_add_string(&platform->response, "role", role_name);
@@ -443,6 +444,11 @@ int df_runtime_ubus_start(struct df_runtime_ubus *service,
     }
 #endif
     return DF_OK;
+}
+
+void df_runtime_ubus_set_active_host(struct df_runtime_ubus *service,
+    bool active_host) {
+    if (service != NULL) service->active_host = active_host;
 }
 
 int df_runtime_ubus_process(struct df_runtime_ubus *service,

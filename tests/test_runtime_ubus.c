@@ -55,6 +55,9 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     TEST_ASSERT_INT_EQ(
         DF_OK,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));
+    TEST_ASSERT_INT_EQ(0, service.active_host ? 1 : 0);
+    df_runtime_ubus_set_active_host(&service, true);
+    TEST_ASSERT_INT_EQ(1, service.active_host ? 1 : 0);
     TEST_ASSERT_INT_EQ(
         DF_ERR_INVALID,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));

@@ -311,6 +311,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             &ubus, df_runtime_call_status_provider, df_runtime_call_submit,
             &call_binding) == DF_OK) {
         wait_context.ubus_started = true;
+        df_runtime_ubus_set_active_host(&ubus,
+            !runtime->config.passive_only || runtime->config.active_host);
     } else {
         df_runtime_ubus_stop(&ubus);
         (void)fputs("doorfast: event=ubus_start_failed\n", stderr);
