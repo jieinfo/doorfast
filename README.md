@@ -45,8 +45,9 @@ config gvs 'main'
 ```
 
 被动观察时保持 `passive_only '1'`。P1 离线/受控主机模式可设置 `active_host '1'`，并将
-`enabled` 改为 `1`；该模式会启用 UDP/8300 主动发送，但仍使用占位头字段，必须在隔离网络
-和目标设备逐项验收后再接入生产。`gvs_local_address` 使用
+`enabled` 改为 `1`；该模式会启用 UDP/8300 主动发送，并按
+[厂商公共头算法](docs/gvs-vendor-header-provider.md)为每个报文生成随机字段及其变换值，
+但仍必须在隔离网络和目标设备逐项验收后再接入生产。`gvs_local_address` 使用
 `IS:楼栋-单元-房间-分机` 格式，例如 `IS:2-1-101-1`；它仅用于本机入站帧筛选。
 Doorfast 不会修改网络、路由或防火墙；主动发送仅针对由会话状态机提交的控制事务。
 修改 `/etc/config/doorfast` 后执行 `/etc/init.d/doorfast reload` 会停止旧实例并按新配置启动。
