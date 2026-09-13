@@ -42,4 +42,11 @@ void test_gvs_identity_derives_network_addresses_and_indoor_peers(void) {
                                  peers[3], 6));
     TEST_ASSERT_INT_EQ(0, memcmp((const uint8_t[]){0x62, 0x02, 0x01, 0x01, 0x01, 0x02},
                                  peers[4], 6));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_identity_unicast_ip(peers[3], unicast));
+    TEST_ASSERT_INT_EQ(0, strcmp("10.5.65.0", unicast));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_identity_unicast_ip(peers[4], unicast));
+    TEST_ASSERT_INT_EQ(0, strcmp("10.5.65.32", unicast));
+    peers[4][0] = 0x32;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_gvs_identity_unicast_ip(peers[4], unicast));
 }
