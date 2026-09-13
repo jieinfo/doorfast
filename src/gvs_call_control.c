@@ -32,6 +32,14 @@ void df_gvs_call_control_set_sender(struct df_gvs_call_control *control,
     control->call_attempt_context = send != NULL ? context : &control->sender;
 }
 
+void df_gvs_call_control_set_handshake_sender(
+    struct df_gvs_call_control *control, df_gvs_call_attempt_fn send,
+    void *context) {
+    if (control == NULL) return;
+    control->handshake_attempt = send;
+    control->handshake_attempt_context = context;
+}
+
 static int handshake_enqueue(struct df_gvs_call_control *control,
     const struct df_gvs_handshake_action *action, uint64_t now) {
     struct df_gvs_call_command command = {0};
@@ -137,8 +145,11 @@ int df_gvs_call_control_step(
     }
     previous = next.handshake_dispatch.state;
     if (df_gvs_call_dispatch_step(&next.handshake_dispatch, &next_session,
-            local, now_ms, df_gvs_call_memory_attempt,
-            &next.handshake_sender) != DF_OK)
+            local, now_ms,
+            next.handshake_attempt != NULL ? next.handshake_attempt :
+                df_gvs_call_memory_attempt,
+            next.handshake_attempt_context != NULL ?
+                next.handshake_attempt_context : &next.handshake_sender) != DF_OK)
         return DF_ERR_INVALID;
     next_result.handshake_frame_ready = previous != DF_GVS_CALL_SENT &&
         next.handshake_dispatch.state == DF_GVS_CALL_SENT;
@@ -146,8 +157,11 @@ int df_gvs_call_control_step(
         next_result.handshake_action_dropped = true;
     if (next_result.handshake.action.valid && !next_result.handshake_action_dropped) {
         if (df_gvs_call_dispatch_step(&next.handshake_dispatch, &next_session,
-                local, now_ms, df_gvs_call_memory_attempt,
-                &next.handshake_sender) != DF_OK)
+                local, now_ms,
+                next.handshake_attempt != NULL ? next.handshake_attempt :
+                    df_gvs_call_memory_attempt,
+                next.handshake_attempt_context != NULL ?
+                    next.handshake_attempt_context : &next.handshake_sender) != DF_OK)
             return DF_ERR_INVALID;
         next_result.handshake_frame_ready =
             next.handshake_dispatch.state == DF_GVS_CALL_SENT;
