@@ -18,6 +18,7 @@
 #include "gvs_runtime_sync.h"
 #include "gvs_send_transaction.h"
 #include "gvs_udp_sender.h"
+#include "gvs_transport_policy.h"
 #include "gvs_sync_state.h"
 #include "runtime_ubus.h"
 
@@ -255,6 +256,17 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         !runtime->config.enabled ||
         df_gvs_identity_parse(runtime->config.gvs_local_address, identity) != DF_OK) {
         return DF_ERR_INVALID;
+    }
+    {
+        const struct df_gvs_transport_policy policy = {
+            .passive_only = runtime->config.passive_only &&
+                !runtime->config.active_host,
+            .real_send_requested = runtime->config.active_host,
+            .one_shot = runtime->config.active_host,
+            .rollback_ready = runtime->config.active_host,
+        };
+        if (df_gvs_transport_policy_validate(&policy) != DF_OK)
+            return DF_ERR_INVALID;
     }
     if (df_gvs_sync_state_load(runtime->config.sync_state_path,
                                &persisted_version) != DF_OK) {

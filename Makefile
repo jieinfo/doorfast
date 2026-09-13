@@ -49,6 +49,7 @@ build/doorfast-tests: src/pcap_ring.h
 build/doorfast: src/deployment_config.h src/deployment_preflight.h src/deployment_snapshot.h src/deployment_report.h
 DAEMON_SOURCES += src/gvs_call_runtime.c
 DAEMON_SOURCES += src/gvs_udp_sender.c
+DAEMON_SOURCES += src/gvs_transport_policy.c
 DAEMON_SOURCES += src/gvs_call_control.c
 DAEMON_SOURCES += src/gvs_incoming_reply.c
 DAEMON_SOURCES += src/gvs_handshake.c
