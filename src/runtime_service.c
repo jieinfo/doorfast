@@ -295,6 +295,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         df_gvs_call_control_set_sender(&call_control,
             df_gvs_udp_send_attempt, &udp_sender);
+        df_gvs_call_control_set_handshake_sender(&call_control,
+            df_gvs_udp_send_attempt, &udp_sender);
         presence_context.sender = &udp_sender;
         presence_context.source = identity;
     }

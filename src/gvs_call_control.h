@@ -16,6 +16,8 @@ struct df_gvs_call_control {
     uint64_t handshake_dropped;
     df_gvs_call_attempt_fn call_attempt;
     void *call_attempt_context;
+    df_gvs_call_attempt_fn handshake_attempt;
+    void *handshake_attempt_context;
 };
 
 struct df_gvs_call_control_result {
@@ -46,6 +48,8 @@ struct df_gvs_call_control_status {
 int df_gvs_call_control_init(struct df_gvs_call_control *, uint64_t,
     df_gvs_header_provider_fn, void *);
 void df_gvs_call_control_set_sender(struct df_gvs_call_control *,
+    df_gvs_call_attempt_fn, void *);
+void df_gvs_call_control_set_handshake_sender(struct df_gvs_call_control *,
     df_gvs_call_attempt_fn, void *);
 int df_gvs_call_control_submit_answer(struct df_gvs_call_control *,
     const struct df_gvs_session *, uint64_t, const uint8_t local[6],
