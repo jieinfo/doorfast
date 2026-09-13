@@ -1,5 +1,7 @@
 #include "gvs_packet.h"
 
+#include <string.h>
+
 static uint16_t df_read_be16(const uint8_t *data) {
     return (uint16_t)(((uint16_t)data[0] << 8) | data[1]);
 }
@@ -28,6 +30,10 @@ int df_gvs_inspect_udp_prefix(const uint8_t *packet, size_t length,
     if (ip_length < 20 || ip_total_length < ip_length + 8 ||
         length < ethernet_length + ip_length + 8) return -1;
     if (packet[ethernet_length + 9] != 17) return 0;
+    memcpy(&prefix.source_ipv4, packet + ethernet_length + 12,
+           sizeof(prefix.source_ipv4));
+    memcpy(&prefix.destination_ipv4, packet + ethernet_length + 16,
+           sizeof(prefix.destination_ipv4));
     udp_offset = ethernet_length + ip_length;
     udp_length = df_read_be16(packet + udp_offset + 4);
     if (udp_length < 8 || udp_length > ip_total_length - ip_length) return -1;

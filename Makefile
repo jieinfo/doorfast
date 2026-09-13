@@ -26,6 +26,7 @@ TEST_SOURCES += tests/test_gvs_transport_policy.c src/gvs_transport_policy.c
 TEST_SOURCES += tests/test_gvs_call_ack.c src/gvs_call_ack.c
 TEST_SOURCES += tests/test_gvs_call_runtime.c src/gvs_call_runtime.c
 TEST_SOURCES += src/gvs_udp_sender.c
+TEST_SOURCES += tests/test_gvs_udp_sender.c
 TEST_SOURCES += tests/test_gvs_call_control.c src/gvs_call_control.c
 TEST_SOURCES += tests/test_gvs_incoming_reply.c src/gvs_incoming_reply.c
 TEST_SOURCES += tests/test_gvs_handshake.c src/gvs_handshake.c

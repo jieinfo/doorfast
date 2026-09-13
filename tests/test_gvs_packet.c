@@ -22,6 +22,14 @@ static size_t build_udp_packet(uint8_t *packet, size_t capacity, bool vlan,
     packet[ip + 2] = (uint8_t)(ip_length >> 8);
     packet[ip + 3] = (uint8_t)ip_length;
     packet[ip + 9] = 17;
+    packet[ip + 12] = 192;
+    packet[ip + 13] = 168;
+    packet[ip + 14] = 1;
+    packet[ip + 15] = 10;
+    packet[ip + 16] = 192;
+    packet[ip + 17] = 168;
+    packet[ip + 18] = 1;
+    packet[ip + 19] = 20;
     packet[udp] = (uint8_t)(source >> 8);
     packet[udp + 1] = (uint8_t)source;
     packet[udp + 2] = (uint8_t)(destination >> 8);
@@ -43,6 +51,10 @@ void test_gvs_udp_prefix_handles_vlan_and_truncation(void) {
     TEST_ASSERT_INT_EQ(1, df_gvs_inspect_udp_prefix(packet, length, &prefix));
     TEST_ASSERT_INT_EQ(8303, prefix.source_port);
     TEST_ASSERT_INT_EQ(40000, prefix.destination_port);
+    TEST_ASSERT_INT_EQ(0, memcmp(&prefix.source_ipv4,
+        (const uint8_t[]){192, 168, 1, 10}, 4));
+    TEST_ASSERT_INT_EQ(0, memcmp(&prefix.destination_ipv4,
+        (const uint8_t[]){192, 168, 1, 20}, 4));
     TEST_ASSERT_INT_EQ(42, (int)prefix.payload_offset);
     TEST_ASSERT_INT_EQ(214, (int)prefix.captured_payload_length);
     TEST_ASSERT_INT_EQ(300, (int)prefix.declared_payload_length);

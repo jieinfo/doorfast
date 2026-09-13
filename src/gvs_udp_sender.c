@@ -1,5 +1,6 @@
 #include "gvs_udp_sender.h"
 #include "gvs_identity.h"
+#include "gvs_packet.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -7,6 +8,18 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+static const struct df_gvs_observed_route *df_gvs_udp_find_route(
+    const struct df_gvs_udp_sender *sender, const uint8_t peer[6]) {
+    size_t index;
+
+    for (index = 0; index < DF_GVS_OBSERVED_ROUTE_CAPACITY; index++) {
+        if (sender->observed_routes[index].valid &&
+            memcmp(sender->observed_routes[index].peer, peer, 6) == 0)
+            return &sender->observed_routes[index];
+    }
+    return NULL;
+}
 
 int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
     uint16_t port, df_gvs_header_provider_fn provider, void *context) {
@@ -47,9 +60,13 @@ enum df_gvs_send_attempt_result df_gvs_udp_send_attempt(
     }
     {
         char host[INET_ADDRSTRLEN];
+        const struct df_gvs_observed_route *route =
+            df_gvs_udp_find_route(sender, command->destination);
         struct sockaddr_in destination = sender->peer;
-        if (df_gvs_identity_unicast_ip(command->destination, host) != DF_OK ||
-            inet_pton(AF_INET, host, &destination.sin_addr) != 1) {
+        if (route != NULL) {
+            destination.sin_addr.s_addr = route->ipv4;
+        } else if (df_gvs_identity_unicast_ip(command->destination, host) != DF_OK ||
+                   inet_pton(AF_INET, host, &destination.sin_addr) != 1) {
             if (sender->failed < UINT_MAX) sender->failed++;
             return DF_GVS_SEND_ATTEMPT_FAILURE;
         }
@@ -62,6 +79,41 @@ enum df_gvs_send_attempt_result df_gvs_udp_send_attempt(
     }
     if (sender->sent < UINT_MAX) sender->sent++;
     return DF_GVS_SEND_ATTEMPT_SUCCESS;
+}
+
+int df_gvs_udp_sender_observe_peer(struct df_gvs_udp_sender *sender,
+    const uint8_t *packet, size_t packet_length, const uint8_t identity[6]) {
+    struct df_udp_prefix prefix;
+    struct df_gvs_frame frame;
+    struct df_event event;
+    struct df_gvs_observed_route *route;
+    size_t index;
+
+    if (sender == NULL || packet == NULL || identity == NULL ||
+        df_gvs_inspect_udp_prefix(packet, packet_length, &prefix) != 1 ||
+        !prefix.payload_complete || prefix.destination_port != 8300U ||
+        df_gvs_frame_parse(packet + prefix.payload_offset,
+            prefix.captured_payload_length, &frame, &event) != DF_OK ||
+        !df_gvs_frame_is_for_identity(&frame, identity))
+        return DF_ERR_INVALID;
+
+    route = NULL;
+    for (index = 0; index < DF_GVS_OBSERVED_ROUTE_CAPACITY; index++) {
+        if (sender->observed_routes[index].valid &&
+            memcmp(sender->observed_routes[index].peer, frame.source, 6) == 0) {
+            route = &sender->observed_routes[index];
+            break;
+        }
+    }
+    if (route == NULL) {
+        route = &sender->observed_routes[sender->next_observed_route];
+        sender->next_observed_route = (sender->next_observed_route + 1U) %
+            DF_GVS_OBSERVED_ROUTE_CAPACITY;
+    }
+    memcpy(route->peer, frame.source, 6);
+    route->ipv4 = prefix.source_ipv4;
+    route->valid = true;
+    return DF_OK;
 }
 
 int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *action,

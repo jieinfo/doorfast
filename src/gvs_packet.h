@@ -6,6 +6,8 @@
 #include <stdint.h>
 
 struct df_udp_prefix {
+    uint32_t source_ipv4;
+    uint32_t destination_ipv4;
     uint16_t source_port;
     uint16_t destination_port;
     size_t payload_offset;
