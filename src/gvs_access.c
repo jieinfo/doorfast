@@ -170,7 +170,12 @@ int df_gvs_access_control_init(struct df_gvs_access_control *control,
         return DF_ERR_INVALID;
     for (i = 0; i < 16U; i++) {
         unsigned char c = (unsigned char)material[i];
-        unsigned value = c <= '9' ? c - '0' : (c | 32U) - 'a' + 10U;
+        unsigned value;
+
+        if (c <= (unsigned char)'9')
+            value = (unsigned)c - (unsigned)'0';
+        else
+            value = ((unsigned)c | 32U) - (unsigned)'a' + 10U;
         control->material[i / 2U] |= (uint8_t)(value << (i % 2U ? 0U : 4U));
     }
     control->configured = true;
