@@ -5,6 +5,14 @@
 #include "gvs_call_dispatch.h"
 #include "gvs_presence.h"
 
+#define DF_GVS_OBSERVED_ROUTE_CAPACITY 8U
+
+struct df_gvs_observed_route {
+    uint8_t peer[6];
+    uint32_t ipv4;
+    bool valid;
+};
+
 struct df_gvs_udp_sender {
     int fd;
     struct sockaddr_in peer;
@@ -12,6 +20,9 @@ struct df_gvs_udp_sender {
     void *fields_context;
     unsigned sent;
     unsigned failed;
+    struct df_gvs_observed_route observed_routes[
+        DF_GVS_OBSERVED_ROUTE_CAPACITY];
+    size_t next_observed_route;
 };
 
 int df_gvs_udp_sender_open(struct df_gvs_udp_sender *, const char *, uint16_t,
@@ -25,5 +36,7 @@ struct df_gvs_udp_presence_context {
     uint16_t sync_version;
 };
 int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *, void *);
+int df_gvs_udp_sender_observe_peer(struct df_gvs_udp_sender *,
+    const uint8_t *, size_t, const uint8_t [6]);
 
 #endif

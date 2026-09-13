@@ -479,6 +479,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (df_gvs_extract_control_payload(packet, packet_length,
                                            &payload, &payload_length) == 1) {
+            if ((!runtime->config.passive_only || runtime->config.active_host) &&
+                payload_length >= DF_GVS_CONTROL_HEADER_SIZE)
+                (void)df_gvs_udp_sender_observe_peer(&udp_sender, packet,
+                    packet_length, identity);
             if (payload_length >= 40U && payload[38] == 0x07 &&
                 payload[39] == 0x01) {
                 struct df_gvs_peer_reply reply;
