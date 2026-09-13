@@ -107,6 +107,10 @@ void test_gvs_udp_transform_matches_vendor_vectors(void);
 void test_gvs_vendor_header_serializes_random_and_transformed_fields(void);
 void test_gvs_vendor_header_clears_fields_when_random_source_fails(void);
 void test_gvs_vendor_header_reads_system_random(void);
+void test_gvs_access_serializes_vendor_direct_unlock_shape(void);
+void test_gvs_access_rejects_stale_session_and_invalid_target(void);
+void test_gvs_access_result_tracks_protocol_reply_without_physical_claim(void);
+void test_gvs_access_result_rejects_failure_and_expires_unanswered(void);
 void test_gvs_observer_only_starts_a_session_for_the_configured_identity(void);
 void test_gvs_replay_reads_an_offline_control_packet_without_transmitting(void);
 void test_gvs_session_tracks_passive_lifecycle(void);
@@ -140,7 +144,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 124;
+    return 128;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -155,7 +159,11 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(124, test_suite_count());
+    TEST_ASSERT_INT_EQ(128, test_suite_count());
+    test_gvs_access_serializes_vendor_direct_unlock_shape();
+    test_gvs_access_rejects_stale_session_and_invalid_target();
+    test_gvs_access_result_tracks_protocol_reply_without_physical_claim();
+    test_gvs_access_result_rejects_failure_and_expires_unanswered();
     test_gvs_udp_transform_matches_vendor_vectors();
     test_gvs_vendor_header_serializes_random_and_transformed_fields();
     test_gvs_vendor_header_clears_fields_when_random_source_fails();
