@@ -1,4 +1,5 @@
 #include "gvs_call_control.h"
+#include "gvs_memory_sender.h"
 
 #include <string.h>
 
@@ -185,9 +186,15 @@ int df_gvs_call_control_step(
         next.dispatch.state == DF_GVS_CALL_SENT) {
         if (next.dispatch.command.type == DF_GVS_CALL_COMMAND_ANSWER) {
             struct df_gvs_receive_result sent_result;
+            uint8_t sent_frame[DF_GVS_CALL_COMMAND_MAX_FRAME_SIZE];
+            size_t sent_length = 0;
 
-            if (df_gvs_receive_datagram(
-                    next.sender.bytes, next.sender.length, local,
+            if (df_gvs_call_command_serialize(
+                    &next.dispatch.command, sent_frame, sizeof(sent_frame),
+                    &sent_length, df_gvs_placeholder_header_fields,
+                    NULL) != DF_OK ||
+                df_gvs_receive_datagram(
+                    sent_frame, sent_length, local,
                     &next_session, &next_deadline, now_ms,
                     &sent_result) != DF_OK) {
                 return DF_ERR_INVALID;

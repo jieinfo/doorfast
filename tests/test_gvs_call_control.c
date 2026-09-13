@@ -59,6 +59,18 @@ static int reject_control_header(
     return DF_ERR_INVALID;
 }
 
+static enum df_gvs_send_attempt_result successful_external_send(
+    const struct df_gvs_call_command *command, unsigned attempt,
+    uint64_t completion_id, void *context) {
+    unsigned *calls = context;
+
+    if (command == NULL || !command->valid || attempt == 0U ||
+        completion_id == 0U || calls == NULL)
+        return DF_GVS_SEND_ATTEMPT_FAILURE;
+    (*calls)++;
+    return DF_GVS_SEND_ATTEMPT_SUCCESS;
+}
+
 void test_gvs_call_control_handshake_receive_and_retry(void) {
     const uint8_t local[6] = {0x61,2,1,1,1,1};
     struct df_gvs_session session = {.state=DF_GVS_RINGING,.generation=9,
@@ -157,6 +169,32 @@ void test_gvs_call_control_answer_reaches_confirmation(void) {
     TEST_ASSERT_INT_EQ(1, result.runtime.acknowledgement_confirmed);
     TEST_ASSERT_INT_EQ(1, result.runtime.receive.talking_transition);
     TEST_ASSERT_INT_EQ(DF_GVS_TALKING, session.state);
+}
+
+void test_gvs_call_control_tracks_answer_sent_by_external_transport(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_session session = {.state = DF_GVS_RINGING, .generation = 9,
+        .peer = {0x32, 2, 1, 0, 1, 0}};
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    unsigned calls = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control, 0, df_gvs_placeholder_header_fields, NULL));
+    df_gvs_call_control_set_sender(&control, successful_external_send, &calls);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_submit_answer(
+        &control, &session, 9, local, 8303, 8302, 120, 0));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
+        &control, &session, local, &deadline, 0, &result));
+    TEST_ASSERT_INT_EQ(1, calls);
+    TEST_ASSERT_INT_EQ(1, result.frame_ready);
+    TEST_ASSERT_INT_EQ(1, result.confirmation_started);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_SENT, control.dispatch.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_ACK_WAITING,
+                       control.acknowledgement.state);
+    TEST_ASSERT_INT_EQ(0, (int)control.sender.length);
+    TEST_ASSERT_INT_EQ(9, (int)session.pick_generation);
 }
 
 void test_gvs_call_control_reports_confirmation_timeout_once(void) {
