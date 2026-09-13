@@ -17,6 +17,7 @@ struct df_config {
     const char *uplink_interface;
     const char *sync_state_path;
     bool passive_only;
+    bool active_host;
     int unlock_delay_seconds;
     int hangup_delay_seconds;
     bool call_elev;

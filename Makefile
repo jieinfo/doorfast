@@ -25,6 +25,7 @@ TEST_SOURCES += tests/test_gvs_call_dispatch.c src/gvs_call_dispatch.c
 TEST_SOURCES += tests/test_gvs_transport_policy.c src/gvs_transport_policy.c
 TEST_SOURCES += tests/test_gvs_call_ack.c src/gvs_call_ack.c
 TEST_SOURCES += tests/test_gvs_call_runtime.c src/gvs_call_runtime.c
+TEST_SOURCES += src/gvs_udp_sender.c
 TEST_SOURCES += tests/test_gvs_call_control.c src/gvs_call_control.c
 TEST_SOURCES += tests/test_gvs_incoming_reply.c src/gvs_incoming_reply.c
 TEST_SOURCES += tests/test_gvs_handshake.c src/gvs_handshake.c
@@ -47,6 +48,7 @@ build/doorfast-tests: src/deployment_snapshot.h
 build/doorfast-tests: src/pcap_ring.h
 build/doorfast: src/deployment_config.h src/deployment_preflight.h src/deployment_snapshot.h src/deployment_report.h
 DAEMON_SOURCES += src/gvs_call_runtime.c
+DAEMON_SOURCES += src/gvs_udp_sender.c
 DAEMON_SOURCES += src/gvs_call_control.c
 DAEMON_SOURCES += src/gvs_incoming_reply.c
 DAEMON_SOURCES += src/gvs_handshake.c
