@@ -15,6 +15,10 @@ int df_config_validate(const struct df_config *config) {
     if (config == NULL) {
         return DF_ERR_INVALID;
     }
+    if (config->access_material != NULL && config->access_material[0] != '\0' &&
+        (strlen(config->access_material) != 16U ||
+         strspn(config->access_material, "0123456789abcdefABCDEF") != 16U))
+        return DF_ERR_INVALID;
     if (!config->enabled) {
         return DF_OK;
     }

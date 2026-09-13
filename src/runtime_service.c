@@ -236,6 +236,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_send_transaction send_transaction = {0};
     struct df_gvs_memory_sender memory_sender = {0};
     struct df_gvs_call_control call_control = {0};
+    struct df_gvs_access_control access = {0};
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
     struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
@@ -278,6 +279,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     started_ms = df_monotonic_ms();
+    if (df_gvs_access_control_init(&access, runtime->config.access_material,
+            started_ms, df_gvs_udp_access_emit, &udp_sender) != DF_OK)
+        return DF_ERR_INVALID;
     if (df_gvs_reply_queue_init(&reply_queue, started_ms) != DF_OK ||
         df_gvs_send_transaction_init(&send_transaction, started_ms) != DF_OK ||
         df_gvs_memory_sender_init(
@@ -311,7 +315,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                               started_ms) == DF_OK &&
         df_runtime_ubus_bind_call(
             &ubus, df_runtime_call_status_provider, df_runtime_call_submit,
-            &call_binding) == DF_OK) {
+            &call_binding) == DF_OK &&
+        df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
@@ -349,6 +354,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
 
         now_ms = df_monotonic_ms();
+        (void)df_gvs_access_result_tick(&access.result, &session, identity, now_ms);
         if (df_gvs_reply_queue_expire(&reply_queue, now_ms,
                                       &expired_replies) != DF_OK) {
             status = DF_ERR_IO;
@@ -542,6 +548,20 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                                   runtime->config.sync_state_path);
                 }
                 continue;
+            }
+            {
+                struct df_gvs_frame access_frame;
+                struct df_event access_event;
+                if (df_gvs_frame_parse(payload, payload_length, &access_frame,
+                        &access_event) == DF_OK && access_frame.family == 0x04 &&
+                    access_frame.opcode == 0x89) {
+                    if (df_gvs_access_result_observe(&access.result, &session,
+                            identity, &access_frame, now_ms) == DF_OK)
+                        (void)fprintf(stdout, "doorfast: event=access_result state=%s raw_status=%u\n",
+                            df_gvs_access_state_name(access.result.state),
+                            (unsigned)access.result.raw_status);
+                    continue;
+                }
             }
             if (df_gvs_call_control_receive(
                     &call_control, payload, payload_length, identity,

@@ -150,6 +150,20 @@ static int df_runtime_ubus_status_handler(
     blobmsg_add_string(&platform->response, "handshake_dispatch",
         df_gvs_call_dispatch_state_name(call_status.handshake_dispatch));
     blobmsg_close_table(&platform->response, call_table);
+    if (platform->owner->access != NULL) {
+        const struct df_gvs_access_control *access = platform->owner->access;
+        void *table = blobmsg_open_table(&platform->response, "access");
+        blobmsg_add_u8(&platform->response, "configured", access->configured);
+        blobmsg_add_string(&platform->response, "state",
+            df_gvs_access_state_name(access->result.state));
+        blobmsg_add_u64(&platform->response, "generation",
+            access->result.session_generation);
+        if (access->result.state == DF_GVS_ACCESS_PROTOCOL_COMPLETED ||
+            access->result.state == DF_GVS_ACCESS_PROTOCOL_REJECTED)
+            blobmsg_add_u32(&platform->response, "raw_status", access->result.raw_status);
+        blobmsg_add_u8(&platform->response, "physical_result_confirmed", 0);
+        blobmsg_close_table(&platform->response, table);
+    }
     df_ubus_deployment_health(&platform->response);
     result = ubus_send_reply(context, request, platform->response.head);
     blob_buf_free(&platform->response);
@@ -301,7 +315,40 @@ static int df_runtime_ubus_hangup_handler(
     return df_runtime_ubus_submit_reply(context, request, platform, &call);
 }
 
+static const struct blobmsg_policy df_runtime_ubus_unlock_policy[] = {
+    {.name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
+};
+
+static int df_runtime_ubus_unlock_handler(
+    struct ubus_context *context, struct ubus_object *object,
+    struct ubus_request_data *request, const char *method,
+    struct blob_attr *message) {
+    struct df_runtime_ubus_platform *platform =
+        container_of(object, struct df_runtime_ubus_platform, object);
+    struct blob_attr *fields[1] = {0};
+    uint64_t generation;
+    int status;
+    (void)method;
+    if (message == NULL) return UBUS_STATUS_INVALID_ARGUMENT;
+    blobmsg_parse(df_runtime_ubus_unlock_policy, 1, fields,
+        blob_data(message), blob_len(message));
+    if (!df_runtime_ubus_get_generation(fields[0], &generation))
+        return UBUS_STATUS_INVALID_ARGUMENT;
+    status = df_runtime_ubus_unlock(platform->owner, generation);
+    if (status != DF_OK)
+        return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT :
+                                         UBUS_STATUS_UNKNOWN_ERROR;
+    blob_buf_init(&platform->response, 0);
+    blobmsg_add_u8(&platform->response, "submitted", 1);
+    blobmsg_add_u64(&platform->response, "generation", generation);
+    status = ubus_send_reply(context, request, platform->response.head);
+    blob_buf_free(&platform->response);
+    return status == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+}
+
 static const struct ubus_method df_runtime_ubus_methods[] = {
+    UBUS_METHOD("unlock", df_runtime_ubus_unlock_handler,
+                df_runtime_ubus_unlock_policy),
     UBUS_METHOD_NOARG("status", df_runtime_ubus_status_handler),
     UBUS_METHOD("answer", df_runtime_ubus_answer_handler,
                 df_runtime_ubus_answer_policy),
@@ -522,4 +569,24 @@ void df_runtime_ubus_stop(struct df_runtime_ubus *service) {
     df_runtime_ubus_platform_stop(service);
 #endif
     memset(service, 0, sizeof(*service));
+}
+
+int df_runtime_ubus_bind_access(struct df_runtime_ubus *service,
+    struct df_gvs_access_control *access, const struct df_gvs_session *session,
+    const uint8_t identity[6]) {
+    if (service == NULL || !service->started || access == NULL ||
+        session == NULL || identity == NULL || service->access != NULL)
+        return DF_ERR_INVALID;
+    service->access = access;
+    service->access_session = session;
+    service->access_identity = identity;
+    return DF_OK;
+}
+
+int df_runtime_ubus_unlock(struct df_runtime_ubus *service, uint64_t generation) {
+    if (service == NULL || !service->started || !service->active_host ||
+        service->access == NULL || generation == 0U)
+        return DF_ERR_INVALID;
+    return df_gvs_access_control_submit(service->access, service->access_session,
+        generation, service->access_identity, service->last_now_ms);
 }

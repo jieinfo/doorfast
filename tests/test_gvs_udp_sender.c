@@ -79,7 +79,7 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void) {
     socklen_t address_length = sizeof(address);
     struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
     uint8_t packet[128];
-    uint8_t received[DF_GVS_CALL_COMMAND_MAX_FRAME_SIZE];
+    uint8_t received[128];
     size_t packet_length;
     int receiver;
     ssize_t received_length;
@@ -123,6 +123,19 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void) {
     TEST_ASSERT_INT_EQ(49, (int)received_length);
     TEST_ASSERT_INT_EQ(0, memcmp(received + 10, door, sizeof(door)));
 
+    {
+        struct df_gvs_access_request access;
+        const uint8_t material[8] = {1,2,3,4,5,6,7,8};
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_prepare_direct(
+            &session, 7, local, material, &access));
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_access_emit(&access, &sender));
+        received_length = recv(receiver, received, sizeof(received), 0);
+        TEST_ASSERT_INT_EQ(50, (int)received_length);
+        TEST_ASSERT_INT_EQ(4, received[38]);
+        TEST_ASSERT_INT_EQ(9, received[39]);
+        TEST_ASSERT_INT_EQ(12, received[40]);
+        TEST_ASSERT_INT_EQ(0, memcmp(received + 42, material, 8));
+    }
     df_gvs_udp_sender_close(&sender);
     close(receiver);
 }

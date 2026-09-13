@@ -109,3 +109,87 @@ void test_gvs_access_result_rejects_failure_and_expires_unanswered(void) {
         &result, &session, local, 2000));
     TEST_ASSERT_INT_EQ(DF_GVS_ACCESS_PROTOCOL_EXPIRED, result.state);
 }
+
+static int access_send_count(const struct df_gvs_access_request *request,
+                             void *context) {
+    int *count = context;
+    TEST_ASSERT_INT_EQ(1, request->valid);
+    (*count)++;
+    return DF_OK;
+}
+
+void test_gvs_access_control_sends_once_and_requires_material(void) {
+    struct df_gvs_access_control control;
+    struct df_gvs_session session = access_session();
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    int sent = 0;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(
+        &control, "", 0, access_send_count, &sent));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_control_submit(
+        &control, &session, 11, local, 0));
+    TEST_ASSERT_INT_EQ(0, sent);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_control_init(
+        &control, "00112233445566xz", 0, access_send_count, &sent));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(
+        &control, "0011223344556677", 0, access_send_count, &sent));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_control_submit(
+        &control, &session, 10, local, 1));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_submit(
+        &control, &session, 11, local, 1));
+    TEST_ASSERT_INT_EQ(1, sent);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_control_submit(
+        &control, &session, 11, local, 2));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_result_tick(
+        &control.result, &session, local, 1001));
+    TEST_ASSERT_INT_EQ(DF_GVS_ACCESS_PROTOCOL_EXPIRED, control.result.state);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_control_submit(
+        &control, &session, 11, local, 1002));
+    TEST_ASSERT_INT_EQ(1, sent);
+    session.generation++;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_submit(
+        &control, &session, 12, local, 1003));
+    TEST_ASSERT_INT_EQ(2, sent);
+}
+
+static int access_send_fail(const struct df_gvs_access_request *request,
+                            void *context) {
+    (void)request;
+    (*(int *)context)++;
+    return DF_ERR_IO;
+}
+
+void test_gvs_access_failed_send_and_late_reply(void) {
+    struct df_gvs_access_control control;
+    struct df_gvs_session session = access_session();
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    uint8_t status = 1;
+    struct df_gvs_frame frame = {.family = 4, .opcode = 0x89,
+        .payload = &status, .payload_length = 1};
+    int sent = 0;
+    memcpy(frame.source, session.peer, 6);
+    memcpy(frame.destination, local, 6);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(&control,
+        "0011223344556677", 0, access_send_fail, &sent));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_gvs_access_control_submit(
+        &control, &session, 11, local, 1));
+    TEST_ASSERT_INT_EQ(DF_GVS_ACCESS_PROTOCOL_SEND_FAILED, control.result.state);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_result_observe(
+        &control.result, &session, local, &frame, 2));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_control_submit(
+        &control, &session, 11, local, 3));
+    TEST_ASSERT_INT_EQ(1, sent);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(&control,
+        "0011223344556677", 0, access_send_count, &sent));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_submit(
+        &control, &session, 11, local, 1));
+    frame.source[1]++;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_result_observe(
+        &control.result, &session, local, &frame, 2));
+    frame.source[1]--;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_result_observe(
+        &control.result, &session, local, &frame, 1001));
+    session.state = DF_GVS_ENDED;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_result_tick(
+        &control.result, &session, local, 1001));
+    TEST_ASSERT_INT_EQ(DF_GVS_ACCESS_PROTOCOL_CANCELLED, control.result.state);
+}
