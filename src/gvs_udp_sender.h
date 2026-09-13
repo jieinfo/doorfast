@@ -3,6 +3,7 @@
 
 #include <netinet/in.h>
 #include "gvs_call_dispatch.h"
+#include "gvs_incoming_reply.h"
 #include "gvs_presence.h"
 
 #define DF_GVS_OBSERVED_ROUTE_CAPACITY 8U
@@ -36,6 +37,8 @@ struct df_gvs_udp_presence_context {
     uint16_t sync_version;
 };
 int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *, void *);
+int df_gvs_udp_incoming_reply_emit(const struct df_gvs_incoming_reply *,
+    struct df_gvs_udp_sender *);
 int df_gvs_udp_sender_observe_peer(struct df_gvs_udp_sender *,
     const uint8_t *, size_t, const uint8_t [6]);
 
