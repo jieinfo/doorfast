@@ -181,3 +181,29 @@ int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *action,
         (const struct sockaddr *)&destination, sizeof(destination));
     return written == (ssize_t)length ? DF_OK : DF_ERR_IO;
 }
+
+int df_gvs_udp_access_emit(const struct df_gvs_access_request *reply,
+    void *context) {
+    struct df_gvs_udp_sender *sender = context;
+    uint8_t frame[DF_GVS_ACCESS_DIRECT_FRAME_SIZE];
+    struct sockaddr_in destination;
+    size_t length = 0;
+    ssize_t written;
+
+    if (reply == NULL || sender == NULL || sender->fd < 0 ||
+        df_gvs_access_serialize_direct(reply, frame, sizeof(frame), &length,
+            sender->provide_fields, sender->fields_context) != DF_OK ||
+        df_gvs_udp_resolve_destination(
+            sender, reply->destination, &destination) != DF_OK) {
+        if (sender != NULL && sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_INVALID;
+    }
+    written = sendto(sender->fd, frame, length, 0,
+        (const struct sockaddr *)&destination, sizeof(destination));
+    if (written != (ssize_t)length) {
+        if (sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_IO;
+    }
+    if (sender->sent < UINT_MAX) sender->sent++;
+    return DF_OK;
+}

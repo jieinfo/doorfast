@@ -26,6 +26,7 @@ enum df_gvs_access_result_state {
     DF_GVS_ACCESS_PROTOCOL_REJECTED,
     DF_GVS_ACCESS_PROTOCOL_EXPIRED,
     DF_GVS_ACCESS_PROTOCOL_CANCELLED,
+    DF_GVS_ACCESS_PROTOCOL_SEND_FAILED,
 };
 
 struct df_gvs_access_result {
@@ -62,5 +63,20 @@ int df_gvs_access_result_observe(
 int df_gvs_access_result_tick(
     struct df_gvs_access_result *result, const struct df_gvs_session *session,
     const uint8_t local[6], uint64_t now_ms);
+
+typedef int (*df_gvs_access_send_fn)(const struct df_gvs_access_request *, void *);
+struct df_gvs_access_control {
+    struct df_gvs_access_result result;
+    bool configured;
+    uint8_t material[8];
+    uint64_t attempted_generation;
+    df_gvs_access_send_fn send;
+    void *send_context;
+};
+int df_gvs_access_control_init(struct df_gvs_access_control *, const char *,
+    uint64_t, df_gvs_access_send_fn, void *);
+int df_gvs_access_control_submit(struct df_gvs_access_control *,
+    const struct df_gvs_session *, uint64_t, const uint8_t [6], uint64_t);
+const char *df_gvs_access_state_name(enum df_gvs_access_result_state);
 
 #endif

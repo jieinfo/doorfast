@@ -10,6 +10,7 @@
 
 struct df_runtime_config {
     struct df_config config;
+    char access_material[17];
     char brand[DF_RUNTIME_BRAND_MAX];
     char gvs_interface[DF_RUNTIME_INTERFACE_MAX];
     char gvs_local_address[DF_RUNTIME_ADDRESS_MAX];

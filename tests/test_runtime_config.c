@@ -10,6 +10,7 @@ void test_runtime_config_parses_main_gvs_section(void) {
         "\toption gvs_interface 'vlan-door.42'\n"
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption uplink_interface 'br-home'\n"
+        "\toption access_material '0d753ea99003cd5d'\n"
         "\toption passive_only '1'\n"
         "\toption capture_promiscuous '0'\n";
     struct df_runtime_config runtime;
@@ -20,6 +21,8 @@ void test_runtime_config_parses_main_gvs_section(void) {
     TEST_ASSERT_INT_EQ(0, strcmp("vlan-door.42", runtime.config.gvs_interface));
     TEST_ASSERT_INT_EQ(0, strcmp("IS:2-1-101-1", runtime.config.gvs_local_address));
     TEST_ASSERT_INT_EQ(0, strcmp("br-home", runtime.config.uplink_interface));
+    TEST_ASSERT_INT_EQ(0, strcmp("0d753ea99003cd5d",
+                                 runtime.config.access_material));
     TEST_ASSERT_INT_EQ(0, strcmp("/etc/config/doorfast-sync",
                                  runtime.config.sync_state_path));
     TEST_ASSERT_INT_EQ(1, runtime.config.passive_only);
@@ -65,6 +68,13 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption sync_state_path '/etc/passwd'\n"
         "\toption passive_only '1'\n";
+    const char malformed_access_material[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'eth9'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption passive_only '1'\n"
+        "\toption access_material 'not-hex'\n";
     struct df_runtime_config runtime;
 
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(duplicate, &runtime));
@@ -72,5 +82,8 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(invalid_boolean, &runtime));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(relative_state, &runtime));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(unrelated_state, &runtime));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_config_parse(malformed_access_material,
+                                               &runtime));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse("", &runtime));
 }

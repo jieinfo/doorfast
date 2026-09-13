@@ -2,6 +2,7 @@
 #define DOORFAST_GVS_UDP_SENDER_H
 
 #include <netinet/in.h>
+#include "gvs_access.h"
 #include "gvs_call_dispatch.h"
 #include "gvs_incoming_reply.h"
 #include "gvs_presence.h"
@@ -41,5 +42,7 @@ int df_gvs_udp_incoming_reply_emit(const struct df_gvs_incoming_reply *,
     struct df_gvs_udp_sender *);
 int df_gvs_udp_sender_observe_peer(struct df_gvs_udp_sender *,
     const uint8_t *, size_t, const uint8_t [6]);
+
+int df_gvs_udp_access_emit(const struct df_gvs_access_request *, void *);
 
 #endif

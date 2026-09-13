@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "doorfast.h"
+#include "gvs_access.h"
 #include "gvs_runtime_sync.h"
 #include "gvs_call_control.h"
 
@@ -31,6 +32,9 @@ struct df_runtime_ubus {
     df_runtime_call_status_provider_fn provide_call_status;
     df_runtime_call_submit_fn submit_call;
     void *call_context;
+    struct df_gvs_access_control *access;
+    const struct df_gvs_session *access_session;
+    const uint8_t *access_identity;
     void *platform;
     uint64_t last_now_ms;
     uint64_t next_reconnect_ms;
@@ -51,5 +55,10 @@ int df_runtime_ubus_read_call_status(struct df_runtime_ubus *,
 int df_runtime_ubus_submit_call(struct df_runtime_ubus *,
     const struct df_runtime_call_request *);
 void df_runtime_ubus_stop(struct df_runtime_ubus *service);
+
+int df_runtime_ubus_bind_access(struct df_runtime_ubus *,
+    struct df_gvs_access_control *, const struct df_gvs_session *,
+    const uint8_t [6]);
+int df_runtime_ubus_unlock(struct df_runtime_ubus *, uint64_t);
 
 #endif

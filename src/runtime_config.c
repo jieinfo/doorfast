@@ -21,12 +21,14 @@ enum df_runtime_option {
     DF_SEEN_HANGUP_DELAY = 1U << 9,
     DF_SEEN_CALL_ELEV = 1U << 10,
     DF_SEEN_SYNC_STATE_PATH = 1U << 11,
-    DF_SEEN_ACTIVE_HOST = 1U << 12
+    DF_SEEN_ACTIVE_HOST = 1U << 12,
+    DF_SEEN_ACCESS_MATERIAL = 1U << 13
 };
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     memset(runtime, 0, sizeof(*runtime));
     (void)snprintf(runtime->brand, sizeof(runtime->brand), "%s", "gvs");
+    runtime->config.access_material = runtime->access_material;
     runtime->config.brand = runtime->brand;
     runtime->config.capture_interface = runtime->gvs_interface;
     runtime->config.gvs_interface = runtime->gvs_interface;
@@ -158,6 +160,15 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
     unsigned int option = 0;
     int result = DF_OK;
 
+    if (strcmp(name, "access_material") == 0) {
+        if (df_claim_option(seen, DF_SEEN_ACCESS_MATERIAL) != DF_OK)
+            return DF_ERR_INVALID;
+        if (value[0] != '\0' && (strlen(value) != 16U ||
+            strspn(value, "0123456789abcdefABCDEF") != 16U))
+            return DF_ERR_INVALID;
+        return df_copy_option(runtime->access_material,
+                              sizeof(runtime->access_material), value);
+    }
     if (strcmp(name, "enabled") == 0) {
         option = DF_SEEN_ENABLED;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;

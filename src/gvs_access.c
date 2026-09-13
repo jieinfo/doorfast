@@ -154,3 +154,70 @@ int df_gvs_access_result_tick(
     }
     return DF_OK;
 }
+
+int df_gvs_access_control_init(struct df_gvs_access_control *control,
+    const char *material, uint64_t now_ms, df_gvs_access_send_fn send,
+    void *context) {
+    size_t i;
+    if (control == NULL) return DF_ERR_INVALID;
+    memset(control, 0, sizeof(*control));
+    df_gvs_access_result_init(&control->result, now_ms);
+    control->send = send;
+    control->send_context = context;
+    if (material == NULL || material[0] == '\0') return DF_OK;
+    if (strlen(material) != 16U ||
+        strspn(material, "0123456789abcdefABCDEF") != 16U)
+        return DF_ERR_INVALID;
+    for (i = 0; i < 16U; i++) {
+        unsigned char c = (unsigned char)material[i];
+        unsigned value;
+
+        if (c <= (unsigned char)'9')
+            value = (unsigned)c - (unsigned)'0';
+        else
+            value = ((unsigned)c | 32U) - (unsigned)'a' + 10U;
+        control->material[i / 2U] |= (uint8_t)(value << (i % 2U ? 0U : 4U));
+    }
+    control->configured = true;
+    return DF_OK;
+}
+
+int df_gvs_access_control_submit(struct df_gvs_access_control *control,
+    const struct df_gvs_session *session, uint64_t generation,
+    const uint8_t local[6], uint64_t now_ms) {
+    struct df_gvs_access_request request;
+    struct df_gvs_access_result next;
+    int status;
+    if (control == NULL || !control->configured || control->send == NULL ||
+        generation == control->attempted_generation ||
+        df_gvs_access_prepare_direct(session, generation, local,
+            control->material, &request) != DF_OK)
+        return DF_ERR_INVALID;
+    next = control->result;
+    if (df_gvs_access_result_tick(&next, session, local, now_ms) != DF_OK ||
+        df_gvs_access_result_begin(&next, session, generation, local,
+            now_ms, 1000U) != DF_OK)
+        return DF_ERR_INVALID;
+    /* No transaction identifier exists in 04/89: allow one attempt per call. */
+    control->attempted_generation = generation;
+    status = control->send(&request, control->send_context);
+    if (status != DF_OK) {
+        next.state = DF_GVS_ACCESS_PROTOCOL_SEND_FAILED;
+        next.deadline_ms = 0;
+    }
+    control->result = next;
+    return status;
+}
+
+const char *df_gvs_access_state_name(enum df_gvs_access_result_state state) {
+    switch (state) {
+    case DF_GVS_ACCESS_PROTOCOL_EMPTY: return "idle";
+    case DF_GVS_ACCESS_PROTOCOL_WAITING: return "waiting";
+    case DF_GVS_ACCESS_PROTOCOL_COMPLETED: return "protocol_completed";
+    case DF_GVS_ACCESS_PROTOCOL_REJECTED: return "protocol_rejected";
+    case DF_GVS_ACCESS_PROTOCOL_EXPIRED: return "expired";
+    case DF_GVS_ACCESS_PROTOCOL_CANCELLED: return "cancelled";
+    case DF_GVS_ACCESS_PROTOCOL_SEND_FAILED: return "send_failed";
+    }
+    return "unknown";
+}
