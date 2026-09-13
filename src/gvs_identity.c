@@ -24,7 +24,8 @@ static int df_gvs_identity_fields(const uint8_t identity[6],
     unsigned building;
     unsigned unit;
 
-    if (identity == NULL || identity[0] != 0x61 ||
+    if (identity == NULL ||
+        (identity[0] != 0x61 && identity[0] != 0x62) ||
         df_gvs_bcd_value(identity[1], &building) != DF_OK ||
         df_gvs_bcd_value(identity[2], &unit) != DF_OK ||
         df_gvs_bcd_value(identity[3], floor) != DF_OK ||
