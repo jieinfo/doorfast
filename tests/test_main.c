@@ -85,6 +85,7 @@ void test_legacy_config_import_keeps_only_safe_fields(void);
 void test_runtime_config_parses_main_gvs_section(void);
 void test_runtime_config_accepts_disabled_minimal_config(void);
 void test_runtime_config_rejects_ambiguous_or_unsafe_config(void);
+void test_runtime_config_parses_explicit_elevator_direction(void);
 void test_sip_invite_and_bye(void);
 void test_gvs_frame_validation_and_event_mapping(void);
 void test_gvs_frame_rejects_truncated_or_inconsistent_payload(void);
@@ -131,6 +132,8 @@ void test_gvs_elevator_control_completes_matching_reply_without_physical_claim(v
 void test_gvs_elevator_control_rejects_duplicate_wrong_and_late_results(void);
 void test_gvs_elevator_control_distinguishes_bounded_send_failures(void);
 void test_gvs_elevator_control_preserves_time_and_cancels_changed_identity(void);
+void test_gvs_elevator_query_sends_immediately_and_periodically(void);
+void test_gvs_elevator_query_disabled_and_clock_safe(void);
 void test_gvs_observer_only_starts_a_session_for_the_configured_identity(void);
 void test_gvs_replay_reads_an_offline_control_packet_without_transmitting(void);
 void test_gvs_session_tracks_passive_lifecycle(void);
@@ -164,7 +167,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 145;
+    return 148;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -179,7 +182,10 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(145, test_suite_count());
+    TEST_ASSERT_INT_EQ(148, test_suite_count());
+    test_gvs_elevator_query_sends_immediately_and_periodically();
+    test_gvs_elevator_query_disabled_and_clock_safe();
+    test_runtime_config_parses_explicit_elevator_direction();
     test_gvs_udp_sender_emits_elevator_request_to_observed_route();
     test_runtime_ubus_elevator_requires_active_host_and_owns_ids();
     test_runtime_ubus_elevator_status_is_bounded_and_aged();

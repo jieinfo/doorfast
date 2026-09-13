@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "doorfast.h"
+#include "gvs_elevator.h"
 
 struct df_config {
     bool enabled;
@@ -22,6 +23,8 @@ struct df_config {
     int unlock_delay_seconds;
     int hangup_delay_seconds;
     bool call_elev;
+    enum df_gvs_elevator_direction call_elev_direction;
+    bool call_elev_direction_configured;
 };
 
 #define DF_LEGACY_BRAND_MAX 32

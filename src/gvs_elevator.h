@@ -26,6 +26,9 @@ struct df_gvs_elevator_request {
     uint16_t payload_length;
 };
 
+typedef int (*df_gvs_elevator_send_fn)(
+    const struct df_gvs_elevator_request *, void *);
+
 #define DF_GVS_ELEVATOR_MAX_ENTRIES 8U
 
 enum df_gvs_elevator_motion {

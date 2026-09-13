@@ -22,7 +22,8 @@ enum df_runtime_option {
     DF_SEEN_CALL_ELEV = 1U << 10,
     DF_SEEN_SYNC_STATE_PATH = 1U << 11,
     DF_SEEN_ACTIVE_HOST = 1U << 12,
-    DF_SEEN_ACCESS_MATERIAL = 1U << 13
+    DF_SEEN_ACCESS_MATERIAL = 1U << 13,
+    DF_SEEN_CALL_ELEV_DIRECTION = 1U << 14
 };
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
@@ -234,6 +235,21 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         option = DF_SEEN_CALL_ELEV;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_parse_boolean(value, &runtime->config.call_elev);
+    }
+    if (strcmp(name, "call_elev_direction") == 0) {
+        option = DF_SEEN_CALL_ELEV_DIRECTION;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        if (strcmp(value, "up") == 0) {
+            runtime->config.call_elev_direction = DF_GVS_ELEVATOR_UP;
+            runtime->config.call_elev_direction_configured = true;
+            return DF_OK;
+        }
+        if (strcmp(value, "down") == 0) {
+            runtime->config.call_elev_direction = DF_GVS_ELEVATOR_DOWN;
+            runtime->config.call_elev_direction_configured = true;
+            return DF_OK;
+        }
+        return DF_ERR_INVALID;
     }
     return result;
 }
