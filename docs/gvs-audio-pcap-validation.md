@@ -35,6 +35,19 @@ A-law. Payload duration is variable: 128, 160, and 192 samples correspond to
 16, 20, and 24 milliseconds at 8 kHz, so the runtime must not require every
 packet to contain exactly 160 bytes.
 
+Direction separates those sizes. Across the five captures, every one of the
+6,245 packets sourced by the original MT8157 address (`10.5.83.0`) carries a
+160-byte payload. Packets sourced by the three door-station addresses use the
+128- and 192-byte sizes. Doorfast therefore accepts all three sizes on receive,
+while the MT8157 replacement transmit path emits 160 A-law samples every 20 ms.
+
+The 16-bit little-endian sequence at offset `0x18` advances by one for nearly
+every consecutive packet from a given IPv4 source. Its captured initial value
+is not fixed, and the MT8157 sequence continues across destination changes and
+capture boundaries. The transmit controller consequently preserves one
+wrapping process-level sequence across call generations instead of resetting
+it when a new call starts.
+
 ## Reproduction
 
 List the audio packets in a capture:
