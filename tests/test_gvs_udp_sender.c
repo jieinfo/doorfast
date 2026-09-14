@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -8,6 +9,8 @@
 #include "gvs_audio_tx.h"
 #include "gvs_elevator.h"
 #include "gvs_media.h"
+#include "gvs_pcm_ingress.h"
+#include "gvs_pcm_pump.h"
 #include "gvs_serialize.h"
 #include "gvs_udp_sender.h"
 #include "test.h"
@@ -245,6 +248,103 @@ void test_gvs_udp_sender_emits_audio_to_observed_peer_port(void)
     TEST_ASSERT_INT_EQ(0, memcmp(audio.destination, door, sizeof(door)));
     TEST_ASSERT_INT_EQ(0, memcmp(audio.source, local, sizeof(local)));
     TEST_ASSERT_INT_EQ(1, (int)sender.sent);
+    df_gvs_udp_sender_close(&sender);
+    close(receiver);
+}
+
+void test_gvs_local_pcm_reaches_observed_peer_audio_route(void)
+{
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t door[6] = {0x32, 2, 1, 0, 1, 0};
+    const uint8_t loopback[4] = {127, 0, 0, 1};
+    struct df_gvs_session session = {
+        .state = DF_GVS_TALKING,
+        .peer = {0x32, 2, 1, 0, 1, 0},
+        .generation = 19,
+    };
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    struct df_gvs_pcm_ingress ingress = {.fd = -1};
+    struct df_gvs_pcm_pump_result pump_result;
+    struct df_gvs_audio_tx tx;
+    struct df_gvs_audio_packet audio;
+    struct sockaddr_in udp_address;
+    struct sockaddr_un local_address;
+    struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
+    int16_t pcm[DF_GVS_AUDIO_TX_SAMPLES] = {0};
+    uint8_t control_packet[256];
+    uint8_t local_packet[DF_GVS_PCM_INGRESS_PACKET_SIZE];
+    uint8_t received[256];
+    char path[96];
+    size_t control_length;
+    size_t local_length = 0;
+    ssize_t received_length;
+    int receiver;
+    int producer;
+    size_t index;
+
+    receiver = socket(AF_INET, SOCK_DGRAM, 0);
+    TEST_ASSERT_INT_EQ(1, receiver >= 0);
+    TEST_ASSERT_INT_EQ(0, setsockopt(receiver, SOL_SOCKET, SO_REUSEADDR,
+                                     &(int){1}, sizeof(int)));
+    memset(&udp_address, 0, sizeof(udp_address));
+    udp_address.sin_family = AF_INET;
+    udp_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    udp_address.sin_port = htons(8302U);
+    TEST_ASSERT_INT_EQ(0, bind(receiver,
+        (const struct sockaddr *)&udp_address, sizeof(udp_address)));
+    TEST_ASSERT_INT_EQ(0, setsockopt(receiver, SOL_SOCKET, SO_RCVTIMEO,
+                                     &timeout, sizeof(timeout)));
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(
+        &sender, "0.0.0.0", 8300, udp_sender_header_fields, NULL));
+    control_length = udp_sender_packet(control_packet, sizeof(control_packet),
+                                       local, door, loopback);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
+        &sender, control_packet, control_length, local));
+
+    (void)snprintf(path, sizeof(path), "/tmp/doorfast-e2e-%ld.sock",
+                   (long)getpid());
+    unlink(path);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_pcm_ingress_open(&ingress, path));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_init(
+        &tx, 900, df_gvs_udp_audio_emit, &sender));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_start(
+        &tx, &session, session.generation, local, 5000));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_pcm_ingress_serialize(
+        session.generation, pcm, DF_GVS_AUDIO_TX_SAMPLES, local_packet,
+        sizeof(local_packet), &local_length));
+
+    producer = socket(AF_UNIX, SOCK_DGRAM, 0);
+    TEST_ASSERT_INT_EQ(1, producer >= 0);
+    memset(&local_address, 0, sizeof(local_address));
+    local_address.sun_family = AF_UNIX;
+    memcpy(local_address.sun_path, path, strlen(path) + 1U);
+    TEST_ASSERT_INT_EQ((int)local_length, (int)sendto(producer, local_packet,
+        local_length, 0, (const struct sockaddr *)&local_address,
+        sizeof(local_address)));
+    close(producer);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_pcm_pump(
+        &ingress, &tx, 5000, &pump_result));
+    TEST_ASSERT_INT_EQ(1, (int)pump_result.received);
+    TEST_ASSERT_INT_EQ(1, (int)pump_result.transmitted);
+    received_length = recv(receiver, received, sizeof(received), 0);
+    TEST_ASSERT_INT_EQ(202, (int)received_length);
+    TEST_ASSERT_INT_EQ(0, df_gvs_parse_audio(
+        received, (size_t)received_length, &audio));
+    TEST_ASSERT_INT_EQ(900, audio.sequence);
+    TEST_ASSERT_INT_EQ(160, (int)audio.field_c);
+    TEST_ASSERT_INT_EQ(1, audio.field_d);
+    TEST_ASSERT_INT_EQ(1, audio.field_e);
+    TEST_ASSERT_INT_EQ(0x100, audio.field_f);
+    TEST_ASSERT_INT_EQ(160, (int)audio.payload_length);
+    TEST_ASSERT_INT_EQ(0, memcmp(audio.destination, door, sizeof(door)));
+    TEST_ASSERT_INT_EQ(0, memcmp(audio.source, local, sizeof(local)));
+    for (index = 0; index < audio.payload_length; index++) {
+        TEST_ASSERT_INT_EQ(0xd5, audio.payload[index]);
+    }
+
+    df_gvs_pcm_ingress_close(&ingress);
     df_gvs_udp_sender_close(&sender);
     close(receiver);
 }
