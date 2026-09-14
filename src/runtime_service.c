@@ -21,6 +21,7 @@
 #include "gvs_udp_sender.h"
 #include "gvs_elevator_query.h"
 #include "gvs_media.h"
+#include "gvs_media_admission.h"
 #include "gvs_media_lifecycle.h"
 #include "gvs_audio_buffer.h"
 #include "gvs_audio_tx.h"
@@ -642,6 +643,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (df_gvs_parse_audio(media_payload,
                         media_prefix.declared_payload_length,
                         &audio_packet) == 0 &&
+                    df_gvs_media_admit(&session, identity,
+                        audio_packet.destination,
+                        audio_packet.source) == DF_GVS_MEDIA_ACCEPTED &&
                     df_gvs_audio_buffer_push(&audio, audio_packet.payload,
                         audio_packet.payload_length, audio_packet.sequence,
                         session.generation, now_ms) == 0) {
@@ -676,7 +680,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     packet + media_prefix.payload_offset;
                 if (df_gvs_parse_video(media_payload,
                         media_prefix.declared_payload_length,
-                        &video_packet) == 0) {
+                        &video_packet) == 0 &&
+                    df_gvs_media_admit(&session, identity,
+                        video_packet.destination,
+                        video_packet.source) == DF_GVS_MEDIA_ACCEPTED) {
                     int frame_status = df_gvs_video_reassembly_push(
                         &video, &video_packet, &frame, &frame_length);
                     if (frame_status == 1 &&
