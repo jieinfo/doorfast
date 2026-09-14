@@ -4,6 +4,7 @@ void test_gvs_call_runtime_tick_is_atomic(void);
 void test_gvs_call_control_answer_reaches_confirmation(void);
 void test_gvs_call_control_tracks_answer_sent_by_external_transport(void);
 void test_gvs_media(void);
+void test_gvs_media_admission_requires_current_exact_endpoints(void);
 void test_gvs_media_lifecycle_isolates_generations_and_endings(void);
 void test_gvs_video_reassembly(void);
 void test_gvs_jpeg(void);
@@ -203,6 +204,7 @@ int main(void) {
     test_g711_alaw();
     test_runtime_ubus_audio_status_tracks_buffer();
     test_gvs_media();
+    test_gvs_media_admission_requires_current_exact_endpoints();
     test_gvs_media_lifecycle_isolates_generations_and_endings();
     test_gvs_video_reassembly();
     test_gvs_jpeg();
