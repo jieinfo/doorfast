@@ -12,6 +12,8 @@ void test_gvs_audio_buffer(void);
 void test_gvs_audio_tx_binds_pcm_to_talking_generation_and_pacing(void);
 void test_gvs_audio_tx_preserves_sequence_across_sessions_and_failures(void);
 void test_gvs_audio_tx_syncs_to_call_lifecycle(void);
+void test_gvs_pcm_ingress_round_trips_private_local_frame(void);
+void test_gvs_pcm_ingress_rejects_stale_shape_and_regular_path(void);
 void test_g711_alaw(void);
 void test_gvs_call_control_reports_confirmation_timeout_once(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
@@ -206,6 +208,8 @@ int main(void) {
     test_gvs_audio_tx_binds_pcm_to_talking_generation_and_pacing();
     test_gvs_audio_tx_preserves_sequence_across_sessions_and_failures();
     test_gvs_audio_tx_syncs_to_call_lifecycle();
+    test_gvs_pcm_ingress_round_trips_private_local_frame();
+    test_gvs_pcm_ingress_rejects_stale_shape_and_regular_path();
     test_gvs_elevator_query_sends_immediately_and_periodically();
     test_gvs_elevator_query_disabled_and_clock_safe();
     test_runtime_config_parses_explicit_elevator_direction();
