@@ -8,6 +8,7 @@ void test_gvs_video_reassembly(void);
 void test_gvs_jpeg(void);
 void test_gvs_video_frame_cache(void);
 void test_gvs_video_snapshot(void);
+void test_gvs_audio_buffer(void);
 void test_gvs_call_control_reports_confirmation_timeout_once(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
 void test_gvs_call_control_bounds_failed_simulated_delivery(void);
@@ -172,7 +173,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 149;
+    return 153;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -187,12 +188,13 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(149, test_suite_count());
+    TEST_ASSERT_INT_EQ(153, test_suite_count());
     test_gvs_media();
     test_gvs_video_reassembly();
     test_gvs_jpeg();
     test_gvs_video_frame_cache();
     test_gvs_video_snapshot();
+    test_gvs_audio_buffer();
     test_gvs_elevator_query_sends_immediately_and_periodically();
     test_gvs_elevator_query_disabled_and_clock_safe();
     test_runtime_config_parses_explicit_elevator_direction();
