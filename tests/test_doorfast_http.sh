@@ -83,8 +83,12 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/video-unavailable"
 grep -aFq 'Status: 404 Not Found' "$workspace/video-unavailable"
 printf 'RIFFtestWAVE' >"$workspace/latest.wav"
+mkdir "$workspace/audio-chunks"
+printf 'RIFFold-WAVE' >"$workspace/audio-chunks/chunk-7-20-30-12-0.wav"
+printf 'RIFFnew-WAVE' >"$workspace/audio-chunks/chunk-7-30-40-12-0.wav"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-chunks" \
   PATH_INFO=/api/v1/audio/latest.wav \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-response"
 grep -aFq 'Content-Type: audio/wav' "$workspace/audio-response"
@@ -94,13 +98,22 @@ grep -aFq 'X-Doorfast-Generation: 7' "$workspace/audio-response"
 grep -aFq 'X-Doorfast-Audio-Previous-Revision: 30' "$workspace/audio-response"
 grep -aFq 'X-Doorfast-Audio-Revision: 40' "$workspace/audio-response"
 grep -aFq 'X-Doorfast-Audio-Dropped-Bytes: 0' "$workspace/audio-response"
-tail -c 12 "$workspace/audio-response" | cmp - "$workspace/latest.wav"
+tail -c 12 "$workspace/audio-response" | cmp - \
+  "$workspace/audio-chunks/chunk-7-30-40-12-0.wav"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-chunks" \
   PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING='generation=7&after=30' \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-cursor-next"
 grep -aFq 'X-Doorfast-Audio-Revision: 40' "$workspace/audio-cursor-next"
-tail -c 12 "$workspace/audio-cursor-next" | cmp - "$workspace/latest.wav"
+tail -c 12 "$workspace/audio-cursor-next" | cmp - \
+  "$workspace/audio-chunks/chunk-7-30-40-12-0.wav"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-chunks" \
+  PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING='after=30' \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-cursor-no-generation"
+grep -aFq 'Status: 400 Bad Request' "$workspace/audio-cursor-no-generation"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
   PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING=generation=8 \
@@ -108,6 +121,7 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
 grep -aFq 'Status: 409 Conflict' "$workspace/audio-mismatch"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-chunks" \
   PATH_INFO=/api/v1/audio/latest.wav HTTP_IF_NONE_MATCH='"df-audio-7-40"' \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-not-modified"
 grep -aFq 'Status: 304 Not Modified' "$workspace/audio-not-modified"
@@ -118,10 +132,22 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
 grep -aFq 'Status: 304 Not Modified' "$workspace/audio-cursor-current"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-chunks" \
   PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING='generation=7&after=20' \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-cursor-missed"
-grep -aFq 'Status: 409 Conflict' "$workspace/audio-cursor-missed"
-grep -aFq '"previous_revision":30,"revision":40' "$workspace/audio-cursor-missed"
+grep -aFq 'X-Doorfast-Audio-Previous-Revision: 20' "$workspace/audio-cursor-missed"
+grep -aFq 'X-Doorfast-Audio-Revision: 30' "$workspace/audio-cursor-missed"
+tail -c 12 "$workspace/audio-cursor-missed" | cmp - \
+  "$workspace/audio-chunks/chunk-7-20-30-12-0.wav"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-chunks" \
+  PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING='generation=7&after=20' \
+  HTTP_IF_NONE_MATCH='"df-audio-7-40"' \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-cursor-etag"
+grep -aFq 'X-Doorfast-Audio-Revision: 30' "$workspace/audio-cursor-etag"
+tail -c 12 "$workspace/audio-cursor-etag" | cmp - \
+  "$workspace/audio-chunks/chunk-7-20-30-12-0.wav"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" TEST_AUDIO_READY=false \
   PATH_INFO=/api/v1/audio/latest.wav \
