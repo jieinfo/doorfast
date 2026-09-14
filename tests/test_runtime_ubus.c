@@ -286,6 +286,9 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
     TEST_ASSERT_INT_EQ(0, (int)status.late_packets);
     TEST_ASSERT_INT_EQ(1, status.snapshot_ready);
     TEST_ASSERT_INT_EQ(1, (int)status.snapshot_packet_count);
+    TEST_ASSERT_INT_EQ(0, (int)status.snapshot_previous_packet_count);
+    TEST_ASSERT_INT_EQ(3, (int)status.snapshot_source_bytes);
+    TEST_ASSERT_INT_EQ(0, (int)status.snapshot_dropped_bytes);
     TEST_ASSERT_INT_EQ(50, (int)status.snapshot_bytes);
     TEST_ASSERT_INT_EQ(21, (int)status.snapshot_timestamp_ms);
     TEST_ASSERT_INT_EQ(DF_OK,

@@ -171,6 +171,13 @@ static int df_runtime_ubus_status_handler(
                        audio_status.snapshot_ready);
         blobmsg_add_u64(&platform->response, "snapshot_packet_count",
                         audio_status.snapshot_packet_count);
+        blobmsg_add_u64(&platform->response,
+                        "snapshot_previous_packet_count",
+                        audio_status.snapshot_previous_packet_count);
+        blobmsg_add_u64(&platform->response, "snapshot_source_bytes",
+                        audio_status.snapshot_source_bytes);
+        blobmsg_add_u64(&platform->response, "snapshot_dropped_bytes",
+                        audio_status.snapshot_dropped_bytes);
         blobmsg_add_u64(&platform->response, "snapshot_bytes",
                         audio_status.snapshot_bytes);
         blobmsg_add_u64(&platform->response, "snapshot_timestamp_ms",

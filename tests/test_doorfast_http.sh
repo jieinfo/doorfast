@@ -7,12 +7,13 @@ cat >"$fakebin/ubus" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$DOORFAST_HTTP_TRACE"
 if [ "$*" = 'call doorfast status' ]; then
-  printf '{"call":{"generation":%s},"video":{"ready":%s,"generation":%s,"frame_no":%s,"bytes":%s},"audio":{"snapshot_ready":%s,"generation":%s,"snapshot_packet_count":%s,"snapshot_bytes":%s}}\n' \
+  printf '{"call":{"generation":%s},"video":{"ready":%s,"generation":%s,"frame_no":%s,"bytes":%s},"audio":{"snapshot_ready":%s,"generation":%s,"snapshot_packet_count":%s,"snapshot_previous_packet_count":%s,"snapshot_bytes":%s,"snapshot_dropped_bytes":%s}}\n' \
     "${TEST_CALL_GENERATION:-7}" "${TEST_VIDEO_READY:-true}" \
     "${TEST_VIDEO_GENERATION:-7}" "${TEST_VIDEO_FRAME:-12}" \
     "${TEST_VIDEO_BYTES:-4}" "${TEST_AUDIO_READY:-true}" \
     "${TEST_AUDIO_GENERATION:-7}" "${TEST_AUDIO_REVISION:-40}" \
-    "${TEST_AUDIO_BYTES:-12}"
+    "${TEST_AUDIO_PREVIOUS_REVISION:-30}" "${TEST_AUDIO_BYTES:-12}" \
+    "${TEST_AUDIO_DROPPED_BYTES:-0}"
 else
   printf '{"ok":true}\n'
 fi
@@ -31,7 +32,9 @@ case "$expression" in
   '@.audio.snapshot_ready') printf '%s\n' "${TEST_AUDIO_READY:-true}" ;;
   '@.audio.generation') printf '%s\n' "${TEST_AUDIO_GENERATION:-7}" ;;
   '@.audio.snapshot_packet_count') printf '%s\n' "${TEST_AUDIO_REVISION:-40}" ;;
+  '@.audio.snapshot_previous_packet_count') printf '%s\n' "${TEST_AUDIO_PREVIOUS_REVISION:-30}" ;;
   '@.audio.snapshot_bytes') printf '%s\n' "${TEST_AUDIO_BYTES:-12}" ;;
+  '@.audio.snapshot_dropped_bytes') printf '%s\n' "${TEST_AUDIO_DROPPED_BYTES:-0}" ;;
   *) exit 1 ;;
 esac
 EOF
@@ -88,8 +91,16 @@ grep -aFq 'Content-Type: audio/wav' "$workspace/audio-response"
 grep -aFq 'Content-Length: 12' "$workspace/audio-response"
 grep -aFq 'ETag: "df-audio-7-40"' "$workspace/audio-response"
 grep -aFq 'X-Doorfast-Generation: 7' "$workspace/audio-response"
+grep -aFq 'X-Doorfast-Audio-Previous-Revision: 30' "$workspace/audio-response"
 grep -aFq 'X-Doorfast-Audio-Revision: 40' "$workspace/audio-response"
+grep -aFq 'X-Doorfast-Audio-Dropped-Bytes: 0' "$workspace/audio-response"
 tail -c 12 "$workspace/audio-response" | cmp - "$workspace/latest.wav"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING='generation=7&after=30' \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-cursor-next"
+grep -aFq 'X-Doorfast-Audio-Revision: 40' "$workspace/audio-cursor-next"
+tail -c 12 "$workspace/audio-cursor-next" | cmp - "$workspace/latest.wav"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
   PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING=generation=8 \
@@ -100,6 +111,17 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   PATH_INFO=/api/v1/audio/latest.wav HTTP_IF_NONE_MATCH='"df-audio-7-40"' \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-not-modified"
 grep -aFq 'Status: 304 Not Modified' "$workspace/audio-not-modified"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING='generation=7&after=40' \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-cursor-current"
+grep -aFq 'Status: 304 Not Modified' "$workspace/audio-cursor-current"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING='generation=7&after=20' \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-cursor-missed"
+grep -aFq 'Status: 409 Conflict' "$workspace/audio-cursor-missed"
+grep -aFq '"previous_revision":30,"revision":40' "$workspace/audio-cursor-missed"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" TEST_AUDIO_READY=false \
   PATH_INFO=/api/v1/audio/latest.wav \
