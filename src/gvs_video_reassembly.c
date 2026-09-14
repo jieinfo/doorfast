@@ -1,6 +1,7 @@
 #include "gvs_video_reassembly.h"
 #include <stdlib.h>
 #include <string.h>
+int df_gvs_jpeg_validate(const uint8_t *data, size_t length) { if (data == NULL || length < 4) return -1; return data[0] == 0xff && data[1] == 0xd8 && data[length - 2] == 0xff && data[length - 1] == 0xd9 ? 0 : -1; }
 void df_gvs_video_reassembly_init(struct df_gvs_video_reassembly *r){if(r!=NULL)memset(r,0,sizeof(*r));}
 void df_gvs_video_reassembly_reset(struct df_gvs_video_reassembly *r){if(r==NULL)return;free(r->buffer);memset(r,0,sizeof(*r));}
 int df_gvs_video_reassembly_push(struct df_gvs_video_reassembly *r,
