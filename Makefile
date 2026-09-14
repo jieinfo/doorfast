@@ -35,6 +35,7 @@ TEST_SOURCES += tests/test_gvs_access.c src/gvs_access.c
 TEST_SOURCES += tests/test_gvs_elevator.c src/gvs_elevator.c
 TEST_SOURCES += tests/test_gvs_elevator_control.c src/gvs_elevator_control.c
 TEST_SOURCES += tests/test_gvs_elevator_query.c src/gvs_elevator_query.c
+TEST_SOURCES += tests/test_gvs_media.c src/gvs_media.c
 TEST_SOURCES += tests/test_deployment_config.c src/deployment_config.c
 TEST_SOURCES += tests/test_deployment_preflight.c src/deployment_preflight.c
 TEST_SOURCES += tests/test_deployment_snapshot.c src/deployment_snapshot.c
