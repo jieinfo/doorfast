@@ -674,29 +674,28 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         uint64_t revision = audio.packet_count;
                         uint64_t pending =
                             audio.byte_count - audio.snapshot_source_bytes;
-                        uint64_t dropped;
                         if (df_gvs_audio_buffer_copy_pending(&audio,
                                 df_runtime_audio_export,
                                 sizeof(df_runtime_audio_export),
-                                &export_length) == 0) {
-                            dropped = pending > export_length
+                                &export_length) == 0 &&
+                            export_length > 0U) {
+                            uint64_t dropped = pending > export_length
                                 ? pending - export_length : 0U;
+                            if (df_g711_alaw_write_wav(
+                                    DF_RUNTIME_AUDIO_SNAPSHOT,
+                                    df_runtime_audio_export,
+                                    export_length) == 0 &&
+                                df_gvs_audio_chunk_store_publish(
+                                    DF_RUNTIME_AUDIO_CHUNKS,
+                                    DF_RUNTIME_AUDIO_SNAPSHOT,
+                                    session.generation, previous_revision,
+                                    revision, 44U + export_length * 2U,
+                                    dropped) == 0 &&
+                                df_gvs_audio_buffer_mark_snapshot(
+                                    &audio, session.generation,
+                                    export_length, now_ms) == 0)
+                                last_audio_export_ms = now_ms;
                         }
-                        if (export_length > 0U &&
-                            df_g711_alaw_write_wav(
-                                DF_RUNTIME_AUDIO_SNAPSHOT,
-                                df_runtime_audio_export,
-                                export_length) == 0 &&
-                            df_gvs_audio_chunk_store_publish(
-                                DF_RUNTIME_AUDIO_CHUNKS,
-                                DF_RUNTIME_AUDIO_SNAPSHOT,
-                                session.generation, previous_revision,
-                                revision, 44U + export_length * 2U,
-                                dropped) == 0 &&
-                            df_gvs_audio_buffer_mark_snapshot(
-                                &audio, session.generation,
-                                export_length, now_ms) == 0)
-                            last_audio_export_ms = now_ms;
                     }
                 }
                 continue;
