@@ -8,6 +8,7 @@
 #include "capture.h"
 #include "capture_retry.h"
 #include "event.h"
+#include "event_stream.h"
 #include "gvs_deadline.h"
 #include "gvs_identity.h"
 #include "gvs_incoming_reply.h"
@@ -195,6 +196,7 @@ static int df_runtime_capture_open(const struct df_runtime_config *runtime,
 struct df_runtime_wait_context {
     struct df_runtime_ubus *ubus;
     bool ubus_started;
+    struct df_event_stream *event_stream;
 };
 
 int df_runtime_pump_delay(unsigned delay_ms, unsigned max_slice_ms,
@@ -228,7 +230,20 @@ static int df_runtime_wait_and_pump(unsigned delay_ms, void *context) {
         df_runtime_ubus_process(wait->ubus, df_monotonic_ms()) != DF_OK) {
         (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
     }
+    if (wait != NULL && wait->event_stream != NULL) {
+        (void)df_event_stream_process(wait->event_stream);
+    }
     return DF_OK;
+}
+
+static void df_runtime_publish_event(struct df_event_stream *stream,
+                                     const char *event, uint64_t generation,
+                                     uint64_t now_ms) {
+    if (stream != NULL && stream->listen_fd >= 0 && df_event_stream_publish(
+            stream, event, generation, now_ms) != DF_OK) {
+        (void)fprintf(stderr, "doorfast: event_stream_publish_failed event=%s\n",
+                      event != NULL ? event : "unknown");
+    }
 }
 
 static int df_runtime_status_provider(
@@ -297,8 +312,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_audio_tx audio_tx = {0};
     struct df_gvs_pcm_ingress pcm_ingress = {.fd = -1};
     struct df_runtime_ubus ubus = {0};
+    struct df_event_stream event_stream = {.listen_fd = -1};
     struct df_runtime_wait_context wait_context = {
         .ubus = &ubus,
+        .event_stream = &event_stream,
     };
     uint8_t identity[6];
     struct df_runtime_call_binding call_binding = {
@@ -418,10 +435,14 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_ubus_stop(&ubus);
         (void)fputs("doorfast: event=ubus_start_failed\n", stderr);
     }
+    if (df_event_stream_init(&event_stream, DF_EVENT_STREAM_DEFAULT_PATH) != DF_OK) {
+        (void)fputs("doorfast: event_stream_disabled\n", stderr);
+    }
     df_runtime_stopping = 0;
     if (signal(SIGINT, df_runtime_stop) == SIG_ERR ||
         signal(SIGTERM, df_runtime_stop) == SIG_ERR) {
         df_runtime_ubus_stop(&ubus);
+        df_event_stream_stop(&event_stream);
         df_gvs_pcm_ingress_close(&pcm_ingress);
         df_capture_close(capture);
         df_gvs_udp_sender_close(&udp_sender);
@@ -455,6 +476,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             df_runtime_ubus_process(&ubus, now_ms) != DF_OK) {
             (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
         }
+        (void)df_event_stream_process(&event_stream);
         (void)df_gvs_access_result_tick(&access.result, &session, identity, now_ms);
         if (df_gvs_elevator_control_tick(&elevator, identity, now_ms) != DF_OK) {
             status = DF_ERR_IO;
@@ -560,6 +582,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         if (timed_out) {
             (void)printf("doorfast: event=session_timeout generation=%llu\n",
                          (unsigned long long)session.generation);
+            df_runtime_publish_event(&event_stream, "timeout",
+                                     session.generation, now_ms);
         }
 
         if (captured == DF_CAPTURE_TIMEOUT) {
@@ -864,6 +888,16 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 for (i = 0; i < result->transition.count; ++i) {
                     df_log_transition(&result->transition.events[i]);
                 }
+                if (result->preempted_session) {
+                    if (result->transition.count > 0U) {
+                        df_runtime_publish_event(&event_stream, "preempted",
+                            result->transition.events[0].generation, now_ms);
+                    }
+                }
+                if (result->accepted_call) {
+                    df_runtime_publish_event(&event_stream, "incoming_call",
+                        session.generation, now_ms);
+                }
                 if (runtime->config.active_host && result->accepted_call) {
                     struct df_gvs_incoming_reply incoming_reply;
                     int reply_status = df_gvs_incoming_reply_prepare(
@@ -902,14 +936,20 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (result->talking_transition) {
                     (void)printf("doorfast: event=session_established generation=%llu\n",
                                  (unsigned long long)session.generation);
+                    df_runtime_publish_event(&event_stream, "call_established",
+                        session.generation, now_ms);
                 }
                 if (result->observed_hangup) {
                     (void)printf("doorfast: event=hangup generation=%llu\n",
                                  (unsigned long long)session.generation);
+                    df_runtime_publish_event(&event_stream, "hangup",
+                        session.generation, now_ms);
                 }
                 if (result->timed_out_transition) {
                     (void)printf("doorfast: event=session_timeout generation=%llu\n",
                                  (unsigned long long)session.generation);
+                    df_runtime_publish_event(&event_stream, "timeout",
+                        session.generation, now_ms);
                 }
                 if ((!runtime->config.passive_only || runtime->config.active_host) &&
                     df_gvs_audio_tx_sync(
@@ -932,6 +972,7 @@ done:
     df_runtime_media_clear(&video, &video_cache, &audio, 0);
     df_gvs_pcm_ingress_close(&pcm_ingress);
     df_gvs_udp_sender_close(&udp_sender);
+    df_event_stream_stop(&event_stream);
     df_runtime_ubus_stop(&ubus);
     df_gvs_runtime_sync_stop(&sync);
     df_capture_close(capture);

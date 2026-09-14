@@ -37,6 +37,11 @@ uci() {
 	printf '%s\n' "$*" >>"$trace"
 }
 
+addgroup() { printf 'addgroup %s\n' "$*" >>"$trace"; }
+mkdir() { printf 'mkdir %s\n' "$*" >>"$trace"; }
+chown() { printf 'chown %s\n' "$*" >>"$trace"; }
+chmod() { printf 'chmod %s\n' "$*" >>"$trace"; }
+
 procd_open_instance() { :; }
 procd_set_param() { :; }
 procd_close_instance() { :; }
@@ -58,3 +63,11 @@ automation_call_elev=
 doorfast_call_elev=0
 start_service
 grep -Fxq -- '-q set doorfast-automation.main.call_elev=0' "$trace"
+
+: >"$trace"
+doorfast_enabled=1
+start_service
+grep -Fq 'addgroup -S doorfast' "$trace"
+grep -Fq 'mkdir -p /var/run/doorfast' "$trace"
+grep -Fq 'chown root:doorfast /var/run/doorfast' "$trace"
+grep -Fq 'chmod 0750 /var/run/doorfast' "$trace"
