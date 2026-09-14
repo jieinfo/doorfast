@@ -45,6 +45,7 @@ TEST_SOURCES += tests/test_g711_alaw.c src/g711_alaw.c
 DAEMON_SOURCES += src/gvs_video_snapshot.c
 DAEMON_SOURCES += src/gvs_media.c src/gvs_video_reassembly.c
 DAEMON_SOURCES += src/gvs_audio_buffer.c
+DAEMON_SOURCES += src/g711_alaw.c
 TEST_SOURCES += tests/test_deployment_config.c src/deployment_config.c
 TEST_SOURCES += tests/test_deployment_preflight.c src/deployment_preflight.c
 TEST_SOURCES += tests/test_deployment_snapshot.c src/deployment_snapshot.c

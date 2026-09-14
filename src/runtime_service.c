@@ -22,6 +22,7 @@
 #include "gvs_elevator_query.h"
 #include "gvs_media.h"
 #include "gvs_audio_buffer.h"
+#include "g711_alaw.h"
 #include "gvs_video_reassembly.h"
 #include "gvs_video_snapshot.h"
 #include "gvs_vendor_header.h"
@@ -32,6 +33,7 @@
 #define DF_RUNTIME_IDLE_POLL_MS 50U
 
 static volatile sig_atomic_t df_runtime_stopping = 0;
+static uint8_t df_runtime_audio_export[DF_GVS_AUDIO_BUFFER_CAPACITY];
 
 static void df_runtime_stop(int signal_number) {
     (void)signal_number;
@@ -263,6 +265,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     uint64_t started_ms;
     uint64_t logged_frame_generation = 0;
     uint64_t auto_elevator_generation = 0;
+    uint64_t last_audio_export_ms = 0;
     enum df_gvs_elevator_control_state logged_elevator_state =
         DF_GVS_ELEVATOR_CONTROL_IDLE;
     int status;
@@ -556,6 +559,19 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         (unsigned long long)session.generation,
                         audio_packet.payload_length,
                         (unsigned)audio_packet.sequence);
+                    if (audio.length >= 8000U &&
+                        now_ms >= last_audio_export_ms + 1000U) {
+                        size_t export_length = 0;
+                        if (df_gvs_audio_buffer_copy(&audio,
+                                df_runtime_audio_export,
+                                sizeof(df_runtime_audio_export),
+                                &export_length) == 0 &&
+                            df_g711_alaw_write_wav(
+                                "/tmp/doorfast-latest.wav",
+                                df_runtime_audio_export,
+                                export_length) == 0)
+                            last_audio_export_ms = now_ms;
+                    }
                 }
                 continue;
             }
