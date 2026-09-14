@@ -1,0 +1,4 @@
+#include "test.h"
+#include "gvs_video_reassembly.h"
+#include <string.h>
+void test_gvs_video_reassembly(void){struct df_gvs_video_reassembly r;struct df_gvs_video_packet a={.frame_no=4,.chunk_count=2,.chunk_index=1,.chunk_length=2,.full_length=4,.payload=(const uint8_t*)"AB"},b={.frame_no=4,.chunk_count=2,.chunk_index=2,.chunk_length=2,.full_length=4,.payload=(const uint8_t*)"CD"};const uint8_t *out;size_t len;df_gvs_video_reassembly_init(&r);TEST_ASSERT_INT_EQ(0,df_gvs_video_reassembly_push(&r,&a,&out,&len));TEST_ASSERT_INT_EQ(1,df_gvs_video_reassembly_push(&r,&b,&out,&len));TEST_ASSERT_INT_EQ(4,(int)len);TEST_ASSERT_INT_EQ(0,memcmp(out,"ABCD",4));df_gvs_video_reassembly_reset(&r);df_gvs_video_reassembly_push(&r,&a,&out,&len);b.chunk_index=3;TEST_ASSERT_INT_EQ(-1,df_gvs_video_reassembly_push(&r,&b,&out,&len));}
