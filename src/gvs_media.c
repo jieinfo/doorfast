@@ -1,0 +1,7 @@
+#include "gvs_media.h"
+#include <string.h>
+static uint16_t le16(const uint8_t *p){return (uint16_t)(p[0]|((uint16_t)p[1]<<8));}
+static uint32_t le32(const uint8_t *p){return (uint32_t)(p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24));}
+static int common(const uint8_t *p,size_t n){static const uint8_t m[10]={0x47,0x56,0x53,0x47,0x56,0x53,0xa5,0xa5,0xa5,0xa5};return p!=NULL&&n>=16&&memcmp(p,m,10)==0;}
+int df_gvs_parse_audio(const uint8_t *p,size_t n,struct df_gvs_audio_packet *o){size_t len;if(!common(p,n)||o==NULL||n<DF_GVS_AUDIO_HEADER_LEN)return -1;len=le16(p+0x22);if(len>n-DF_GVS_AUDIO_HEADER_LEN)return -1;memcpy(o->destination,p+10,6);memcpy(o->source,p+16,6);o->sequence=le16(p+0x18);o->field_c=le32(p+0x1a);o->field_d=le16(p+0x1e);o->field_e=le16(p+0x20);o->field_f=le16(p+0x24);o->payload=p+DF_GVS_AUDIO_HEADER_LEN;o->payload_length=len;return 0;}
+int df_gvs_parse_video(const uint8_t *p,size_t n,struct df_gvs_video_packet *o){size_t len;if(!common(p,n)||o==NULL||n<DF_GVS_VIDEO_HEADER_LEN)return -1;len=le16(p+0x22);if(len==0||len>1200||len>n-DF_GVS_VIDEO_HEADER_LEN||le32(p+0x1a)==0)return -1;o->chunk_count=le16(p+0x1e);o->chunk_index=le16(p+0x20);if(o->chunk_count==0||o->chunk_index==0||o->chunk_index>o->chunk_count)return -1;memcpy(o->destination,p+10,6);memcpy(o->source,p+16,6);o->frame_no=le16(p+0x18);o->full_length=le32(p+0x1a);o->chunk_length=(uint16_t)len;o->capacity=le16(p+0x24);o->payload=p+DF_GVS_VIDEO_HEADER_LEN;return 0;}
