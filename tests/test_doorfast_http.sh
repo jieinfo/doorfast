@@ -6,9 +6,30 @@ fakebin="$workspace/bin"; trace="$workspace/trace"; mkdir -p "$fakebin"
 cat >"$fakebin/ubus" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$DOORFAST_HTTP_TRACE"
-printf '{"ok":true}\n'
+if [ "$*" = 'call doorfast status' ]; then
+  printf '{"call":{"generation":%s},"video":{"ready":%s,"generation":%s,"frame_no":%s,"bytes":%s}}\n' \
+    "${TEST_CALL_GENERATION:-7}" "${TEST_VIDEO_READY:-true}" \
+    "${TEST_VIDEO_GENERATION:-7}" "${TEST_VIDEO_FRAME:-12}" \
+    "${TEST_VIDEO_BYTES:-4}"
+else
+  printf '{"ok":true}\n'
+fi
 EOF
-chmod +x "$fakebin/ubus"
+cat >"$fakebin/jsonfilter" <<'EOF'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -e ]; then expression="$2"; shift 2; else shift; fi
+done
+case "$expression" in
+  '@.call.generation') printf '%s\n' "${TEST_CALL_GENERATION:-7}" ;;
+  '@.video.ready') printf '%s\n' "${TEST_VIDEO_READY:-true}" ;;
+  '@.video.generation') printf '%s\n' "${TEST_VIDEO_GENERATION:-7}" ;;
+  '@.video.frame_no') printf '%s\n' "${TEST_VIDEO_FRAME:-12}" ;;
+  '@.video.bytes') printf '%s\n' "${TEST_VIDEO_BYTES:-4}" ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$fakebin/ubus" "$fakebin/jsonfilter"
 run() {
   (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" PATH_INFO="$1" CONTENT_LENGTH="${#2}"; printf '%s' "$2" | sh package/doorfast/files/doorfast-http.sh >/dev/null)
 }
@@ -24,7 +45,34 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   PATH_INFO=/api/v1/video/latest.jpg \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/video-response"
 grep -aFq 'Content-Type: image/jpeg' "$workspace/video-response"
+grep -aFq 'Content-Length: 4' "$workspace/video-response"
+grep -aFq 'Cache-Control: no-cache' "$workspace/video-response"
+grep -aFq 'ETag: "df-7-12"' "$workspace/video-response"
+grep -aFq 'X-Doorfast-Generation: 7' "$workspace/video-response"
+grep -aFq 'X-Doorfast-Frame: 12' "$workspace/video-response"
 tail -c 4 "$workspace/video-response" | cmp - "$workspace/latest.jpg"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_VIDEO_SNAPSHOT="$workspace/latest.jpg" \
+  PATH_INFO=/api/v1/video/latest.jpg QUERY_STRING=generation=8 \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/video-mismatch"
+grep -aFq 'Status: 409 Conflict' "$workspace/video-mismatch"
+grep -aFq '"generation":7' "$workspace/video-mismatch"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_VIDEO_SNAPSHOT="$workspace/latest.jpg" \
+  PATH_INFO=/api/v1/video/latest.jpg QUERY_STRING=generation=bad \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/video-invalid"
+grep -aFq 'Status: 400 Bad Request' "$workspace/video-invalid"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_VIDEO_SNAPSHOT="$workspace/latest.jpg" \
+  PATH_INFO=/api/v1/video/latest.jpg HTTP_IF_NONE_MATCH='"df-7-12"' \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/video-not-modified"
+grep -aFq 'Status: 304 Not Modified' "$workspace/video-not-modified"
+test "$(wc -c <"$workspace/video-not-modified" | tr -d ' ')" -lt 150
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_VIDEO_SNAPSHOT="$workspace/latest.jpg" TEST_VIDEO_READY=false \
+  PATH_INFO=/api/v1/video/latest.jpg \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/video-unavailable"
+grep -aFq 'Status: 404 Not Found' "$workspace/video-unavailable"
 printf 'RIFFtestWAVE' >"$workspace/latest.wav"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
@@ -37,5 +85,6 @@ grep -Fxq 'call doorfast unlock {"generation":7}' "$trace"
 grep -Fxq 'call doorfast answer {"generation":7,"primary_media_port":8303}' "$trace"
 grep -Fxq 'call doorfast hangup {"generation":7,"reason":"ha"}' "$trace"
 grep -Fxq 'call doorfast call_elevator {"direction":"up"}' "$trace"
+trace_lines="$(wc -l <"$trace" | tr -d ' ')"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" PATH_INFO=/api/v1/unknown sh package/doorfast/files/doorfast-http.sh >/dev/null
-test "$(wc -l <"$trace" | tr -d ' ')" -eq 5
+test "$(wc -l <"$trace" | tr -d ' ')" -eq "$trace_lines"

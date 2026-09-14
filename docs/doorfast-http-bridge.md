@@ -33,3 +33,18 @@ When `video.ready` is true, the matching snapshot is available at
 and snapshot publication failure set the status back to unavailable and remove
 the file. Consumers must compare `video.generation` with `call.generation`
 instead of treating an earlier image as current.
+
+Consumers can bind the image request to the active call by appending the
+generation returned by `status`:
+
+```text
+/api/v1/video/latest.jpg?generation=<call.generation>
+```
+
+The bridge returns `409 Conflict` if the requested generation is no longer
+current. Successful responses include `X-Doorfast-Generation`,
+`X-Doorfast-Frame`, and an `ETag` derived from both values. Send that ETag in
+`If-None-Match` to receive `304 Not Modified` while the latest complete frame
+has not changed. The bridge copies the atomically published snapshot and checks
+its status again before responding; a concurrent frame transition returns a
+short-lived `503 Service Unavailable` response with `Retry-After: 1`.
