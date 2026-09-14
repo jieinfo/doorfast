@@ -76,6 +76,7 @@ static int df_runtime_ubus_status_handler(
     struct df_gvs_call_control_status call_status;
     struct df_runtime_elevator_status elevator_status;
     struct df_gvs_audio_status audio_status;
+    struct df_gvs_audio_tx_status audio_tx_status;
     const char *phase_name;
     const char *role_name;
     void *sync_table;
@@ -163,6 +164,23 @@ static int df_runtime_ubus_status_handler(
         blobmsg_add_u64(&platform->response, "buffered_bytes", audio_status.buffered_bytes);
         blobmsg_add_u64(&platform->response, "last_timestamp_ms", audio_status.last_timestamp_ms);
         blobmsg_close_table(&platform->response, audio_table);
+    }
+    if (df_runtime_ubus_read_audio_tx_status(
+            platform->owner, &audio_tx_status) == DF_OK) {
+        void *audio_tx_table = blobmsg_open_table(
+            &platform->response, "audio_tx");
+        blobmsg_add_u8(&platform->response, "active", audio_tx_status.active);
+        blobmsg_add_u64(&platform->response, "generation",
+                        audio_tx_status.generation);
+        blobmsg_add_u64(&platform->response, "packets_sent",
+                        audio_tx_status.packets_sent);
+        blobmsg_add_u64(&platform->response, "packets_failed",
+                        audio_tx_status.packets_failed);
+        blobmsg_add_u32(&platform->response, "next_sequence",
+                        audio_tx_status.next_sequence);
+        blobmsg_add_u64(&platform->response, "next_send_ms",
+                        audio_tx_status.next_send_ms);
+        blobmsg_close_table(&platform->response, audio_tx_table);
     }
     if (df_runtime_ubus_read_elevator_status(
             platform->owner, &elevator_status) != DF_OK) {
@@ -622,6 +640,23 @@ int df_runtime_ubus_read_audio_status(struct df_runtime_ubus *service,
     struct df_gvs_audio_status *status) {
     if (service == NULL || !service->started || service->audio == NULL || status == NULL) return DF_ERR_INVALID;
     return df_gvs_audio_buffer_status(service->audio, status);
+}
+
+int df_runtime_ubus_bind_audio_tx(struct df_runtime_ubus *service,
+                                  struct df_gvs_audio_tx *audio_tx) {
+    if (service == NULL || !service->started || audio_tx == NULL ||
+        service->audio_tx != NULL)
+        return DF_ERR_INVALID;
+    service->audio_tx = audio_tx;
+    return DF_OK;
+}
+
+int df_runtime_ubus_read_audio_tx_status(
+    struct df_runtime_ubus *service, struct df_gvs_audio_tx_status *status) {
+    if (service == NULL || !service->started || service->audio_tx == NULL ||
+        status == NULL)
+        return DF_ERR_INVALID;
+    return df_gvs_audio_tx_read_status(service->audio_tx, status);
 }
 
 int df_runtime_ubus_bind_call(

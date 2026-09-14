@@ -237,18 +237,34 @@ void test_runtime_ubus_elevator_status_is_bounded_and_aged(void) {
     df_runtime_ubus_stop(&service);
 }
 
+static int discard_audio_frame(const uint8_t *frame, size_t length,
+                               void *context) {
+    (void)frame;
+    (void)length;
+    (void)context;
+    return DF_OK;
+}
+
 void test_runtime_ubus_audio_status_tracks_buffer(void) {
     struct df_runtime_ubus service = {0};
     struct df_gvs_audio_buffer audio;
+    struct df_gvs_audio_tx audio_tx;
     struct df_gvs_audio_status status;
+    struct df_gvs_audio_tx_status tx_status;
     const uint8_t payload[] = {1, 2, 3};
     unsigned sync_calls = 0;
     df_gvs_audio_buffer_init(&audio);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_init(
+        &audio_tx, 77, discard_audio_frame, NULL));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
         &service, provide_runtime_status, &sync_calls, 10));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_audio(&service, &audio));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_bind_audio(&service, &audio));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_bind_audio_tx(&service, &audio_tx));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_bind_audio_tx(&service, &audio_tx));
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
         &audio, payload, sizeof(payload), 1, 4, 20));
     TEST_ASSERT_INT_EQ(DF_OK,
@@ -256,5 +272,9 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
     TEST_ASSERT_INT_EQ(1, status.ready);
     TEST_ASSERT_INT_EQ(3, (int)status.buffered_bytes);
     TEST_ASSERT_INT_EQ(4, (int)status.generation);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_read_audio_tx_status(&service, &tx_status));
+    TEST_ASSERT_INT_EQ(0, tx_status.active);
+    TEST_ASSERT_INT_EQ(77, tx_status.next_sequence);
     df_runtime_ubus_stop(&service);
 }

@@ -22,6 +22,7 @@
 #include "gvs_elevator_query.h"
 #include "gvs_media.h"
 #include "gvs_audio_buffer.h"
+#include "gvs_audio_tx.h"
 #include "g711_alaw.h"
 #include "gvs_video_reassembly.h"
 #include "gvs_video_snapshot.h"
@@ -251,6 +252,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_runtime_sync sync = {0};
     struct df_gvs_video_reassembly video = {0};
     struct df_gvs_audio_buffer audio = {0};
+    struct df_gvs_audio_tx audio_tx = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
         .ubus = &ubus,
@@ -296,6 +298,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     started_ms = df_monotonic_ms();
     df_gvs_video_reassembly_init(&video);
     df_gvs_audio_buffer_init(&audio);
+    if (df_gvs_audio_tx_init(&audio_tx, (uint16_t)started_ms,
+            df_gvs_udp_audio_emit, &udp_sender) != DF_OK)
+        return DF_ERR_INVALID;
     if (df_gvs_access_control_init(&access, runtime->config.access_material,
             started_ms, df_gvs_udp_access_emit, &udp_sender) != DF_OK)
         return DF_ERR_INVALID;
@@ -345,7 +350,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             &call_binding) == DF_OK &&
         df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK &&
         df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK &&
-        df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK) {
+        df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK &&
+        df_runtime_ubus_bind_audio_tx(&ubus, &audio_tx) == DF_OK) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
@@ -463,6 +469,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 (void)fputs("doorfast: event=call_ack_cancelled mode=passive\n", stdout);
             }
         }
+        if ((!runtime->config.passive_only || runtime->config.active_host) &&
+            df_gvs_audio_tx_sync(
+                &audio_tx, &session, identity, now_ms) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
         if (timed_out) {
             (void)printf("doorfast: event=session_timeout generation=%llu\n",
                          (unsigned long long)session.generation);
@@ -493,6 +505,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     status = DF_ERR_IO;
                     goto done;
                 }
+            }
+            if ((!runtime->config.passive_only || runtime->config.active_host) &&
+                df_gvs_audio_tx_sync(
+                    &audio_tx, &session, identity, now_ms) != DF_OK) {
+                status = DF_ERR_IO;
+                goto done;
             }
             if (ended) {
                 (void)printf("doorfast: event=network_lost generation=%llu\n",
@@ -771,6 +789,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (result->timed_out_transition) {
                     (void)printf("doorfast: event=session_timeout generation=%llu\n",
                                  (unsigned long long)session.generation);
+                }
+                if ((!runtime->config.passive_only || runtime->config.active_host) &&
+                    df_gvs_audio_tx_sync(
+                        &audio_tx, &session, identity, now_ms) != DF_OK) {
+                    status = DF_ERR_IO;
+                    goto done;
                 }
             }
         }
