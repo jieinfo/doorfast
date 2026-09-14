@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=34
+PKG_RELEASE:=35
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -43,6 +43,8 @@ define Package/doorfast/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/doorfast.init $(1)/etc/init.d/doorfast
 	$(INSTALL_BIN) ./files/doorfast-recorder.init $(1)/etc/init.d/doorfast-recorder
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_BIN) ./files/doorfast-group $(1)/etc/uci-defaults/doorfast-group
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/doorfast.config $(1)/etc/config/doorfast
 	$(INSTALL_CONF) ./files/doorfast-automation.config $(1)/etc/config/doorfast-automation

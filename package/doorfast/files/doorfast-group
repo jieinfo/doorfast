@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# The event stream is local-only and readable by the doorfast group.
+# addgroup is idempotent on BusyBox and keeps upgrades compatible.
+if command -v addgroup >/dev/null 2>&1; then
+	addgroup -S doorfast 2>/dev/null || true
+fi
+
+exit 0
