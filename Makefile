@@ -36,6 +36,7 @@ TEST_SOURCES += tests/test_gvs_elevator.c src/gvs_elevator.c
 TEST_SOURCES += tests/test_gvs_elevator_control.c src/gvs_elevator_control.c
 TEST_SOURCES += tests/test_gvs_elevator_query.c src/gvs_elevator_query.c
 TEST_SOURCES += tests/test_gvs_media.c src/gvs_media.c
+TEST_SOURCES += tests/test_gvs_media_lifecycle.c src/gvs_media_lifecycle.c
 TEST_SOURCES += tests/test_gvs_video_reassembly.c src/gvs_video_reassembly.c
 TEST_SOURCES += tests/test_gvs_jpeg.c
 TEST_SOURCES += tests/test_gvs_video_frame_cache.c src/gvs_video_frame_cache.c
@@ -47,6 +48,7 @@ TEST_SOURCES += src/gvs_pcm_pump.c
 TEST_SOURCES += tests/test_g711_alaw.c src/g711_alaw.c
 DAEMON_SOURCES += src/gvs_video_snapshot.c
 DAEMON_SOURCES += src/gvs_media.c src/gvs_video_reassembly.c
+DAEMON_SOURCES += src/gvs_media_lifecycle.c
 DAEMON_SOURCES += src/gvs_audio_buffer.c
 DAEMON_SOURCES += src/gvs_audio_tx.c
 DAEMON_SOURCES += src/gvs_pcm_ingress.c
@@ -84,6 +86,7 @@ DAEMON_SOURCES += src/gvs_elevator_query.c
 build/doorfast-tests build/doorfast: src/gvs_call_runtime.h
 build/doorfast-tests build/doorfast: src/gvs_call_control.h src/deployment_config.h
 build/doorfast-tests build/doorfast: src/gvs_audio_tx.h
+build/doorfast-tests build/doorfast: src/gvs_media_lifecycle.h
 build/doorfast-tests build/doorfast: src/gvs_pcm_ingress.h
 build/doorfast-tests build/doorfast: src/gvs_pcm_pump.h
 DAEMON_SOURCES += src/gvs_call_ack.c
