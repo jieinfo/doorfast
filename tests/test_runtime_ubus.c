@@ -249,11 +249,15 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
     struct df_runtime_ubus service = {0};
     struct df_gvs_audio_buffer audio;
     struct df_gvs_audio_tx audio_tx;
+    struct df_gvs_video_frame_cache video;
     struct df_gvs_audio_status status;
     struct df_gvs_audio_tx_status tx_status;
+    struct df_gvs_video_status video_status;
+    const uint8_t jpeg[] = {0xff, 0xd8, 0xff, 0xd9};
     const uint8_t payload[] = {1, 2, 3};
     unsigned sync_calls = 0;
     df_gvs_audio_buffer_init(&audio);
+    df_gvs_video_frame_cache_init(&video);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_init(
         &audio_tx, 77, discard_audio_frame, NULL));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
@@ -265,6 +269,9 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
         df_runtime_ubus_bind_audio_tx(&service, &audio_tx));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_bind_audio_tx(&service, &audio_tx));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_video(&service, &video));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_bind_video(&service, &video));
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
         &audio, payload, sizeof(payload), 1, 4, 20));
     TEST_ASSERT_INT_EQ(DF_OK,
@@ -279,5 +286,18 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
         df_runtime_ubus_read_audio_tx_status(&service, &tx_status));
     TEST_ASSERT_INT_EQ(0, tx_status.active);
     TEST_ASSERT_INT_EQ(77, tx_status.next_sequence);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_read_video_status(&service, &video_status));
+    TEST_ASSERT_INT_EQ(0, video_status.ready);
+    TEST_ASSERT_INT_EQ(0, df_gvs_video_frame_cache_store(
+        &video, jpeg, sizeof(jpeg), 4, 12, 30));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_read_video_status(&service, &video_status));
+    TEST_ASSERT_INT_EQ(1, video_status.ready);
+    TEST_ASSERT_INT_EQ(4, (int)video_status.generation);
+    TEST_ASSERT_INT_EQ(12, video_status.frame_no);
+    TEST_ASSERT_INT_EQ(4, (int)video_status.bytes);
+    TEST_ASSERT_INT_EQ(30, (int)video_status.timestamp_ms);
     df_runtime_ubus_stop(&service);
+    df_gvs_video_frame_cache_reset(&video);
 }

@@ -28,6 +28,7 @@
 #include "gvs_pcm_ingress.h"
 #include "gvs_pcm_pump.h"
 #include "g711_alaw.h"
+#include "gvs_video_frame_cache.h"
 #include "gvs_video_reassembly.h"
 #include "gvs_video_snapshot.h"
 #include "gvs_vendor_header.h"
@@ -43,10 +44,12 @@ static volatile sig_atomic_t df_runtime_stopping = 0;
 static uint8_t df_runtime_audio_export[DF_GVS_AUDIO_BUFFER_CAPACITY];
 
 static void df_runtime_media_clear(struct df_gvs_video_reassembly *video,
+                                   struct df_gvs_video_frame_cache *video_cache,
                                    struct df_gvs_audio_buffer *audio,
                                    uint64_t generation)
 {
     df_gvs_video_reassembly_reset(video);
+    df_gvs_video_frame_cache_reset(video_cache);
     df_gvs_audio_buffer_reset(audio, generation);
     (void)remove(DF_RUNTIME_AUDIO_SNAPSHOT);
     (void)remove(DF_RUNTIME_VIDEO_SNAPSHOT);
@@ -56,6 +59,7 @@ static int df_runtime_media_sync(
     struct df_gvs_media_lifecycle *lifecycle,
     const struct df_gvs_session *session,
     struct df_gvs_video_reassembly *video,
+    struct df_gvs_video_frame_cache *video_cache,
     struct df_gvs_audio_buffer *audio)
 {
     struct df_gvs_media_lifecycle_result result;
@@ -64,7 +68,7 @@ static int df_runtime_media_sync(
         return DF_ERR_INVALID;
     }
     if (result.clear) {
-        df_runtime_media_clear(video, audio, result.generation);
+        df_runtime_media_clear(video, video_cache, audio, result.generation);
     }
     return DF_OK;
 }
@@ -284,6 +288,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_gvs_video_reassembly video = {0};
+    struct df_gvs_video_frame_cache video_cache = {0};
     struct df_gvs_media_lifecycle media_lifecycle = {0};
     struct df_gvs_audio_buffer audio = {0};
     struct df_gvs_audio_tx audio_tx = {0};
@@ -332,10 +337,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     }
     started_ms = df_monotonic_ms();
     df_gvs_video_reassembly_init(&video);
+    df_gvs_video_frame_cache_init(&video_cache);
     df_gvs_media_lifecycle_init(&media_lifecycle);
     df_gvs_audio_buffer_init(&audio);
     if (df_runtime_media_sync(
-            &media_lifecycle, &session, &video, &audio) != DF_OK) {
+            &media_lifecycle, &session, &video, &video_cache,
+            &audio) != DF_OK) {
         return DF_ERR_INVALID;
     }
     if (df_gvs_audio_tx_init(&audio_tx, (uint16_t)started_ms,
@@ -399,7 +406,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK &&
         df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK &&
         df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK &&
-        df_runtime_ubus_bind_audio_tx(&ubus, &audio_tx) == DF_OK) {
+        df_runtime_ubus_bind_audio_tx(&ubus, &audio_tx) == DF_OK &&
+        df_runtime_ubus_bind_video(&ubus, &video_cache) == DF_OK) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
@@ -527,7 +535,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             goto done;
         }
         if (df_runtime_media_sync(
-                &media_lifecycle, &session, &video, &audio) != DF_OK) {
+                &media_lifecycle, &session, &video, &video_cache,
+                &audio) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
         }
@@ -581,7 +590,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 goto done;
             }
             if (df_runtime_media_sync(
-                    &media_lifecycle, &session, &video, &audio) != DF_OK) {
+                    &media_lifecycle, &session, &video, &video_cache,
+                    &audio) != DF_OK) {
                 status = DF_ERR_IO;
                 goto done;
             }
@@ -686,16 +696,27 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         video_packet.source) == DF_GVS_MEDIA_ACCEPTED) {
                     int frame_status = df_gvs_video_reassembly_push(
                         &video, &video_packet, &frame, &frame_length);
-                    if (frame_status == 1 &&
-                        df_gvs_jpeg_validate(frame, frame_length) == 0 &&
-                        df_gvs_video_snapshot_write(
-                            DF_RUNTIME_VIDEO_SNAPSHOT, frame,
-                            frame_length) == 0) {
-                        (void)printf(
-                            "doorfast: event=video_frame generation=%llu "
-                            "bytes=%zu frame=%u\n",
-                            (unsigned long long)session.generation,
-                            frame_length, (unsigned)video_packet.frame_no);
+                    if (frame_status == DF_GVS_VIDEO_REASSEMBLY_COMPLETE &&
+                        df_gvs_jpeg_validate(frame, frame_length) == 0) {
+                        int cache_status = df_gvs_video_frame_cache_store(
+                            &video_cache, frame, frame_length,
+                            session.generation, video_packet.frame_no,
+                            now_ms);
+                        int snapshot_status = cache_status == 0
+                            ? df_gvs_video_snapshot_write(
+                                DF_RUNTIME_VIDEO_SNAPSHOT, frame, frame_length)
+                            : -1;
+
+                        if (cache_status == 0 && snapshot_status == 0) {
+                            (void)printf(
+                                "doorfast: event=video_frame generation=%llu "
+                                "bytes=%zu frame=%u\n",
+                                (unsigned long long)session.generation,
+                                frame_length, (unsigned)video_packet.frame_no);
+                        } else {
+                            df_gvs_video_frame_cache_invalidate(&video_cache);
+                            (void)remove(DF_RUNTIME_VIDEO_SNAPSHOT);
+                        }
                     }
                 }
                 continue;
@@ -876,7 +897,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     goto done;
                 }
                 if (df_runtime_media_sync(
-                        &media_lifecycle, &session, &video, &audio) != DF_OK) {
+                        &media_lifecycle, &session, &video, &video_cache,
+                        &audio) != DF_OK) {
                     status = DF_ERR_IO;
                     goto done;
                 }
@@ -886,7 +908,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     status = DF_OK;
 
 done:
-    df_runtime_media_clear(&video, &audio, 0);
+    df_runtime_media_clear(&video, &video_cache, &audio, 0);
     df_gvs_pcm_ingress_close(&pcm_ingress);
     df_gvs_udp_sender_close(&udp_sender);
     df_runtime_ubus_stop(&ubus);

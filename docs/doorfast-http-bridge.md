@@ -17,3 +17,19 @@ python3 tests/run_doorfast_http_status.py http://<doorfast-host>/cgi-bin/doorfas
 The script only calls `status`; it does not unlock, answer, hang up, or call an
 elevator. Test those actions from Home Assistant after confirming the device is
 in active host mode and the local network is isolated.
+
+The status response includes a `video` table:
+
+| Field | Meaning |
+| --- | --- |
+| `ready` | A complete validated JPEG exists for the current call generation |
+| `generation` | Call generation that produced the frame; zero when unavailable |
+| `frame_no` | Latest 16-bit GVS video frame number |
+| `bytes` | Complete JPEG size |
+| `timestamp_ms` | Monotonic receive time on the Doorfast host |
+
+When `video.ready` is true, the matching snapshot is available at
+`/api/v1/video/latest.jpg`. Startup, preemption, hangup, timeout, network loss,
+and snapshot publication failure set the status back to unavailable and remove
+the file. Consumers must compare `video.generation` with `call.generation`
+instead of treating an earlier image as current.
