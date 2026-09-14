@@ -167,6 +167,14 @@ static int df_runtime_ubus_status_handler(
         blobmsg_add_u64(&platform->response, "late_packets", audio_status.late_packets);
         blobmsg_add_u64(&platform->response, "buffered_bytes", audio_status.buffered_bytes);
         blobmsg_add_u64(&platform->response, "last_timestamp_ms", audio_status.last_timestamp_ms);
+        blobmsg_add_u8(&platform->response, "snapshot_ready",
+                       audio_status.snapshot_ready);
+        blobmsg_add_u64(&platform->response, "snapshot_packet_count",
+                        audio_status.snapshot_packet_count);
+        blobmsg_add_u64(&platform->response, "snapshot_bytes",
+                        audio_status.snapshot_bytes);
+        blobmsg_add_u64(&platform->response, "snapshot_timestamp_ms",
+                        audio_status.snapshot_timestamp_ms);
         blobmsg_close_table(&platform->response, audio_table);
     }
     if (df_runtime_ubus_read_audio_tx_status(

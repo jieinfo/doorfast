@@ -26,8 +26,12 @@ struct df_gvs_audio_buffer {
     uint64_t duplicate_packets;
     uint64_t late_packets;
     uint64_t last_timestamp_ms;
+    uint64_t snapshot_packet_count;
+    uint64_t snapshot_timestamp_ms;
+    size_t snapshot_bytes;
     uint16_t last_sequence;
     bool has_sequence;
+    bool snapshot_ready;
 };
 
 struct df_gvs_audio_status {
@@ -39,8 +43,12 @@ struct df_gvs_audio_status {
     uint64_t duplicate_packets;
     uint64_t late_packets;
     uint64_t last_timestamp_ms;
+    uint64_t snapshot_packet_count;
+    uint64_t snapshot_timestamp_ms;
     size_t buffered_bytes;
+    size_t snapshot_bytes;
     bool ready;
+    bool snapshot_ready;
 };
 void df_gvs_audio_buffer_init(struct df_gvs_audio_buffer *);
 void df_gvs_audio_buffer_reset(struct df_gvs_audio_buffer *, uint64_t);
@@ -50,6 +58,8 @@ int df_gvs_audio_buffer_read(struct df_gvs_audio_buffer *, uint8_t *, size_t,
     size_t *);
 int df_gvs_audio_buffer_copy(const struct df_gvs_audio_buffer *, uint8_t *,
     size_t, size_t *);
+int df_gvs_audio_buffer_mark_snapshot(struct df_gvs_audio_buffer *, uint64_t,
+    size_t, uint64_t);
 int df_gvs_audio_buffer_status(const struct df_gvs_audio_buffer *,
     struct df_gvs_audio_status *);
 #endif

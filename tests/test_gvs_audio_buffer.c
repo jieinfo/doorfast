@@ -13,6 +13,16 @@ void test_gvs_audio_buffer(void) {
     TEST_ASSERT_INT_EQ(5, (int)s.buffered_bytes);
     TEST_ASSERT_INT_EQ(1, (int)s.sequence_gaps);
     TEST_ASSERT_INT_EQ(1, (int)s.missing_packets);
+    TEST_ASSERT_INT_EQ(0, s.snapshot_ready);
+    TEST_ASSERT_INT_EQ(-1, df_gvs_audio_buffer_mark_snapshot(
+        &b, 8, 5, 125));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_mark_snapshot(
+        &b, 7, 5, 125));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_status(&b, &s));
+    TEST_ASSERT_INT_EQ(1, s.snapshot_ready);
+    TEST_ASSERT_INT_EQ(2, (int)s.snapshot_packet_count);
+    TEST_ASSERT_INT_EQ(54, (int)s.snapshot_bytes);
+    TEST_ASSERT_INT_EQ(125, (int)s.snapshot_timestamp_ms);
     TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_DUPLICATE,
         df_gvs_audio_buffer_push(&b, c, sizeof(c), 12, 7, 121));
     TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_LATE,
@@ -36,6 +46,9 @@ void test_gvs_audio_buffer(void) {
         &b, a, sizeof(a), 2, 8, 240));
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_status(&b, &s));
     TEST_ASSERT_INT_EQ(8, (int)s.generation);
+    TEST_ASSERT_INT_EQ(0, s.snapshot_ready);
+    TEST_ASSERT_INT_EQ(0, (int)s.snapshot_packet_count);
+    TEST_ASSERT_INT_EQ(0, (int)s.snapshot_bytes);
     TEST_ASSERT_INT_EQ(3, (int)s.packet_count);
     TEST_ASSERT_INT_EQ(1, (int)s.sequence_gaps);
     TEST_ASSERT_INT_EQ(1, (int)s.missing_packets);

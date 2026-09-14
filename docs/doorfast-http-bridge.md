@@ -48,3 +48,10 @@ current. Successful responses include `X-Doorfast-Generation`,
 has not changed. The bridge copies the atomically published snapshot and checks
 its status again before responding; a concurrent frame transition returns a
 short-lived `503 Service Unavailable` response with `Retry-After: 1`.
+
+The latest decoded audio window follows the same contract at
+`/api/v1/audio/latest.wav?generation=<call.generation>`. The `audio` status
+table distinguishes received buffered data from a successfully published WAV
+using `snapshot_ready`, `snapshot_packet_count`, `snapshot_bytes`, and
+`snapshot_timestamp_ms`. Audio responses use `snapshot_packet_count` as their
+revision in `ETag` and `X-Doorfast-Audio-Revision`.
