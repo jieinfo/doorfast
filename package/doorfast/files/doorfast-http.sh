@@ -2,9 +2,10 @@
 path="${PATH_INFO:-}"
 [ -n "$path" ] || path="${QUERY_STRING#path=}"
 if [ "$path" = /api/v1/video/latest.jpg ]; then
-  if [ -r /tmp/doorfast-latest.jpg ]; then
+  snapshot="${DOORFAST_VIDEO_SNAPSHOT:-/tmp/doorfast-latest.jpg}"
+  if [ -r "$snapshot" ]; then
     printf 'Content-Type: image/jpeg\r\nCache-Control: no-store\r\n\r\n'
-    cat /tmp/doorfast-latest.jpg
+    cat "$snapshot"
   else
     printf 'Status: 404 Not Found\r\nContent-Type: application/json\r\n\r\n'
     printf '{"error":"video frame unavailable"}\n'

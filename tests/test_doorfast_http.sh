@@ -18,6 +18,13 @@ run /api/v1/answer '{"generation":7,"primary_media_port":8303}'
 run /api/v1/hangup '{"generation":7,"reason":"ha"}'
 run /api/v1/call_elevator '{"direction":"up"}'
 test "$(wc -l <"$trace" | tr -d ' ')" -eq 5
+printf '\377\330\377\331' >"$workspace/latest.jpg"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_VIDEO_SNAPSHOT="$workspace/latest.jpg" \
+  PATH_INFO=/api/v1/video/latest.jpg \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/video-response"
+grep -aFq 'Content-Type: image/jpeg' "$workspace/video-response"
+tail -c 4 "$workspace/video-response" | cmp - "$workspace/latest.jpg"
 grep -Fxq 'call doorfast status' "$trace"
 grep -Fxq 'call doorfast unlock {"generation":7}' "$trace"
 grep -Fxq 'call doorfast answer {"generation":7,"primary_media_port":8303}' "$trace"
