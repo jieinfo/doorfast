@@ -24,6 +24,7 @@ void test_gvs_media(void)
     size_t serialized_length = 0;
 
     header(audio);
+    audio[0x1a] = 3;
     audio[0x22] = 3;
     audio[DF_GVS_AUDIO_HEADER_LEN] = 1;
     TEST_ASSERT_INT_EQ(0, df_gvs_parse_audio(audio, sizeof(audio),
@@ -31,6 +32,13 @@ void test_gvs_media(void)
     TEST_ASSERT_INT_EQ(3, (int)audio_packet.payload_length);
     audio[0x22] = 4;
     TEST_ASSERT_INT_EQ(-1, df_gvs_parse_audio(audio, sizeof(audio),
+                                               &audio_packet));
+    audio[0x22] = 3;
+    audio[0x1a] = 2;
+    TEST_ASSERT_INT_EQ(-1, df_gvs_parse_audio(audio, sizeof(audio),
+                                               &audio_packet));
+    audio[0x1a] = 3;
+    TEST_ASSERT_INT_EQ(-1, df_gvs_parse_audio(audio, sizeof(audio) - 1U,
                                                &audio_packet));
 
     header(video);
@@ -40,6 +48,8 @@ void test_gvs_media(void)
     video[0x22] = 3;
     TEST_ASSERT_INT_EQ(0, df_gvs_parse_video(video, sizeof(video),
                                               &video_packet));
+    TEST_ASSERT_INT_EQ(-1, df_gvs_parse_video(video, sizeof(video) - 1U,
+                                               &video_packet));
     video[0x20] = 2;
     TEST_ASSERT_INT_EQ(-1, df_gvs_parse_video(video, sizeof(video),
                                                &video_packet));

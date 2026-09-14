@@ -272,6 +272,9 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
     TEST_ASSERT_INT_EQ(1, status.ready);
     TEST_ASSERT_INT_EQ(3, (int)status.buffered_bytes);
     TEST_ASSERT_INT_EQ(4, (int)status.generation);
+    TEST_ASSERT_INT_EQ(0, (int)status.missing_packets);
+    TEST_ASSERT_INT_EQ(0, (int)status.duplicate_packets);
+    TEST_ASSERT_INT_EQ(0, (int)status.late_packets);
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_read_audio_tx_status(&service, &tx_status));
     TEST_ASSERT_INT_EQ(0, tx_status.active);

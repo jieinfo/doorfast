@@ -161,6 +161,9 @@ static int df_runtime_ubus_status_handler(
         blobmsg_add_u64(&platform->response, "packets", audio_status.packet_count);
         blobmsg_add_u64(&platform->response, "bytes", audio_status.byte_count);
         blobmsg_add_u64(&platform->response, "sequence_gaps", audio_status.sequence_gaps);
+        blobmsg_add_u64(&platform->response, "missing_packets", audio_status.missing_packets);
+        blobmsg_add_u64(&platform->response, "duplicate_packets", audio_status.duplicate_packets);
+        blobmsg_add_u64(&platform->response, "late_packets", audio_status.late_packets);
         blobmsg_add_u64(&platform->response, "buffered_bytes", audio_status.buffered_bytes);
         blobmsg_add_u64(&platform->response, "last_timestamp_ms", audio_status.last_timestamp_ms);
         blobmsg_close_table(&platform->response, audio_table);
