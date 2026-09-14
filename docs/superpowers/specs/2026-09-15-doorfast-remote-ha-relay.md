@@ -30,6 +30,10 @@ config relay 'main'
         option retry_max '3'
 ```
 
+`url` is the HTTPS authority only, such as `https://ha.example` or
+`https://ha.example:8443`; it must not contain a path. The relay appends
+`/api/doorfast/<entry_id>` to this base URL.
+
 The relay must reject startup when `enabled=1` and URL, entry ID, token file, or CA validation is missing. HTTPS is mandatory; an explicit loopback-only HTTP mode could be considered for development tests but must not be a production fallback.
 
 The final URL is `url` plus `/api/doorfast/` plus a validated entry ID. The token is read from a root-owned `0600` file and supplied through the chosen HTTP library's in-memory request header API. Do not put the token in UCI, command-line arguments, logs, or event payloads.

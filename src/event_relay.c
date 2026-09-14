@@ -122,7 +122,22 @@ int df_relay_token_file_ok(const char *path) {
 }
 
 int df_relay_validate_https_url(const char *url) {
-    if (!url || strncmp(url, "https://", 8) != 0 || url[8] == '\0' || strchr(url + 8, ' ')) return -1;
+    const char *p, *colon;
+    unsigned long port = 443;
+    if (!url || strncmp(url, "https://", 8) != 0 || url[8] == '\0') return -1;
+    for (p = url + 8; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c <= 0x20 || c == 0x7f || *p == '/') return -1;
+    }
+    colon = strrchr(url + 8, ':');
+    if (colon) {
+        char *end;
+        if (colon == url + 8 || !colon[1]) return -1;
+        errno = 0; port = strtoul(colon + 1, &end, 10);
+        if (errno || *end || port == 0 || port > 65535) return -1;
+    }
+    if (!strncmp(url + 8, "localhost", 9) && (url[17] == '\0' || url[17] == ':')) return 0;
+    if (url[8] == ':') return -1;
     return 0;
 }
 

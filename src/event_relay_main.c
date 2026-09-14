@@ -2,15 +2,18 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t running = 1;
@@ -46,11 +49,26 @@ static int post_event(const char *url, const char *entry, const char *token,
     if (getaddrinfo(host, port, &hints, &results)) return -1;
     for (item = results; item; item = item->ai_next) {
         fd = socket(item->ai_family, item->ai_socktype, item->ai_protocol);
-        if (fd >= 0 && connect(fd, item->ai_addr, item->ai_addrlen) == 0) break;
+        if (fd >= 0) {
+            int flags = fcntl(fd, F_GETFL, 0);
+            if (flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0) {
+                int connected = connect(fd, item->ai_addr, item->ai_addrlen);
+                if (connected == 0) break;
+                if (connected < 0 && errno == EINPROGRESS) {
+                    struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+                    int error = 0; socklen_t error_length = sizeof(error);
+                    if (poll(&pfd, 1, 5000) > 0 && !getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_length) && error == 0) break;
+                }
+            }
+        }
         if (fd >= 0) { close(fd); fd = -1; }
     }
     freeaddrinfo(results);
     if (fd < 0) return -1;
+    { int flags = fcntl(fd, F_GETFL, 0); if (flags >= 0) (void)fcntl(fd, F_SETFL, flags & ~O_NONBLOCK); }
+    { struct timeval timeout = { .tv_sec = 5, .tv_usec = 0 };
+      setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)); }
     ctx = SSL_CTX_new(TLS_client_method());
     if (!ctx || !SSL_CTX_load_verify_locations(ctx, ca_file, NULL)) goto done;
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
@@ -82,6 +100,7 @@ static int connect_unix(const char *path) {
     if (strlen(path) >= sizeof(address.sun_path)) { close(fd); return -1; }
     strcpy(address.sun_path, path);
     if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0) { close(fd); return -1; }
+    if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) { close(fd); return -1; }
     return fd;
 }
 
@@ -113,14 +132,17 @@ int main(int argc, char **argv) {
             if (c < 0x21 || c == 0x7f) return 2;
         }
     }
-    signal(SIGTERM, stop_relay); signal(SIGINT, stop_relay); SSL_library_init();
+    signal(SIGTERM, stop_relay); signal(SIGINT, stop_relay); signal(SIGPIPE, SIG_IGN); SSL_library_init();
     df_relay_queue_init(&queue);
     while (running) {
         if (socket_fd < 0) { socket_fd = connect_unix(socket_path); if (socket_fd < 0) { sleep(1); continue; } }
         if (used == sizeof(line) - 1) { used = 0; continue; }
         { ssize_t n = read(socket_fd, line + used, sizeof(line) - 1 - used);
-          if (n <= 0) { close(socket_fd); socket_fd = -1; used = 0; continue; }
-          used += (size_t)n; }
+          int would_block = n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+          if (would_block) n = 0;
+          if (n < 0 || (n == 0 && !would_block)) { close(socket_fd); socket_fd = -1; used = 0; continue; }
+          used += (size_t)n;
+          if (n == 0 && queue.length == 0) usleep(10000); }
         while (used) {
             char *newline = memchr(line, '\n', used); size_t length;
             if (!newline) break;
