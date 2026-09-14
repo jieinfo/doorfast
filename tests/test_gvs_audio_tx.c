@@ -116,3 +116,43 @@ void test_gvs_audio_tx_preserves_sequence_across_sessions_and_failures(void)
         capture.frame, capture.length, &packet));
     TEST_ASSERT_INT_EQ(0, packet.sequence);
 }
+
+void test_gvs_audio_tx_syncs_to_call_lifecycle(void)
+{
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_session session = {
+        .state = DF_GVS_RINGING,
+        .peer = {0x32, 2, 1, 0, 1, 0},
+        .generation = 7,
+    };
+    struct audio_tx_capture capture = {0};
+    struct df_gvs_audio_tx tx;
+    struct df_gvs_audio_tx_status status;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_init(
+        &tx, 300, capture_audio_frame, &capture));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_sync(
+        &tx, &session, local, 100));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_read_status(&tx, &status));
+    TEST_ASSERT_INT_EQ(0, status.active);
+    session.state = DF_GVS_TALKING;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_sync(
+        &tx, &session, local, 101));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_read_status(&tx, &status));
+    TEST_ASSERT_INT_EQ(1, status.active);
+    TEST_ASSERT_INT_EQ(7, (int)status.generation);
+    session.state = DF_GVS_ENDED;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_sync(
+        &tx, &session, local, 102));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_read_status(&tx, &status));
+    TEST_ASSERT_INT_EQ(0, status.active);
+    TEST_ASSERT_INT_EQ(300, status.next_sequence);
+    session.state = DF_GVS_TALKING;
+    session.generation = 8;
+    session.peer[4] = 2;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_sync(
+        &tx, &session, local, 103));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_read_status(&tx, &status));
+    TEST_ASSERT_INT_EQ(1, status.active);
+    TEST_ASSERT_INT_EQ(8, (int)status.generation);
+}

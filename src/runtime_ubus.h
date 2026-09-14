@@ -10,6 +10,7 @@
 #include "gvs_runtime_sync.h"
 #include "gvs_call_control.h"
 #include "gvs_audio_buffer.h"
+#include "gvs_audio_tx.h"
 
 typedef int (*df_runtime_status_provider_fn)(
     struct df_gvs_runtime_sync_status *status, void *context);
@@ -52,6 +53,7 @@ struct df_runtime_ubus {
     const uint8_t *access_identity;
     struct df_gvs_elevator_control *elevator;
     struct df_gvs_audio_buffer *audio;
+    struct df_gvs_audio_tx *audio_tx;
     const uint8_t *elevator_identity;
     uint64_t next_elevator_transaction_id;
     struct df_gvs_elevator_status observed_elevator_status;
@@ -92,5 +94,9 @@ int df_runtime_ubus_read_elevator_status(struct df_runtime_ubus *,
     struct df_runtime_elevator_status *);
 int df_runtime_ubus_bind_audio(struct df_runtime_ubus *, struct df_gvs_audio_buffer *);
 int df_runtime_ubus_read_audio_status(struct df_runtime_ubus *, struct df_gvs_audio_status *);
+int df_runtime_ubus_bind_audio_tx(struct df_runtime_ubus *,
+    struct df_gvs_audio_tx *);
+int df_runtime_ubus_read_audio_tx_status(struct df_runtime_ubus *,
+    struct df_gvs_audio_tx_status *);
 
 #endif

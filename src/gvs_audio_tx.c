@@ -99,6 +99,34 @@ int df_gvs_audio_tx_stop(struct df_gvs_audio_tx *tx, uint64_t generation,
     return DF_OK;
 }
 
+int df_gvs_audio_tx_sync(struct df_gvs_audio_tx *tx,
+                         const struct df_gvs_session *session,
+                         const uint8_t source[6], uint64_t now_ms)
+{
+    bool matches;
+
+    if (tx == NULL || session == NULL || !tx->initialized ||
+        !address_valid(source) || now_ms < tx->last_now_ms) {
+        return DF_ERR_INVALID;
+    }
+    matches = tx->active && session->state == DF_GVS_TALKING &&
+        session->generation == tx->generation &&
+        memcmp(session->peer, tx->destination, sizeof(tx->destination)) == 0 &&
+        memcmp(source, tx->source, sizeof(tx->source)) == 0;
+    if (matches) {
+        return DF_OK;
+    }
+    if (tx->active &&
+        df_gvs_audio_tx_stop(tx, tx->generation, now_ms) != DF_OK) {
+        return DF_ERR_INVALID;
+    }
+    if (session->state == DF_GVS_TALKING) {
+        return df_gvs_audio_tx_start(
+            tx, session, session->generation, source, now_ms);
+    }
+    return DF_OK;
+}
+
 int df_gvs_audio_tx_read_status(const struct df_gvs_audio_tx *tx,
                                 struct df_gvs_audio_tx_status *status)
 {

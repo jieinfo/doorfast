@@ -44,6 +44,8 @@ int df_gvs_audio_tx_start(struct df_gvs_audio_tx *,
 int df_gvs_audio_tx_submit_pcm(struct df_gvs_audio_tx *, uint64_t,
     const int16_t *, size_t, uint64_t);
 int df_gvs_audio_tx_stop(struct df_gvs_audio_tx *, uint64_t, uint64_t);
+int df_gvs_audio_tx_sync(struct df_gvs_audio_tx *,
+    const struct df_gvs_session *, const uint8_t [6], uint64_t);
 int df_gvs_audio_tx_read_status(const struct df_gvs_audio_tx *,
     struct df_gvs_audio_tx_status *);
 
