@@ -23,6 +23,8 @@
 #include "gvs_media.h"
 #include "gvs_audio_buffer.h"
 #include "gvs_audio_tx.h"
+#include "gvs_pcm_ingress.h"
+#include "gvs_pcm_pump.h"
 #include "g711_alaw.h"
 #include "gvs_video_reassembly.h"
 #include "gvs_video_snapshot.h"
@@ -31,7 +33,7 @@
 #include "gvs_sync_state.h"
 #include "runtime_ubus.h"
 
-#define DF_RUNTIME_IDLE_POLL_MS 50U
+#define DF_RUNTIME_IDLE_POLL_MS 10U
 
 static volatile sig_atomic_t df_runtime_stopping = 0;
 static uint8_t df_runtime_audio_export[DF_GVS_AUDIO_BUFFER_CAPACITY];
@@ -253,6 +255,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_video_reassembly video = {0};
     struct df_gvs_audio_buffer audio = {0};
     struct df_gvs_audio_tx audio_tx = {0};
+    struct df_gvs_pcm_ingress pcm_ingress = {.fd = -1};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
         .ubus = &ubus,
@@ -343,6 +346,14 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
     }
+    if ((!runtime->config.passive_only || runtime->config.active_host) &&
+        df_gvs_pcm_ingress_open(
+            &pcm_ingress, DF_GVS_PCM_INGRESS_DEFAULT_PATH) != DF_OK) {
+        df_capture_close(capture);
+        df_gvs_udp_sender_close(&udp_sender);
+        df_gvs_runtime_sync_stop(&sync);
+        return DF_ERR_IO;
+    }
     if (df_runtime_ubus_start(&ubus, df_runtime_status_provider, &sync,
                               started_ms) == DF_OK &&
         df_runtime_ubus_bind_call(
@@ -363,7 +374,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     if (signal(SIGINT, df_runtime_stop) == SIG_ERR ||
         signal(SIGTERM, df_runtime_stop) == SIG_ERR) {
         df_runtime_ubus_stop(&ubus);
+        df_gvs_pcm_ingress_close(&pcm_ingress);
         df_capture_close(capture);
+        df_gvs_udp_sender_close(&udp_sender);
+        df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
     }
     (void)setvbuf(stdout, NULL, _IOLBF, 0);
@@ -474,6 +488,20 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 &audio_tx, &session, identity, now_ms) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
+        }
+        if (!runtime->config.passive_only || runtime->config.active_host) {
+            struct df_gvs_pcm_pump_result pcm_result;
+
+            if (df_gvs_pcm_pump(
+                    &pcm_ingress, &audio_tx, now_ms, &pcm_result) != DF_OK) {
+                status = DF_ERR_IO;
+                goto done;
+            }
+            if (pcm_result.send_failed) {
+                (void)fputs(
+                    "doorfast: event=audio_tx_failed source=local_pcm\n",
+                    stderr);
+            }
         }
         if (timed_out) {
             (void)printf("doorfast: event=session_timeout generation=%llu\n",
@@ -803,6 +831,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
 
 done:
     df_gvs_video_reassembly_reset(&video);
+    df_gvs_pcm_ingress_close(&pcm_ingress);
     df_gvs_udp_sender_close(&udp_sender);
     df_runtime_ubus_stop(&ubus);
     df_gvs_runtime_sync_stop(&sync);

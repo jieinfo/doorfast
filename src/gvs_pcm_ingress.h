@@ -7,6 +7,7 @@
 #include "gvs_audio_tx.h"
 
 #define DF_GVS_PCM_INGRESS_MAGIC_SIZE 8U
+#define DF_GVS_PCM_INGRESS_DEFAULT_PATH "/var/run/doorfast-audio.sock"
 #define DF_GVS_PCM_INGRESS_HEADER_SIZE 16U
 #define DF_GVS_PCM_INGRESS_PACKET_SIZE \
     (DF_GVS_PCM_INGRESS_HEADER_SIZE + DF_GVS_AUDIO_TX_SAMPLES * 2U)
