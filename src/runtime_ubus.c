@@ -77,6 +77,7 @@ static int df_runtime_ubus_status_handler(
     struct df_runtime_elevator_status elevator_status;
     struct df_gvs_audio_status audio_status;
     struct df_gvs_audio_tx_status audio_tx_status;
+    struct df_gvs_video_status video_status;
     const char *phase_name;
     const char *role_name;
     void *sync_table;
@@ -184,6 +185,19 @@ static int df_runtime_ubus_status_handler(
         blobmsg_add_u64(&platform->response, "next_send_ms",
                         audio_tx_status.next_send_ms);
         blobmsg_close_table(&platform->response, audio_tx_table);
+    }
+    if (df_runtime_ubus_read_video_status(
+            platform->owner, &video_status) == DF_OK) {
+        void *video_table = blobmsg_open_table(&platform->response, "video");
+        blobmsg_add_u8(&platform->response, "ready", video_status.ready);
+        blobmsg_add_u64(&platform->response, "generation",
+                        video_status.generation);
+        blobmsg_add_u32(&platform->response, "frame_no",
+                        video_status.frame_no);
+        blobmsg_add_u64(&platform->response, "bytes", video_status.bytes);
+        blobmsg_add_u64(&platform->response, "timestamp_ms",
+                        video_status.timestamp_ms);
+        blobmsg_close_table(&platform->response, video_table);
     }
     if (df_runtime_ubus_read_elevator_status(
             platform->owner, &elevator_status) != DF_OK) {
@@ -660,6 +674,23 @@ int df_runtime_ubus_read_audio_tx_status(
         status == NULL)
         return DF_ERR_INVALID;
     return df_gvs_audio_tx_read_status(service->audio_tx, status);
+}
+
+int df_runtime_ubus_bind_video(struct df_runtime_ubus *service,
+    struct df_gvs_video_frame_cache *video) {
+    if (service == NULL || !service->started || video == NULL ||
+        service->video != NULL)
+        return DF_ERR_INVALID;
+    service->video = video;
+    return DF_OK;
+}
+
+int df_runtime_ubus_read_video_status(
+    struct df_runtime_ubus *service, struct df_gvs_video_status *status) {
+    if (service == NULL || !service->started || service->video == NULL ||
+        status == NULL)
+        return DF_ERR_INVALID;
+    return df_gvs_video_frame_cache_status(service->video, status);
 }
 
 int df_runtime_ubus_bind_call(

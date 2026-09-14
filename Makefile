@@ -49,6 +49,7 @@ TEST_SOURCES += src/gvs_pcm_pump.c
 TEST_SOURCES += tests/test_g711_alaw.c src/g711_alaw.c
 DAEMON_SOURCES += src/gvs_video_snapshot.c
 DAEMON_SOURCES += src/gvs_media.c src/gvs_video_reassembly.c
+DAEMON_SOURCES += src/gvs_video_frame_cache.c
 DAEMON_SOURCES += src/gvs_media_admission.c
 DAEMON_SOURCES += src/gvs_media_lifecycle.c
 DAEMON_SOURCES += src/gvs_audio_buffer.c
@@ -90,6 +91,7 @@ build/doorfast-tests build/doorfast: src/gvs_call_control.h src/deployment_confi
 build/doorfast-tests build/doorfast: src/gvs_audio_tx.h
 build/doorfast-tests build/doorfast: src/gvs_media_admission.h
 build/doorfast-tests build/doorfast: src/gvs_media_lifecycle.h
+build/doorfast-tests build/doorfast: src/gvs_video_frame_cache.h
 build/doorfast-tests build/doorfast: src/gvs_pcm_ingress.h
 build/doorfast-tests build/doorfast: src/gvs_pcm_pump.h
 DAEMON_SOURCES += src/gvs_call_ack.c
