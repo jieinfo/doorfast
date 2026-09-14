@@ -274,6 +274,8 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
         df_runtime_ubus_bind_video(&service, &video));
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
         &audio, payload, sizeof(payload), 1, 4, 20));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_mark_snapshot(
+        &audio, 4, sizeof(payload), 21));
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_read_audio_status(&service, &status));
     TEST_ASSERT_INT_EQ(1, status.ready);
@@ -282,6 +284,10 @@ void test_runtime_ubus_audio_status_tracks_buffer(void) {
     TEST_ASSERT_INT_EQ(0, (int)status.missing_packets);
     TEST_ASSERT_INT_EQ(0, (int)status.duplicate_packets);
     TEST_ASSERT_INT_EQ(0, (int)status.late_packets);
+    TEST_ASSERT_INT_EQ(1, status.snapshot_ready);
+    TEST_ASSERT_INT_EQ(1, (int)status.snapshot_packet_count);
+    TEST_ASSERT_INT_EQ(50, (int)status.snapshot_bytes);
+    TEST_ASSERT_INT_EQ(21, (int)status.snapshot_timestamp_ms);
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_read_audio_tx_status(&service, &tx_status));
     TEST_ASSERT_INT_EQ(0, tx_status.active);

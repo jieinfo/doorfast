@@ -37,6 +37,21 @@ read_video_status() {
   [ "$VIDEO_GENERATION" = "$CALL_GENERATION" ]
 }
 
+read_audio_status() {
+  local status
+  status="$(ubus call doorfast status 2>/dev/null)" || return 1
+  AUDIO_READY="$(json_field "$status" '@.audio.snapshot_ready')"
+  AUDIO_GENERATION="$(json_field "$status" '@.audio.generation')"
+  AUDIO_REVISION="$(json_field "$status" '@.audio.snapshot_packet_count')"
+  AUDIO_BYTES="$(json_field "$status" '@.audio.snapshot_bytes')"
+  CALL_GENERATION="$(json_field "$status" '@.call.generation')"
+  case "$AUDIO_READY" in true|1) ;; *) return 1 ;; esac
+  case "$AUDIO_GENERATION:$AUDIO_REVISION:$AUDIO_BYTES:$CALL_GENERATION" in
+    *[!0-9:]*|:*|*::*|*:) return 1 ;;
+  esac
+  [ "$AUDIO_GENERATION" = "$CALL_GENERATION" ]
+}
+
 if [ "$path" = /api/v1/video/latest.jpg ]; then
   snapshot="${DOORFAST_VIDEO_SNAPSHOT:-/tmp/doorfast-latest.jpg}"
   query_generation
@@ -92,13 +107,55 @@ if [ "$path" = /api/v1/video/latest.jpg ]; then
 fi
 if [ "$path" = /api/v1/audio/latest.wav ]; then
   audio="${DOORFAST_AUDIO_SNAPSHOT:-/tmp/doorfast-latest.wav}"
-  if [ -r "$audio" ]; then
-    printf 'Content-Type: audio/wav\r\nCache-Control: no-store\r\n\r\n'
-    cat "$audio"
-  else
+  query_generation
+  case "$REQUESTED_GENERATION" in
+    ''|*[!0-9]*)
+      if [ -n "$REQUESTED_GENERATION" ]; then
+        printf 'Status: 400 Bad Request\r\nContent-Type: application/json\r\n\r\n'
+        printf '{"error":"invalid audio generation"}\n'
+        exit 0
+      fi
+      ;;
+  esac
+  if ! read_audio_status || [ ! -r "$audio" ]; then
     printf 'Status: 404 Not Found\r\nContent-Type: application/json\r\n\r\n'
     printf '{"error":"audio unavailable"}\n'
+    exit 0
   fi
+  if [ -n "$REQUESTED_GENERATION" ] &&
+     [ "$REQUESTED_GENERATION" != "$AUDIO_GENERATION" ]; then
+    printf 'Status: 409 Conflict\r\nContent-Type: application/json\r\n\r\n'
+    printf '{"error":"audio generation mismatch","generation":%s}\n' \
+      "$AUDIO_GENERATION"
+    exit 0
+  fi
+  etag="\"df-audio-$AUDIO_GENERATION-$AUDIO_REVISION\""
+  if [ "${HTTP_IF_NONE_MATCH:-}" = "$etag" ]; then
+    printf 'Status: 304 Not Modified\r\nETag: %s\r\nCache-Control: no-cache\r\n\r\n' "$etag"
+    exit 0
+  fi
+  temporary="$(mktemp "${TMPDIR:-/tmp}/doorfast-audio.XXXXXX")" || {
+    printf 'Status: 503 Service Unavailable\r\nContent-Type: application/json\r\n\r\n'
+    printf '{"error":"audio temporarily unavailable"}\n'
+    exit 0
+  }
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  expected_generation="$AUDIO_GENERATION"
+  expected_revision="$AUDIO_REVISION"
+  expected_bytes="$AUDIO_BYTES"
+  if ! cp "$audio" "$temporary" ||
+     ! read_audio_status ||
+     [ "$AUDIO_GENERATION" != "$expected_generation" ] ||
+     [ "$AUDIO_REVISION" != "$expected_revision" ] ||
+     [ "$AUDIO_BYTES" != "$expected_bytes" ] ||
+     [ "$(wc -c <"$temporary" | tr -d ' ')" != "$expected_bytes" ]; then
+    printf 'Status: 503 Service Unavailable\r\nContent-Type: application/json\r\nRetry-After: 1\r\n\r\n'
+    printf '{"error":"audio changed during read"}\n'
+    exit 0
+  fi
+  printf 'Content-Type: audio/wav\r\nContent-Length: %s\r\nCache-Control: no-cache\r\nETag: %s\r\nX-Doorfast-Generation: %s\r\nX-Doorfast-Audio-Revision: %s\r\n\r\n' \
+    "$expected_bytes" "$etag" "$expected_generation" "$expected_revision"
+  cat "$temporary"
   exit 0
 fi
 printf 'Content-Type: application/json\r\n\r\n'

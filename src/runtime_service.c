@@ -673,7 +673,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                             df_g711_alaw_write_wav(
                                 DF_RUNTIME_AUDIO_SNAPSHOT,
                                 df_runtime_audio_export,
-                                export_length) == 0)
+                                export_length) == 0 &&
+                            df_gvs_audio_buffer_mark_snapshot(
+                                &audio, session.generation,
+                                export_length, now_ms) == 0)
                             last_audio_export_ms = now_ms;
                     }
                 }
