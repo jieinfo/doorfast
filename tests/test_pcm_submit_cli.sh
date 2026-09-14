@@ -57,29 +57,23 @@ path = sys.argv[1]
 server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 server.bind(path)
 os.chmod(path, 0o600)
-filler = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-filler.setblocking(False)
-packet = bytes(336)
-queued = 0
-while True:
+for attempt in range(256):
     try:
-        filler.sendto(packet, path)
-        queued += 1
-    except (BlockingIOError, OSError):
+        result = subprocess.run(
+            ["build/doorfast-pcm-submit", "23", path],
+            input=bytes(320),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError("PCM submit blocked on a full receive queue") from error
+    if result.returncode == 3:
         break
-assert queued > 0
-try:
-    result = subprocess.run(
-        ["build/doorfast-pcm-submit", "23", path],
-        input=bytes(320),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=1,
-        check=False,
-    )
-except subprocess.TimeoutExpired as error:
-    raise AssertionError("PCM submit blocked on a full receive queue") from error
-assert result.returncode == 3, result.returncode
+    assert result.returncode == 0, result.returncode
+else:
+    raise AssertionError("PCM receive queue did not reach its bounded capacity")
 PY
 
 if python3 - 2>/dev/null <<'PY' | build/doorfast-pcm-submit 0 "$socket" >/dev/null 2>&1
