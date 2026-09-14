@@ -666,7 +666,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     if (audio.length >= 8000U &&
                         now_ms >= last_audio_export_ms + 1000U) {
                         size_t export_length = 0;
-                        if (df_gvs_audio_buffer_copy(&audio,
+                        if (df_gvs_audio_buffer_copy_pending(&audio,
                                 df_runtime_audio_export,
                                 sizeof(df_runtime_audio_export),
                                 &export_length) == 0 &&

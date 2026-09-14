@@ -9,6 +9,7 @@ json_field() {
 query_generation() {
   local item key value old_ifs
   REQUESTED_GENERATION=''
+  REQUESTED_AFTER=''
   old_ifs="$IFS"
   IFS='&'
   for item in ${QUERY_STRING:-}; do
@@ -16,7 +17,8 @@ query_generation() {
     value="${item#*=}"
     if [ "$key" = generation ]; then
       REQUESTED_GENERATION="$value"
-      break
+    elif [ "$key" = after ]; then
+      REQUESTED_AFTER="$value"
     fi
   done
   IFS="$old_ifs"
@@ -43,10 +45,12 @@ read_audio_status() {
   AUDIO_READY="$(json_field "$status" '@.audio.snapshot_ready')"
   AUDIO_GENERATION="$(json_field "$status" '@.audio.generation')"
   AUDIO_REVISION="$(json_field "$status" '@.audio.snapshot_packet_count')"
+  AUDIO_PREVIOUS_REVISION="$(json_field "$status" '@.audio.snapshot_previous_packet_count')"
   AUDIO_BYTES="$(json_field "$status" '@.audio.snapshot_bytes')"
+  AUDIO_DROPPED_BYTES="$(json_field "$status" '@.audio.snapshot_dropped_bytes')"
   CALL_GENERATION="$(json_field "$status" '@.call.generation')"
   case "$AUDIO_READY" in true|1) ;; *) return 1 ;; esac
-  case "$AUDIO_GENERATION:$AUDIO_REVISION:$AUDIO_BYTES:$CALL_GENERATION" in
+  case "$AUDIO_GENERATION:$AUDIO_REVISION:$AUDIO_PREVIOUS_REVISION:$AUDIO_BYTES:$AUDIO_DROPPED_BYTES:$CALL_GENERATION" in
     *[!0-9:]*|:*|*::*|*:) return 1 ;;
   esac
   [ "$AUDIO_GENERATION" = "$CALL_GENERATION" ]
@@ -117,6 +121,15 @@ if [ "$path" = /api/v1/audio/latest.wav ]; then
       fi
       ;;
   esac
+  case "$REQUESTED_AFTER" in
+    ''|*[!0-9]*)
+      if [ -n "$REQUESTED_AFTER" ]; then
+        printf 'Status: 400 Bad Request\r\nContent-Type: application/json\r\n\r\n'
+        printf '{"error":"invalid audio cursor"}\n'
+        exit 0
+      fi
+      ;;
+  esac
   if ! read_audio_status || [ ! -r "$audio" ]; then
     printf 'Status: 404 Not Found\r\nContent-Type: application/json\r\n\r\n'
     printf '{"error":"audio unavailable"}\n'
@@ -130,8 +143,17 @@ if [ "$path" = /api/v1/audio/latest.wav ]; then
     exit 0
   fi
   etag="\"df-audio-$AUDIO_GENERATION-$AUDIO_REVISION\""
-  if [ "${HTTP_IF_NONE_MATCH:-}" = "$etag" ]; then
+  if [ "${HTTP_IF_NONE_MATCH:-}" = "$etag" ] ||
+     { [ -n "$REQUESTED_AFTER" ] &&
+       [ "$REQUESTED_AFTER" = "$AUDIO_REVISION" ]; }; then
     printf 'Status: 304 Not Modified\r\nETag: %s\r\nCache-Control: no-cache\r\n\r\n' "$etag"
+    exit 0
+  fi
+  if [ -n "$REQUESTED_AFTER" ] &&
+     [ "$REQUESTED_AFTER" != "$AUDIO_PREVIOUS_REVISION" ]; then
+    printf 'Status: 409 Conflict\r\nContent-Type: application/json\r\n\r\n'
+    printf '{"error":"audio cursor unavailable","generation":%s,"previous_revision":%s,"revision":%s}\n' \
+      "$AUDIO_GENERATION" "$AUDIO_PREVIOUS_REVISION" "$AUDIO_REVISION"
     exit 0
   fi
   temporary="$(mktemp "${TMPDIR:-/tmp}/doorfast-audio.XXXXXX")" || {
@@ -142,19 +164,25 @@ if [ "$path" = /api/v1/audio/latest.wav ]; then
   trap 'rm -f "$temporary"' EXIT HUP INT TERM
   expected_generation="$AUDIO_GENERATION"
   expected_revision="$AUDIO_REVISION"
+  expected_previous_revision="$AUDIO_PREVIOUS_REVISION"
   expected_bytes="$AUDIO_BYTES"
+  expected_dropped_bytes="$AUDIO_DROPPED_BYTES"
   if ! cp "$audio" "$temporary" ||
      ! read_audio_status ||
      [ "$AUDIO_GENERATION" != "$expected_generation" ] ||
      [ "$AUDIO_REVISION" != "$expected_revision" ] ||
+     [ "$AUDIO_PREVIOUS_REVISION" != "$expected_previous_revision" ] ||
      [ "$AUDIO_BYTES" != "$expected_bytes" ] ||
+     [ "$AUDIO_DROPPED_BYTES" != "$expected_dropped_bytes" ] ||
      [ "$(wc -c <"$temporary" | tr -d ' ')" != "$expected_bytes" ]; then
     printf 'Status: 503 Service Unavailable\r\nContent-Type: application/json\r\nRetry-After: 1\r\n\r\n'
     printf '{"error":"audio changed during read"}\n'
     exit 0
   fi
-  printf 'Content-Type: audio/wav\r\nContent-Length: %s\r\nCache-Control: no-cache\r\nETag: %s\r\nX-Doorfast-Generation: %s\r\nX-Doorfast-Audio-Revision: %s\r\n\r\n' \
-    "$expected_bytes" "$etag" "$expected_generation" "$expected_revision"
+  printf 'Content-Type: audio/wav\r\nContent-Length: %s\r\nCache-Control: no-cache\r\nETag: %s\r\nX-Doorfast-Generation: %s\r\nX-Doorfast-Audio-Previous-Revision: %s\r\nX-Doorfast-Audio-Revision: %s\r\nX-Doorfast-Audio-Dropped-Bytes: %s\r\n\r\n' \
+    "$expected_bytes" "$etag" "$expected_generation" \
+    "$expected_previous_revision" "$expected_revision" \
+    "$expected_dropped_bytes"
   cat "$temporary"
   exit 0
 fi

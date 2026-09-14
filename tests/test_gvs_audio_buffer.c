@@ -3,6 +3,7 @@
 #include <string.h>
 void test_gvs_audio_buffer(void) {
     struct df_gvs_audio_buffer b;
+    struct df_gvs_audio_buffer incremental;
     struct df_gvs_audio_status s;
     uint8_t out[8]; size_t n;
     const uint8_t a[] = {1, 2, 3}, c[] = {4, 5};
@@ -57,4 +58,30 @@ void test_gvs_audio_buffer(void) {
     TEST_ASSERT_INT_EQ(8, (int)s.buffered_bytes);
     TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_ERROR,
         df_gvs_audio_buffer_push(&b, a, sizeof(a), 3, 0, 260));
+
+    df_gvs_audio_buffer_init(&incremental);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
+        &incremental, a, sizeof(a), 1, 9, 300));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_copy_pending(
+        &incremental, out, sizeof(out), &n));
+    TEST_ASSERT_INT_EQ(3, (int)n);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_mark_snapshot(
+        &incremental, 9, n, 301));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_copy_pending(
+        &incremental, out, sizeof(out), &n));
+    TEST_ASSERT_INT_EQ(0, (int)n);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
+        &incremental, c, sizeof(c), 2, 9, 320));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_copy_pending(
+        &incremental, out, sizeof(out), &n));
+    TEST_ASSERT_INT_EQ(2, (int)n);
+    TEST_ASSERT_INT_EQ(0, memcmp(out, "\4\5", 2));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_mark_snapshot(
+        &incremental, 9, n, 321));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_status(&incremental, &s));
+    TEST_ASSERT_INT_EQ(2, (int)s.snapshot_packet_count);
+    TEST_ASSERT_INT_EQ(1, (int)s.snapshot_previous_packet_count);
+    TEST_ASSERT_INT_EQ(5, (int)s.snapshot_source_bytes);
+    TEST_ASSERT_INT_EQ(0, (int)s.snapshot_dropped_bytes);
+    TEST_ASSERT_INT_EQ(48, (int)s.snapshot_bytes);
 }
