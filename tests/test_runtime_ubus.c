@@ -236,3 +236,25 @@ void test_runtime_ubus_elevator_status_is_bounded_and_aged(void) {
         df_runtime_ubus_update_elevator_status(&service, &observed, 31));
     df_runtime_ubus_stop(&service);
 }
+
+void test_runtime_ubus_audio_status_tracks_buffer(void) {
+    struct df_runtime_ubus service = {0};
+    struct df_gvs_audio_buffer audio;
+    struct df_gvs_audio_status status;
+    const uint8_t payload[] = {1, 2, 3};
+    unsigned sync_calls = 0;
+    df_gvs_audio_buffer_init(&audio);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_audio(&service, &audio));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_bind_audio(&service, &audio));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
+        &audio, payload, sizeof(payload), 1, 4, 20));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_read_audio_status(&service, &status));
+    TEST_ASSERT_INT_EQ(1, status.ready);
+    TEST_ASSERT_INT_EQ(3, (int)status.buffered_bytes);
+    TEST_ASSERT_INT_EQ(4, (int)status.generation);
+    df_runtime_ubus_stop(&service);
+}
