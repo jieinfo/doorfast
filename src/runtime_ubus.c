@@ -147,7 +147,8 @@ static int df_runtime_ubus_status_handler(
     blobmsg_add_string(&platform->response, "confirmation",
         df_gvs_call_ack_state_name(call_status.acknowledgement_state));
     blobmsg_add_u32(&platform->response, "attempts", call_status.attempts);
-    blobmsg_add_string(&platform->response, "handshake_mode", "simulated");
+    blobmsg_add_string(&platform->response, "handshake_mode",
+        df_runtime_ubus_handshake_mode(platform->owner));
     blobmsg_add_u8(&platform->response, "handshake_active", call_status.handshake_active);
     blobmsg_add_u32(&platform->response, "handshake_missed", call_status.handshake_missed);
     blobmsg_add_u64(&platform->response, "handshake_next_ms", call_status.handshake_next_ms);
@@ -644,8 +645,15 @@ int df_runtime_ubus_start(struct df_runtime_ubus *service,
 }
 
 void df_runtime_ubus_set_active_host(struct df_runtime_ubus *service,
-    bool active_host) {
+                                     bool active_host) {
     if (service != NULL) service->active_host = active_host;
+}
+
+const char *df_runtime_ubus_handshake_mode(
+    const struct df_runtime_ubus *service) {
+    if (service == NULL || !service->started)
+        return NULL;
+    return service->active_host ? "udp" : "simulated";
 }
 
 int df_runtime_ubus_process(struct df_runtime_ubus *service,

@@ -45,6 +45,7 @@ define Package/doorfast/install
 	$(INSTALL_BIN) ./files/doorfast-recorder.init $(1)/etc/init.d/doorfast-recorder
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/doorfast.config $(1)/etc/config/doorfast
+	$(INSTALL_CONF) ./files/doorfast-automation.config $(1)/etc/config/doorfast-automation
 	$(INSTALL_CONF) ./files/doorfast-sync.config $(1)/etc/config/doorfast-sync
 	$(INSTALL_CONF) ./files/doorfast-deployment.config $(1)/etc/config/doorfast-deployment
 endef

@@ -118,6 +118,21 @@ void test_runtime_ubus_validates_and_routes_call_requests(void) {
     df_runtime_ubus_stop(&service);
 }
 
+void test_runtime_ubus_reports_handshake_transport(void) {
+    struct df_runtime_ubus service = {0};
+    unsigned sync_calls = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(0, strcmp("simulated",
+        df_runtime_ubus_handshake_mode(&service)));
+    df_runtime_ubus_set_active_host(&service, true);
+    TEST_ASSERT_INT_EQ(0, strcmp("udp",
+        df_runtime_ubus_handshake_mode(&service)));
+    df_runtime_ubus_stop(&service);
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_handshake_mode(&service) == NULL);
+}
+
 static int submit_access(const struct df_gvs_access_request *request, void *context) {
     unsigned *calls = context;
     TEST_ASSERT_INT_EQ(7, (int)request->session_generation);

@@ -133,7 +133,8 @@ function formatStatus(payload) {
                 ['会话', callSessionLabel(call.session)],
                 ['会话代次', unsignedText(call.generation, 'generation')],
                 ['命令', callCommandLabel(call.command)],
-                ['模拟发送', callDispatchLabel(call.dispatch)],
+                [root.mode === 'active_host' ? '发送状态' : '模拟发送',
+                    callDispatchLabel(call.dispatch)],
                 ['业务确认', callConfirmationLabel(call.confirmation)],
                 ['发送次数', unsignedText(call.attempts, 'attempts')]
             ]
@@ -175,8 +176,9 @@ function formatStatus(payload) {
         }
         sections.push({title: '电梯控制', rows: elevatorRows});
     }
-    if (call.handshake_mode === 'simulated') {
-        sections.push({title: '保活模拟（仅内存发送）', rows: [
+    if (call.handshake_mode === 'simulated' || call.handshake_mode === 'udp') {
+        sections.push({title: call.handshake_mode === 'udp'
+            ? '通话保活（UDP）' : '保活模拟（仅内存发送）', rows: [
             ['已启动', yesNo(call.handshake_active)],
             ['未回复次数', unsignedText(call.handshake_missed, 'handshake_missed')],
             ['距下次探测（毫秒，最近采样）', unsignedText(call.handshake_next_ms, 'handshake_next_ms')],

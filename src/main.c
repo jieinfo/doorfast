@@ -17,7 +17,7 @@
 #define DF_MAX_LEGACY_CONFIG_BYTES 65536
 
 static void df_print_usage(FILE *stream) {
-    (void)fputs("Usage: doorfast --help | --config <path> | --preflight <path> | --import-legacy <path> | --inspect-pcap <path> <IS-address> | --simulate-handshake-pcap <path> <IS-address>\n", stream);
+    (void)fputs("Usage: doorfast --help | --config <path> [--call-elev <0|1>] | --preflight <path> | --import-legacy <path> | --inspect-pcap <path> <IS-address> | --simulate-handshake-pcap <path> <IS-address>\n", stream);
 }
 
 static int df_read_deployment_config(const char *path,
@@ -68,7 +68,7 @@ static int df_run_preflight(const char *path, const char *root) {
     return report.safe ? 0 : 2;
 }
 
-static int df_run_config(const char *path) {
+static int df_run_config(const char *path, int call_elev_override) {
     struct df_runtime_config runtime;
     int result = df_runtime_config_load(path, &runtime);
 
@@ -76,6 +76,8 @@ static int df_run_config(const char *path) {
         (void)fprintf(stderr, "doorfast: invalid or unreadable configuration: %s\n", path);
         return 2;
     }
+    if (call_elev_override >= 0)
+        runtime.config.call_elev = call_elev_override == 1;
     if (!runtime.config.enabled) {
         (void)fputs("doorfast: disabled\n", stdout);
         return 0;
@@ -178,7 +180,12 @@ int main(int argc, char **argv) {
         return df_import_legacy_file(argv[2]);
     }
     if (argc == 3 && strcmp(argv[1], "--config") == 0) {
-        return df_run_config(argv[2]);
+        return df_run_config(argv[2], -1);
+    }
+    if (argc == 5 && strcmp(argv[1], "--config") == 0 &&
+        strcmp(argv[3], "--call-elev") == 0 &&
+        (strcmp(argv[4], "0") == 0 || strcmp(argv[4], "1") == 0)) {
+        return df_run_config(argv[2], argv[4][0] - '0');
     }
     if (argc == 3 && strcmp(argv[1], "--preflight") == 0) {
         return df_run_preflight(argv[2], "/");

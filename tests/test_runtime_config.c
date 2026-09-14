@@ -41,6 +41,22 @@ void test_runtime_config_accepts_disabled_minimal_config(void) {
     TEST_ASSERT_INT_EQ(1, runtime.config.passive_only);
 }
 
+void test_runtime_config_keeps_auto_elevator_inert_in_passive_mode(void) {
+    const char input[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'eth9'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption passive_only '1'\n"
+        "\toption active_host '0'\n"
+        "\toption call_elev '1'\n";
+    struct df_runtime_config runtime;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
+    TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
+    TEST_ASSERT_INT_EQ(0, runtime.config.active_host);
+}
+
 void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
     const char duplicate[] =
         "config gvs 'main'\n"
@@ -94,13 +110,14 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_config_parse(malformed_access_material,
                                                &runtime));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+    TEST_ASSERT_INT_EQ(DF_OK,
                        df_runtime_config_parse(automatic_without_direction,
                                                &runtime));
+    TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse("", &runtime));
 }
 
-void test_runtime_config_parses_explicit_elevator_direction(void) {
+void test_runtime_config_ignores_legacy_elevator_direction(void) {
     const char input[] =
         "config gvs 'main'\n"
         "\toption enabled '1'\n"
@@ -109,11 +126,9 @@ void test_runtime_config_parses_explicit_elevator_direction(void) {
         "\toption passive_only '0'\n"
         "\toption active_host '1'\n"
         "\toption call_elev '1'\n"
-        "\toption call_elev_direction 'up'\n";
+        "\toption call_elev_direction 'down'\n";
     struct df_runtime_config runtime;
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
     TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
-    TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_UP, runtime.config.call_elev_direction);
-    TEST_ASSERT_INT_EQ(1, runtime.config.call_elev_direction_configured);
 }
