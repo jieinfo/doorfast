@@ -41,10 +41,12 @@ TEST_SOURCES += tests/test_gvs_jpeg.c
 TEST_SOURCES += tests/test_gvs_video_frame_cache.c src/gvs_video_frame_cache.c
 TEST_SOURCES += tests/test_gvs_video_snapshot.c src/gvs_video_snapshot.c
 TEST_SOURCES += tests/test_gvs_audio_buffer.c src/gvs_audio_buffer.c
+TEST_SOURCES += tests/test_gvs_audio_tx.c src/gvs_audio_tx.c
 TEST_SOURCES += tests/test_g711_alaw.c src/g711_alaw.c
 DAEMON_SOURCES += src/gvs_video_snapshot.c
 DAEMON_SOURCES += src/gvs_media.c src/gvs_video_reassembly.c
 DAEMON_SOURCES += src/gvs_audio_buffer.c
+DAEMON_SOURCES += src/gvs_audio_tx.c
 DAEMON_SOURCES += src/g711_alaw.c
 TEST_SOURCES += tests/test_deployment_config.c src/deployment_config.c
 TEST_SOURCES += tests/test_deployment_preflight.c src/deployment_preflight.c
@@ -77,6 +79,7 @@ DAEMON_SOURCES += src/gvs_elevator_control.c
 DAEMON_SOURCES += src/gvs_elevator_query.c
 build/doorfast-tests build/doorfast: src/gvs_call_runtime.h
 build/doorfast-tests build/doorfast: src/gvs_call_control.h src/deployment_config.h
+build/doorfast-tests build/doorfast: src/gvs_audio_tx.h
 DAEMON_SOURCES += src/gvs_call_ack.c
 build/doorfast-tests build/doorfast: src/gvs_call_ack.h
 DAEMON_SOURCES += src/gvs_call_dispatch.c
