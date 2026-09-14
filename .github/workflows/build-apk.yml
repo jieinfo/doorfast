@@ -20,6 +20,7 @@ jobs:
       - run: python3 -B -m unittest tests/test_vm_preflight_state.py
       - run: python3 -B -m unittest tests/test_compare_doorfast_site.py
       - run: node tests/test_luci_status.js
+      - run: node tests/test_luci_settings.js
       - run: sh tests/test_main_cli.sh
       - run: sh tests/test_recorder_cli.sh
       - run: sh tests/test_pcm_submit_cli.sh

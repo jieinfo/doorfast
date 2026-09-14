@@ -4,6 +4,11 @@ set -eu
 make doorfast
 ./build/doorfast --help | grep -q '^Usage: doorfast '
 ./build/doorfast --config tests/fixtures/doorfast-disabled.conf | grep -q '^doorfast: disabled$'
+./build/doorfast --config tests/fixtures/doorfast-disabled.conf --call-elev 1 | grep -q '^doorfast: disabled$'
+if ./build/doorfast --config tests/fixtures/doorfast-disabled.conf --call-elev yes >/dev/null 2>&1; then
+    echo 'invalid automatic elevator override unexpectedly accepted' >&2
+    exit 1
+fi
 if ./build/doorfast --config tests/fixtures/legacy-doorlink.conf >/dev/null 2>&1; then
     echo 'legacy configuration unexpectedly accepted as runtime configuration' >&2
     exit 1

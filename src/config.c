@@ -40,11 +40,6 @@ int df_config_validate(const struct df_config *config) {
         !df_delay_is_valid(config->hangup_delay_seconds)) {
         return DF_ERR_INVALID;
     }
-    if (config->call_elev && (!config->active_host ||
-        !config->call_elev_direction_configured ||
-        (config->call_elev_direction != DF_GVS_ELEVATOR_DOWN &&
-         config->call_elev_direction != DF_GVS_ELEVATOR_UP)))
-        return DF_ERR_INVALID;
     return DF_OK;
 }
 

@@ -72,6 +72,12 @@ assert.deepEqual(model.formatStatus(handshakePayload).at(-1), {
         ['距下次探测（毫秒，最近采样）', '1800'],
         ['发送事务', '等待重试'], ['累计丢弃动作', '3']
     ]});
+const udpHandshakePayload = JSON.parse(JSON.stringify(handshakePayload));
+udpHandshakePayload.mode = 'active_host';
+udpHandshakePayload.call.handshake_mode = 'udp';
+assert.equal(model.formatStatus(udpHandshakePayload)[2].rows[3][0], '发送状态');
+assert.equal(model.formatStatus(udpHandshakePayload).at(-1).title,
+    '通话保活（UDP）');
 handshakePayload.call.handshake_missed = -1;
 assert.throws(() => model.formatStatus(handshakePayload), TypeError);
 

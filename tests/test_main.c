@@ -26,6 +26,7 @@ void test_gvs_call_control_bounds_failed_simulated_delivery(void);
 void test_gvs_call_control_rejects_receive_before_submission_time(void);
 void test_gvs_call_control_exposes_public_status(void);
 void test_runtime_ubus_validates_and_routes_call_requests(void);
+void test_runtime_ubus_reports_handshake_transport(void);
 void test_gvs_incoming_reply_matches_observed_0381(void);
 void test_gvs_incoming_reply_tracks_each_retransmission_without_new_session(void);
 void test_gvs_incoming_reply_rejects_stale_or_non_call_observation(void);
@@ -103,8 +104,9 @@ void test_config_redaction(void);
 void test_legacy_config_import_keeps_only_safe_fields(void);
 void test_runtime_config_parses_main_gvs_section(void);
 void test_runtime_config_accepts_disabled_minimal_config(void);
+void test_runtime_config_keeps_auto_elevator_inert_in_passive_mode(void);
 void test_runtime_config_rejects_ambiguous_or_unsafe_config(void);
-void test_runtime_config_parses_explicit_elevator_direction(void);
+void test_runtime_config_ignores_legacy_elevator_direction(void);
 void test_sip_invite_and_bye(void);
 void test_gvs_frame_validation_and_event_mapping(void);
 void test_gvs_frame_rejects_truncated_or_inconsistent_payload(void);
@@ -187,7 +189,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 156;
+    return 158;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -202,7 +204,7 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(156, test_suite_count());
+    TEST_ASSERT_INT_EQ(158, test_suite_count());
     test_g711_alaw();
     test_gvs_audio_chunk_store();
     test_runtime_ubus_audio_status_tracks_buffer();
@@ -223,7 +225,7 @@ int main(void) {
     test_gvs_pcm_pump_drops_stale_frames_and_obeys_pacing();
     test_gvs_elevator_query_sends_immediately_and_periodically();
     test_gvs_elevator_query_disabled_and_clock_safe();
-    test_runtime_config_parses_explicit_elevator_direction();
+    test_runtime_config_ignores_legacy_elevator_direction();
     test_gvs_udp_sender_emits_elevator_request_to_observed_route();
     test_gvs_udp_sender_emits_audio_to_observed_peer_port();
     test_gvs_local_pcm_reaches_observed_peer_audio_route();
@@ -331,6 +333,7 @@ int main(void) {
     test_legacy_config_import_keeps_only_safe_fields();
     test_runtime_config_parses_main_gvs_section();
     test_runtime_config_accepts_disabled_minimal_config();
+    test_runtime_config_keeps_auto_elevator_inert_in_passive_mode();
     test_runtime_config_rejects_ambiguous_or_unsafe_config();
     test_sip_invite_and_bye();
     test_gvs_frame_validation_and_event_mapping();
@@ -381,5 +384,6 @@ int main(void) {
     test_gvs_call_control_rejects_receive_before_submission_time();
     test_gvs_call_control_exposes_public_status();
     test_runtime_ubus_validates_and_routes_call_requests();
+    test_runtime_ubus_reports_handshake_transport();
     return test_failures();
 }

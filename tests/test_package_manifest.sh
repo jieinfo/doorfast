@@ -19,6 +19,7 @@ test -f package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.j
 test -f package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
@@ -32,9 +33,26 @@ grep -q 'luci-app-doorfast-\*.apk' .github/workflows/build-apk.yml
 ! grep -R -E -q 'wget -O-|auth|auto_update|opkg|\.ipk' package/doorfast scripts
 python3 -m json.tool package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.json >/dev/null
 python3 -m json.tool package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json >/dev/null
-! grep -R -E -q 'service|set|delete|add|exec|command' package/luci-app-doorfast/root/usr/share/rpcd/acl.d
+python3 - <<'PY'
+import json
+
+acl = json.load(open('package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json'))['luci-app-doorfast']
+assert acl['read']['uci'] == ['doorfast-automation']
+assert acl['write']['uci'] == ['doorfast-automation']
+assert set(acl['read']['ubus']['doorfast']) == {'status'}
+assert set(acl['write']['ubus']['doorfast']) == {'answer', 'hangup', 'unlock', 'call_elevator'}
+assert set(acl['read']) == {'uci', 'ubus'}
+assert set(acl['write']) == {'uci', 'ubus'}
+
+menu = json.load(open('package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.json'))
+assert menu['admin/services/doorfast']['action']['type'] == 'firstchild'
+assert menu['admin/services/doorfast/status']['action']['path'] == 'doorfast/status'
+assert menu['admin/services/doorfast/settings']['action']['path'] == 'doorfast/settings'
+PY
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
+node tests/test_luci_settings.js
 grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/workflows/build-apk.yml
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
@@ -50,6 +68,15 @@ grep -F "option gvs_local_address ''" package/doorfast/files/doorfast.config
 grep -F "option uplink_interface ''" package/doorfast/files/doorfast.config
 grep -F "option sync_state_path '/etc/config/doorfast-sync'" package/doorfast/files/doorfast.config
 grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
+test -f package/doorfast/files/doorfast-automation.config
+grep -F "config automation 'main'" package/doorfast/files/doorfast-automation.config
+! grep -Fq 'option call_elev' package/doorfast/files/doorfast-automation.config
+! grep -Fq 'call_elev' package/doorfast/files/doorfast.config
+! grep -Fq 'call_elev_direction' package/doorfast/files/doorfast.config
+grep -Eq 'doorfast-automation\.config.+/doorfast-automation' package/doorfast/Makefile
+grep -Fq 'procd_add_reload_trigger doorfast doorfast-automation' package/doorfast/files/doorfast.init
+grep -Fq -- '--call-elev "$call_elev"' package/doorfast/files/doorfast.init
+sh tests/test_doorfast_init.sh
 grep -F "config state 'sync'" package/doorfast/files/doorfast-sync.config
 grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile

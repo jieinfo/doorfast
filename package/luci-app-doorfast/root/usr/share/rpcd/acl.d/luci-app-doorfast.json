@@ -2,11 +2,13 @@
   "luci-app-doorfast": {
     "description": "Read Doorfast status and submit local call and access controls",
     "read": {
+      "uci": ["doorfast-automation"],
       "ubus": {
         "doorfast": ["status"]
       }
     },
     "write": {
+      "uci": ["doorfast-automation"],
       "ubus": {
         "doorfast": ["answer", "hangup", "unlock", "call_elevator"]
       }
