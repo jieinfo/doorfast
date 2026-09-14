@@ -24,6 +24,7 @@ jobs:
       - run: sh tests/test_recorder_cli.sh
       - run: sh tests/test_site_inventory.sh
       - run: sh tests/test_package_manifest.sh
+      - run: sh tests/test_doorfast_http.sh
 
   apk:
     runs-on: ubuntu-24.04
