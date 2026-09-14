@@ -12,6 +12,17 @@ if [ "$path" = /api/v1/video/latest.jpg ]; then
   fi
   exit 0
 fi
+if [ "$path" = /api/v1/audio/latest.wav ]; then
+  audio="${DOORFAST_AUDIO_SNAPSHOT:-/tmp/doorfast-latest.wav}"
+  if [ -r "$audio" ]; then
+    printf 'Content-Type: audio/wav\r\nCache-Control: no-store\r\n\r\n'
+    cat "$audio"
+  else
+    printf 'Status: 404 Not Found\r\nContent-Type: application/json\r\n\r\n'
+    printf '{"error":"audio unavailable"}\n'
+  fi
+  exit 0
+fi
 printf 'Content-Type: application/json\r\n\r\n'
 body=''
 if [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then

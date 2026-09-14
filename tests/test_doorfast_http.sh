@@ -25,6 +25,13 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/video-response"
 grep -aFq 'Content-Type: image/jpeg' "$workspace/video-response"
 tail -c 4 "$workspace/video-response" | cmp - "$workspace/latest.jpg"
+printf 'RIFFtestWAVE' >"$workspace/latest.wav"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_AUDIO_SNAPSHOT="$workspace/latest.wav" \
+  PATH_INFO=/api/v1/audio/latest.wav \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-response"
+grep -aFq 'Content-Type: audio/wav' "$workspace/audio-response"
+tail -c 12 "$workspace/audio-response" | cmp - "$workspace/latest.wav"
 grep -Fxq 'call doorfast status' "$trace"
 grep -Fxq 'call doorfast unlock {"generation":7}' "$trace"
 grep -Fxq 'call doorfast answer {"generation":7,"primary_media_port":8303}' "$trace"
