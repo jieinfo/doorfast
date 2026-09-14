@@ -9,6 +9,7 @@ void test_gvs_jpeg(void);
 void test_gvs_video_frame_cache(void);
 void test_gvs_video_snapshot(void);
 void test_gvs_audio_buffer(void);
+void test_g711_alaw(void);
 void test_gvs_call_control_reports_confirmation_timeout_once(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
 void test_gvs_call_control_bounds_failed_simulated_delivery(void);
@@ -174,7 +175,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 154;
+    return 155;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -189,7 +190,8 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(154, test_suite_count());
+    TEST_ASSERT_INT_EQ(155, test_suite_count());
+    test_g711_alaw();
     test_runtime_ubus_audio_status_tracks_buffer();
     test_gvs_media();
     test_gvs_video_reassembly();
