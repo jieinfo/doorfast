@@ -1,7 +1,17 @@
 #!/bin/sh
-printf 'Content-Type: application/json\r\n\r\n'
 path="${PATH_INFO:-}"
 [ -n "$path" ] || path="${QUERY_STRING#path=}"
+if [ "$path" = /api/v1/video/latest.jpg ]; then
+  if [ -r /tmp/doorfast-latest.jpg ]; then
+    printf 'Content-Type: image/jpeg\r\nCache-Control: no-store\r\n\r\n'
+    cat /tmp/doorfast-latest.jpg
+  else
+    printf 'Status: 404 Not Found\r\nContent-Type: application/json\r\n\r\n'
+    printf '{"error":"video frame unavailable"}\n'
+  fi
+  exit 0
+fi
+printf 'Content-Type: application/json\r\n\r\n'
 body=''
 if [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then
   body="$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
