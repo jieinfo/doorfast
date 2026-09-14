@@ -72,6 +72,55 @@ int df_gvs_pcm_ingress_serialize(uint64_t generation, const int16_t *pcm,
     return DF_OK;
 }
 
+int df_gvs_pcm_ingress_send(const char *path, uint64_t generation,
+                            const int16_t *pcm, size_t sample_count)
+{
+    struct sockaddr_un address;
+    struct stat state;
+    uint8_t packet[DF_GVS_PCM_INGRESS_PACKET_SIZE];
+    size_t packet_length = 0;
+    size_t path_length;
+    ssize_t sent;
+    int fd;
+    int flags;
+
+    if (path == NULL || path[0] == '\0' || pcm == NULL || generation == 0U ||
+        sample_count != DF_GVS_AUDIO_TX_SAMPLES) {
+        return DF_ERR_INVALID;
+    }
+    path_length = strlen(path);
+    if (path_length >= sizeof(address.sun_path)) {
+        return DF_ERR_INVALID;
+    }
+    if (lstat(path, &state) != 0) {
+        return DF_ERR_IO;
+    }
+    if (!S_ISSOCK(state.st_mode) || state.st_uid != geteuid() ||
+        (state.st_mode & 0777) != (S_IRUSR | S_IWUSR)) {
+        return DF_ERR_INVALID;
+    }
+    if (df_gvs_pcm_ingress_serialize(generation, pcm, sample_count, packet,
+            sizeof(packet), &packet_length) != DF_OK) {
+        return DF_ERR_INVALID;
+    }
+    fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return DF_ERR_IO;
+    }
+    flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        close(fd);
+        return DF_ERR_IO;
+    }
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    memcpy(address.sun_path, path, path_length + 1U);
+    sent = sendto(fd, packet, packet_length, 0,
+        (const struct sockaddr *)&address, sizeof(address));
+    close(fd);
+    return sent == (ssize_t)packet_length ? DF_OK : DF_ERR_IO;
+}
+
 int df_gvs_pcm_ingress_open(struct df_gvs_pcm_ingress *ingress,
                             const char *path)
 {

@@ -22,6 +22,7 @@ jobs:
       - run: node tests/test_luci_status.js
       - run: sh tests/test_main_cli.sh
       - run: sh tests/test_recorder_cli.sh
+      - run: sh tests/test_pcm_submit_cli.sh
       - run: sh tests/test_site_inventory.sh
       - run: sh tests/test_package_manifest.sh
       - run: sh tests/test_doorfast_http.sh
@@ -69,6 +70,7 @@ jobs:
           test -n "$luci_list"
           grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-recorder' "$doorfast_list"
+          grep -Fxq '/usr/sbin/doorfast-pcm-submit' "$doorfast_list"
           grep -Fxq '/etc/init.d/doorfast-recorder' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-site-inventory' "$doorfast_list"
           grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"

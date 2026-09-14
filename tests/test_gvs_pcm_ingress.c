@@ -103,6 +103,53 @@ void test_gvs_pcm_ingress_rejects_stale_shape_and_regular_path(void)
     df_gvs_pcm_ingress_close(&ingress);
 }
 
+void test_gvs_pcm_ingress_sender_uses_owned_private_socket(void)
+{
+    struct df_gvs_pcm_ingress ingress = {.fd = -1};
+    int16_t source[DF_GVS_AUDIO_TX_SAMPLES] = {0};
+    int16_t received[DF_GVS_AUDIO_TX_SAMPLES] = {0};
+    char path[96];
+    char alias[96];
+    uint64_t generation = 0;
+
+    source[0] = INT16_MIN;
+    source[1] = -1234;
+    source[DF_GVS_AUDIO_TX_SAMPLES - 1U] = INT16_MAX;
+    (void)snprintf(path, sizeof(path), "/tmp/doorfast-pcm-send-%ld.sock",
+                   (long)getpid());
+    (void)snprintf(alias, sizeof(alias), "/tmp/doorfast-pcm-send-%ld.link",
+                   (long)getpid());
+    unlink(path);
+    unlink(alias);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_pcm_ingress_open(&ingress, path));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_pcm_ingress_send(
+        path, 11, source, DF_GVS_AUDIO_TX_SAMPLES));
+    TEST_ASSERT_INT_EQ(DF_GVS_PCM_INGRESS_FRAME,
+        df_gvs_pcm_ingress_receive(&ingress, &generation, received,
+                                   DF_GVS_AUDIO_TX_SAMPLES));
+    TEST_ASSERT_INT_EQ(11, (int)generation);
+    TEST_ASSERT_INT_EQ(INT16_MIN, received[0]);
+    TEST_ASSERT_INT_EQ(-1234, received[1]);
+    TEST_ASSERT_INT_EQ(INT16_MAX,
+                       received[DF_GVS_AUDIO_TX_SAMPLES - 1U]);
+
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_pcm_ingress_send(
+        path, 0, source, DF_GVS_AUDIO_TX_SAMPLES));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_pcm_ingress_send(
+        path, 11, source, DF_GVS_AUDIO_TX_SAMPLES - 1U));
+    TEST_ASSERT_INT_EQ(0, symlink(path, alias));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_pcm_ingress_send(
+        alias, 11, source, DF_GVS_AUDIO_TX_SAMPLES));
+    unlink(alias);
+    TEST_ASSERT_INT_EQ(0, chmod(path, 0660));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_pcm_ingress_send(
+        path, 11, source, DF_GVS_AUDIO_TX_SAMPLES));
+    TEST_ASSERT_INT_EQ(0, chmod(path, 0600));
+    df_gvs_pcm_ingress_close(&ingress);
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_gvs_pcm_ingress_send(
+        path, 11, source, DF_GVS_AUDIO_TX_SAMPLES));
+}
+
 struct pcm_pump_capture {
     unsigned calls;
     uint16_t sequence;

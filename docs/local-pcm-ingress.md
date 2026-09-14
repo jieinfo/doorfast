@@ -31,3 +31,17 @@ Accepted samples pass through the session-bound audio transmitter, which
 applies the talking-state, generation, pacing, A-law encoding, and
 observed-route checks before UDP/8302 transmission. Doorfast does not synthesize
 silence when no local frame is available.
+
+The APK also installs `doorfast-pcm-submit` as the supported producer for this
+private socket. It reads exactly one 320-byte, signed 16-bit little-endian PCM
+frame from standard input and requires the current nonzero call generation:
+
+```sh
+producer | doorfast-pcm-submit <generation>
+```
+
+An optional second argument overrides the socket path for isolated tests. The
+sender accepts only a real Unix datagram socket owned by its effective user with
+mode `0600`; it rejects symbolic links and broader permissions. One invocation
+produces one atomic datagram. A future HTTP or WebRTC bridge must pace calls at
+20 ms and must not retry a frame after a successful exit.
