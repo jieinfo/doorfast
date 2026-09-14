@@ -19,16 +19,18 @@ define Build/Prepare
 	$(RM) -r $(PKG_BUILD_DIR)
 	$(INSTALL_DIR) $(PKG_BUILD_DIR)/src
 	$(CP) ./src/. $(PKG_BUILD_DIR)/src/
+	$(CP) ./src/event_relay_main.c $(PKG_BUILD_DIR)/event_relay_main.c
+	$(RM) $(PKG_BUILD_DIR)/src/event_relay_main.c
 endef
 
 define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -std=c17 -Wall -Wextra -Werror -pedantic \
-		-I$(PKG_BUILD_DIR)/src $(filter-out $(PKG_BUILD_DIR)/src/event_relay_main.c,$(wildcard $(PKG_BUILD_DIR)/src/*.c)) -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -DDF_RECORDER_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
-		-I$(PKG_BUILD_DIR)/src $(filter-out $(PKG_BUILD_DIR)/src/event_relay_main.c,$(wildcard $(PKG_BUILD_DIR)/src/*.c)) -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-recorder
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-recorder
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_PCM_SUBMIT_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
 		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/pcm_submit_main.c $(PKG_BUILD_DIR)/src/gvs_pcm_ingress.c -o $(PKG_BUILD_DIR)/doorfast-pcm-submit
-	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -std=c17 -Wall -Wextra -Werror -pedantic -I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/event_relay.c $(PKG_BUILD_DIR)/src/event_relay_main.c -lssl -lcrypto -o $(PKG_BUILD_DIR)/doorfast-event-relay
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -std=c17 -Wall -Wextra -Werror -pedantic -I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/event_relay.c $(PKG_BUILD_DIR)/event_relay_main.c -lssl -lcrypto -o $(PKG_BUILD_DIR)/doorfast-event-relay
 endef
 
 define Package/doorfast/install
