@@ -62,6 +62,30 @@ This is Doorfast integration evidence (`D-T`). It checks the same shape seen in
 the vendor static path and captures, but does not replace playback confirmation
 from the physical door station (`D-F`).
 
+## Receive integrity and sequencing
+
+The media parsers require the UDP payload size to equal the media header plus
+the length declared at offset `0x22`. Audio additionally requires field `c` at
+offset `0x1a` to carry that same payload size, matching the vendor send path and
+all complete authorized capture samples. A read-only pass over the five
+authorized captures found 14,959 audio packets: 13,804 were captured completely,
+1,155 were truncated by the capture limit, and none of the complete packets
+violated this strict length rule. Truncated packets and packets with trailing
+bytes are rejected before buffering or video reassembly.
+
+The audio buffer treats the 16-bit sequence as a wrapping counter. It accepts a
+forward jump while counting both the gap event and the number of missing
+packets. An identical sequence is counted and discarded as a duplicate; a
+sequence behind the current half-range window is counted and discarded as
+late. These rejected packets do not change the buffer, accepted-packet totals,
+or latest media timestamp. A new call generation resets the complete sequence
+window and its counters.
+
+The ubus `audio` status exposes `sequence_gaps`, `missing_packets`,
+`duplicate_packets`, and `late_packets` separately for diagnostics. This is a
+bounded receive policy, not a concealment or adaptive jitter buffer; live audio
+quality and reorder timing still require target-device measurement.
+
 ## Reproduction
 
 List the audio packets in a capture:

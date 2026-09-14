@@ -12,14 +12,36 @@ void test_gvs_audio_buffer(void) {
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_status(&b, &s));
     TEST_ASSERT_INT_EQ(5, (int)s.buffered_bytes);
     TEST_ASSERT_INT_EQ(1, (int)s.sequence_gaps);
+    TEST_ASSERT_INT_EQ(1, (int)s.missing_packets);
+    TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_DUPLICATE,
+        df_gvs_audio_buffer_push(&b, c, sizeof(c), 12, 7, 121));
+    TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_LATE,
+        df_gvs_audio_buffer_push(&b, c, sizeof(c), 11, 7, 122));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_status(&b, &s));
+    TEST_ASSERT_INT_EQ(1, (int)s.duplicate_packets);
+    TEST_ASSERT_INT_EQ(1, (int)s.late_packets);
+    TEST_ASSERT_INT_EQ(2, (int)s.packet_count);
+    TEST_ASSERT_INT_EQ(5, (int)s.buffered_bytes);
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_copy(&b, out, sizeof(out), &n));
     TEST_ASSERT_INT_EQ(5, (int)n);
     TEST_ASSERT_INT_EQ(0, memcmp(out, "\1\2\3\4\5", 5));
     TEST_ASSERT_INT_EQ(5, (int)b.length);
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_read(&b, out, sizeof(out), &n));
     TEST_ASSERT_INT_EQ(5, (int)n);
-    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(&b, a, sizeof(a), 1, 8, 200));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
+        &b, a, sizeof(a), UINT16_MAX, 8, 200));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
+        &b, c, sizeof(c), 0, 8, 220));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
+        &b, a, sizeof(a), 2, 8, 240));
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_status(&b, &s));
     TEST_ASSERT_INT_EQ(8, (int)s.generation);
-    TEST_ASSERT_INT_EQ(1, (int)s.packet_count);
+    TEST_ASSERT_INT_EQ(3, (int)s.packet_count);
+    TEST_ASSERT_INT_EQ(1, (int)s.sequence_gaps);
+    TEST_ASSERT_INT_EQ(1, (int)s.missing_packets);
+    TEST_ASSERT_INT_EQ(0, (int)s.duplicate_packets);
+    TEST_ASSERT_INT_EQ(0, (int)s.late_packets);
+    TEST_ASSERT_INT_EQ(8, (int)s.buffered_bytes);
+    TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_ERROR,
+        df_gvs_audio_buffer_push(&b, a, sizeof(a), 3, 0, 260));
 }
