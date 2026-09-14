@@ -66,6 +66,10 @@ void test_gvs_runtime_sync_names_only_valid_public_states(void);
 void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void);
 void test_runtime_delay_is_pumped_in_bounded_slices(void);
 void test_runtime_delay_rejects_invalid_input_and_stops_on_failure(void);
+void test_event_stream_serializes_exact_json(void);
+void test_event_stream_rejects_unknown_event(void);
+void test_event_stream_bounds_each_client_at_64_events(void);
+void test_event_stream_drops_disconnected_client_without_error(void);
 void test_gvs_sync_adapters_require_explicit_nonempty_sensitive_values(void);
 void test_gvs_priority_valid_matrix_and_unknown_categories(void);
 void test_gvs_session_preemption_transaction(void);
@@ -189,7 +193,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 158;
+    return 162;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -204,7 +208,11 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(158, test_suite_count());
+    TEST_ASSERT_INT_EQ(162, test_suite_count());
+    test_event_stream_serializes_exact_json();
+    test_event_stream_rejects_unknown_event();
+    test_event_stream_bounds_each_client_at_64_events();
+    test_event_stream_drops_disconnected_client_without_error();
     test_g711_alaw();
     test_gvs_audio_chunk_store();
     test_runtime_ubus_audio_status_tracks_buffer();
