@@ -118,6 +118,7 @@ void test_gvs_vendor_header_reads_system_random(void);
 void test_runtime_ubus_access_requires_active_host(void);
 void test_runtime_ubus_elevator_requires_active_host_and_owns_ids(void);
 void test_runtime_ubus_elevator_status_is_bounded_and_aged(void);
+void test_runtime_ubus_audio_status_tracks_buffer(void);
 void test_gvs_access_failed_send_and_late_reply(void);
 void test_gvs_access_control_sends_once_and_requires_material(void);
 void test_gvs_access_serializes_vendor_direct_unlock_shape(void);
@@ -173,7 +174,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 153;
+    return 154;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -188,7 +189,8 @@ int main(void) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(153, test_suite_count());
+    TEST_ASSERT_INT_EQ(154, test_suite_count());
+    test_runtime_ubus_audio_status_tracks_buffer();
     test_gvs_media();
     test_gvs_video_reassembly();
     test_gvs_jpeg();

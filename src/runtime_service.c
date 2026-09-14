@@ -21,6 +21,7 @@
 #include "gvs_udp_sender.h"
 #include "gvs_elevator_query.h"
 #include "gvs_media.h"
+#include "gvs_audio_buffer.h"
 #include "gvs_video_reassembly.h"
 #include "gvs_video_snapshot.h"
 #include "gvs_vendor_header.h"
@@ -247,6 +248,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_gvs_video_reassembly video = {0};
+    struct df_gvs_audio_buffer audio = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
         .ubus = &ubus,
@@ -290,6 +292,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     }
     started_ms = df_monotonic_ms();
     df_gvs_video_reassembly_init(&video);
+    df_gvs_audio_buffer_init(&audio);
     if (df_gvs_access_control_init(&access, runtime->config.access_material,
             started_ms, df_gvs_udp_access_emit, &udp_sender) != DF_OK)
         return DF_ERR_INVALID;
@@ -338,7 +341,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             &ubus, df_runtime_call_status_provider, df_runtime_call_submit,
             &call_binding) == DF_OK &&
         df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK &&
-        df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK) {
+        df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK &&
+        df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
@@ -536,6 +540,25 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             struct df_udp_prefix media_prefix;
             int media_status = df_gvs_inspect_udp_prefix(
                 packet, packet_length, &media_prefix);
+            if (media_status == 1 && media_prefix.payload_complete &&
+                (media_prefix.source_port == 8302 ||
+                 media_prefix.destination_port == 8302) &&
+                session.state != DF_GVS_IDLE && session.state != DF_GVS_ENDED) {
+                struct df_gvs_audio_packet audio_packet;
+                const uint8_t *media_payload = packet + media_prefix.payload_offset;
+                if (df_gvs_parse_audio(media_payload,
+                        media_prefix.declared_payload_length,
+                        &audio_packet) == 0 &&
+                    df_gvs_audio_buffer_push(&audio, audio_packet.payload,
+                        audio_packet.payload_length, audio_packet.sequence,
+                        session.generation, now_ms) == 0) {
+                    (void)printf("doorfast: event=audio_frame generation=%llu bytes=%zu sequence=%u\n",
+                        (unsigned long long)session.generation,
+                        audio_packet.payload_length,
+                        (unsigned)audio_packet.sequence);
+                }
+                continue;
+            }
             if (media_status == 1 && media_prefix.payload_complete &&
                 (media_prefix.source_port == 8303 ||
                  media_prefix.destination_port == 8303) &&
