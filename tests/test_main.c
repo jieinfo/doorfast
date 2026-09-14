@@ -78,6 +78,7 @@ void test_pcap_ring_rotates_and_recovers_oldest_slot(void);
 void test_gvs_udp_prefix_handles_vlan_and_truncation(void);
 void test_gvs_udp_sender_replies_to_observed_peer_route(void);
 void test_gvs_udp_sender_emits_elevator_request_to_observed_route(void);
+void test_gvs_udp_sender_emits_audio_to_observed_peer_port(void);
 void test_evidence_classifier_separates_recent_and_control(void);
 void test_evidence_classifier_keeps_observed_incoming_call(void);
 void test_evidence_log_preserves_fixed_fields_and_rotates(void);
@@ -207,6 +208,7 @@ int main(void) {
     test_gvs_elevator_query_disabled_and_clock_safe();
     test_runtime_config_parses_explicit_elevator_direction();
     test_gvs_udp_sender_emits_elevator_request_to_observed_route();
+    test_gvs_udp_sender_emits_audio_to_observed_peer_port();
     test_runtime_ubus_elevator_requires_active_host_and_owns_ids();
     test_runtime_ubus_elevator_status_is_bounded_and_aged();
     test_gvs_elevator_control_sends_twice_then_expires();

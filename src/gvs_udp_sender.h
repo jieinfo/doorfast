@@ -46,5 +46,6 @@ int df_gvs_udp_sender_observe_peer(struct df_gvs_udp_sender *,
 
 int df_gvs_udp_access_emit(const struct df_gvs_access_request *, void *);
 int df_gvs_udp_elevator_emit(const struct df_gvs_elevator_request *, void *);
+int df_gvs_udp_audio_emit(const uint8_t *, size_t, void *);
 
 #endif
