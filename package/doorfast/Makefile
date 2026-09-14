@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=33
+PKG_RELEASE:=34
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -26,12 +26,15 @@ define Build/Compile
 		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -DDF_RECORDER_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
 		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-recorder
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_PCM_SUBMIT_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/pcm_submit_main.c $(PKG_BUILD_DIR)/src/gvs_pcm_ingress.c -o $(PKG_BUILD_DIR)/doorfast-pcm-submit
 endef
 
 define Package/doorfast/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/doorfast $(1)/usr/sbin/doorfast
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/doorfast-recorder $(1)/usr/sbin/doorfast-recorder
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/doorfast-pcm-submit $(1)/usr/sbin/doorfast-pcm-submit
 	$(INSTALL_BIN) ./files/doorfast-site-inventory.sh $(1)/usr/sbin/doorfast-site-inventory
 	$(INSTALL_DIR) $(1)/www/cgi-bin
 	$(INSTALL_BIN) ./files/doorfast-http.sh $(1)/www/cgi-bin/doorfast

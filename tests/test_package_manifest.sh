@@ -8,6 +8,7 @@ test -f package/doorfast/files/doorfast-site-inventory.sh
 grep -q 'doorfast-site-inventory.*usr/libexec/doorfast' package/doorfast/Makefile
 grep -q 'doorfast-site-inventory.impl.sh' scripts/prepare-sdk-package.sh
 grep -q 'doorfast-recorder.*usr/sbin/doorfast-recorder' package/doorfast/Makefile
+grep -q 'doorfast-pcm-submit.*usr/sbin/doorfast-pcm-submit' package/doorfast/Makefile
 ! grep -q 'respawn' package/doorfast/files/doorfast-recorder.init
 test -f package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-sync.config

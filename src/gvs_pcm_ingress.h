@@ -26,6 +26,7 @@ struct df_gvs_pcm_ingress {
 
 int df_gvs_pcm_ingress_serialize(uint64_t, const int16_t *, size_t,
     uint8_t *, size_t, size_t *);
+int df_gvs_pcm_ingress_send(const char *, uint64_t, const int16_t *, size_t);
 int df_gvs_pcm_ingress_open(struct df_gvs_pcm_ingress *, const char *);
 int df_gvs_pcm_ingress_receive(struct df_gvs_pcm_ingress *, uint64_t *,
     int16_t *, size_t);
