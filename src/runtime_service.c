@@ -24,6 +24,7 @@
 #include "gvs_media_admission.h"
 #include "gvs_media_lifecycle.h"
 #include "gvs_audio_buffer.h"
+#include "gvs_audio_chunk_store.h"
 #include "gvs_audio_tx.h"
 #include "gvs_pcm_ingress.h"
 #include "gvs_pcm_pump.h"
@@ -38,6 +39,7 @@
 
 #define DF_RUNTIME_IDLE_POLL_MS 10U
 #define DF_RUNTIME_AUDIO_SNAPSHOT "/tmp/doorfast-latest.wav"
+#define DF_RUNTIME_AUDIO_CHUNKS "/tmp/doorfast-audio-chunks"
 #define DF_RUNTIME_VIDEO_SNAPSHOT "/tmp/doorfast-latest.jpg"
 
 static volatile sig_atomic_t df_runtime_stopping = 0;
@@ -52,6 +54,7 @@ static void df_runtime_media_clear(struct df_gvs_video_reassembly *video,
     df_gvs_video_frame_cache_reset(video_cache);
     df_gvs_audio_buffer_reset(audio, generation);
     (void)remove(DF_RUNTIME_AUDIO_SNAPSHOT);
+    (void)df_gvs_audio_chunk_store_clear(DF_RUNTIME_AUDIO_CHUNKS);
     (void)remove(DF_RUNTIME_VIDEO_SNAPSHOT);
 }
 
@@ -666,18 +669,33 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     if (audio.length >= 8000U &&
                         now_ms >= last_audio_export_ms + 1000U) {
                         size_t export_length = 0;
+                        uint64_t previous_revision =
+                            audio.snapshot_packet_count;
+                        uint64_t revision = audio.packet_count;
+                        uint64_t pending =
+                            audio.byte_count - audio.snapshot_source_bytes;
                         if (df_gvs_audio_buffer_copy_pending(&audio,
                                 df_runtime_audio_export,
                                 sizeof(df_runtime_audio_export),
                                 &export_length) == 0 &&
-                            df_g711_alaw_write_wav(
-                                DF_RUNTIME_AUDIO_SNAPSHOT,
-                                df_runtime_audio_export,
-                                export_length) == 0 &&
-                            df_gvs_audio_buffer_mark_snapshot(
-                                &audio, session.generation,
-                                export_length, now_ms) == 0)
-                            last_audio_export_ms = now_ms;
+                            export_length > 0U) {
+                            uint64_t dropped = pending > export_length
+                                ? pending - export_length : 0U;
+                            if (df_g711_alaw_write_wav(
+                                    DF_RUNTIME_AUDIO_SNAPSHOT,
+                                    df_runtime_audio_export,
+                                    export_length) == 0 &&
+                                df_gvs_audio_chunk_store_publish(
+                                    DF_RUNTIME_AUDIO_CHUNKS,
+                                    DF_RUNTIME_AUDIO_SNAPSHOT,
+                                    session.generation, previous_revision,
+                                    revision, 44U + export_length * 2U,
+                                    dropped) == 0 &&
+                                df_gvs_audio_buffer_mark_snapshot(
+                                    &audio, session.generation,
+                                    export_length, now_ms) == 0)
+                                last_audio_export_ms = now_ms;
+                        }
                     }
                 }
                 continue;

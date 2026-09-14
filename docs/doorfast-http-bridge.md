@@ -57,11 +57,13 @@ using `snapshot_ready`, `snapshot_packet_count`, `snapshot_bytes`, and
 revision in `ETag` and `X-Doorfast-Audio-Revision`.
 
 Each WAV contains only samples accepted since the previous successful export;
-it does not repeat the complete rolling receive buffer. A sequential consumer
-can send `after=<snapshot_packet_count>` with the generation. The current
-revision returns `304 Not Modified`, the immediately preceding revision returns
-the next WAV chunk, and any older or unknown cursor returns `409 Conflict` with
-the revisions needed to resynchronize. `snapshot_previous_packet_count` and
+it does not repeat the complete rolling receive buffer. The runtime keeps four
+immutable chunks, normally covering about four seconds, and removes the whole
+queue at every call lifecycle boundary. A sequential consumer can send
+`after=<snapshot_packet_count>` with the generation. The current revision
+returns `304 Not Modified`; any retained cursor returns its next WAV chunk; an
+expired or unknown cursor returns `409 Conflict` with the latest revisions for
+resynchronization. `snapshot_previous_packet_count` and
 `snapshot_dropped_bytes` are also exposed in status. A nonzero dropped byte
 count means the producer received more unexported audio than the bounded ring
 could retain.
