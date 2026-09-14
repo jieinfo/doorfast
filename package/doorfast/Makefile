@@ -33,6 +33,8 @@ define Package/doorfast/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/doorfast $(1)/usr/sbin/doorfast
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/doorfast-recorder $(1)/usr/sbin/doorfast-recorder
 	$(INSTALL_BIN) ./files/doorfast-site-inventory.sh $(1)/usr/sbin/doorfast-site-inventory
+	$(INSTALL_DIR) $(1)/www/cgi-bin
+	$(INSTALL_BIN) ./files/doorfast-http.sh $(1)/www/cgi-bin/doorfast
 	$(INSTALL_DIR) $(1)/usr/libexec/doorfast
 	$(INSTALL_BIN) ./files/doorfast-site-inventory.impl.sh $(1)/usr/libexec/doorfast/doorfast-site-inventory.sh
 	$(INSTALL_DIR) $(1)/etc/init.d
