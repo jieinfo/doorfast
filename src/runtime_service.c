@@ -20,6 +20,9 @@
 #include "gvs_send_transaction.h"
 #include "gvs_udp_sender.h"
 #include "gvs_elevator_query.h"
+#include "gvs_media.h"
+#include "gvs_video_reassembly.h"
+#include "gvs_video_snapshot.h"
 #include "gvs_vendor_header.h"
 #include "gvs_transport_policy.h"
 #include "gvs_sync_state.h"
@@ -243,6 +246,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
     struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
+    struct df_gvs_video_reassembly video = {0};
     struct df_runtime_ubus ubus = {0};
     struct df_runtime_wait_context wait_context = {
         .ubus = &ubus,
@@ -285,6 +289,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     started_ms = df_monotonic_ms();
+    df_gvs_video_reassembly_init(&video);
     if (df_gvs_access_control_init(&access, runtime->config.access_material,
             started_ms, df_gvs_udp_access_emit, &udp_sender) != DF_OK)
         return DF_ERR_INVALID;
@@ -469,6 +474,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         if (captured == DF_CAPTURE_ERROR) {
             bool ended = false;
 
+            df_gvs_video_reassembly_reset(&video);
+
             (void)df_gvs_session_abort(&session, &ended);
             df_gvs_deadline_cancel(&deadline);
             {
@@ -524,6 +531,39 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 goto done;
             }
             continue;
+        }
+        {
+            struct df_udp_prefix media_prefix;
+            int media_status = df_gvs_inspect_udp_prefix(
+                packet, packet_length, &media_prefix);
+            if (media_status == 1 && media_prefix.payload_complete &&
+                (media_prefix.source_port == 8303 ||
+                 media_prefix.destination_port == 8303) &&
+                session.state != DF_GVS_IDLE && session.state != DF_GVS_ENDED) {
+                struct df_gvs_video_packet video_packet;
+                const uint8_t *frame = NULL;
+                size_t frame_length = 0;
+                const uint8_t *media_payload =
+                    packet + media_prefix.payload_offset;
+                if (df_gvs_parse_video(media_payload,
+                        media_prefix.declared_payload_length,
+                        &video_packet) == 0) {
+                    int frame_status = df_gvs_video_reassembly_push(
+                        &video, &video_packet, &frame, &frame_length);
+                    if (frame_status == 1 &&
+                        df_gvs_jpeg_validate(frame, frame_length) == 0 &&
+                        df_gvs_video_snapshot_write(
+                            "/tmp/doorfast-latest.jpg", frame,
+                            frame_length) == 0) {
+                        (void)printf(
+                            "doorfast: event=video_frame generation=%llu "
+                            "bytes=%zu frame=%u\n",
+                            (unsigned long long)session.generation,
+                            frame_length, (unsigned)video_packet.frame_no);
+                    }
+                }
+                continue;
+            }
         }
         if (df_gvs_extract_control_payload(packet, packet_length,
                                            &payload, &payload_length) == 1) {
@@ -699,6 +739,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     status = DF_OK;
 
 done:
+    df_gvs_video_reassembly_reset(&video);
     df_gvs_udp_sender_close(&udp_sender);
     df_runtime_ubus_stop(&ubus);
     df_gvs_runtime_sync_stop(&sync);

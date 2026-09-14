@@ -7,6 +7,7 @@ void test_gvs_media(void);
 void test_gvs_video_reassembly(void);
 void test_gvs_jpeg(void);
 void test_gvs_video_frame_cache(void);
+void test_gvs_video_snapshot(void);
 void test_gvs_call_control_reports_confirmation_timeout_once(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
 void test_gvs_call_control_bounds_failed_simulated_delivery(void);
@@ -191,6 +192,7 @@ int main(void) {
     test_gvs_video_reassembly();
     test_gvs_jpeg();
     test_gvs_video_frame_cache();
+    test_gvs_video_snapshot();
     test_gvs_elevator_query_sends_immediately_and_periodically();
     test_gvs_elevator_query_disabled_and_clock_safe();
     test_runtime_config_parses_explicit_elevator_direction();
