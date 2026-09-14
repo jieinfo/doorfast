@@ -1,5 +1,6 @@
 #include "gvs_udp_sender.h"
 #include "gvs_identity.h"
+#include "gvs_media.h"
 #include "gvs_packet.h"
 
 #include <arpa/inet.h>
@@ -234,5 +235,38 @@ int df_gvs_udp_elevator_emit(const struct df_gvs_elevator_request *request,
     }
     if (sender->sent < UINT_MAX)
         sender->sent++;
+    return DF_OK;
+}
+
+int df_gvs_udp_audio_emit(const uint8_t *frame, size_t length, void *context)
+{
+    struct df_gvs_udp_sender *sender = context;
+    struct df_gvs_audio_packet packet;
+    struct sockaddr_in destination;
+    ssize_t written;
+
+    if (sender == NULL || sender->fd < 0 ||
+        df_gvs_parse_audio(frame, length, &packet) != 0 ||
+        packet.payload_length == 0U ||
+        length != DF_GVS_AUDIO_HEADER_LEN + packet.payload_length ||
+        df_gvs_udp_resolve_destination(
+            sender, packet.destination, &destination) != DF_OK) {
+        if (sender != NULL && sender->failed < UINT_MAX) {
+            sender->failed++;
+        }
+        return DF_ERR_INVALID;
+    }
+    destination.sin_port = htons(8302U);
+    written = sendto(sender->fd, frame, length, 0,
+        (const struct sockaddr *)&destination, sizeof(destination));
+    if (written != (ssize_t)length) {
+        if (sender->failed < UINT_MAX) {
+            sender->failed++;
+        }
+        return DF_ERR_IO;
+    }
+    if (sender->sent < UINT_MAX) {
+        sender->sent++;
+    }
     return DF_OK;
 }
