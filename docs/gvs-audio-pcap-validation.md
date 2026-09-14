@@ -48,6 +48,20 @@ capture boundaries. The transmit controller consequently preserves one
 wrapping process-level sequence across call generations instead of resetting
 it when a new call starts.
 
+## Doorfast transmission regression
+
+The project test suite now exercises the complete local transmit boundary. It
+sends a serialized 336-byte `DFPCM01` Unix datagram, checks the active call
+generation and pacing in the PCM pump, encodes 160 zero PCM samples to the
+expected A-law value `0xd5`, resolves a route learned from a control packet, and
+receives the resulting 202-byte GVS frame from a real UDP/8302 loopback socket.
+The parsed frame must retain the current source and peer identities, sequence,
+160-byte length fields, `d/e = 1`, and `f = 0x0100`.
+
+This is Doorfast integration evidence (`D-T`). It checks the same shape seen in
+the vendor static path and captures, but does not replace playback confirmation
+from the physical door station (`D-F`).
+
 ## Reproduction
 
 List the audio packets in a capture:
