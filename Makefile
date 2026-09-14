@@ -41,6 +41,7 @@ TEST_SOURCES += tests/test_gvs_jpeg.c
 TEST_SOURCES += tests/test_gvs_video_frame_cache.c src/gvs_video_frame_cache.c
 TEST_SOURCES += tests/test_gvs_video_snapshot.c src/gvs_video_snapshot.c
 TEST_SOURCES += tests/test_gvs_audio_buffer.c src/gvs_audio_buffer.c
+TEST_SOURCES += tests/test_g711_alaw.c src/g711_alaw.c
 DAEMON_SOURCES += src/gvs_video_snapshot.c
 DAEMON_SOURCES += src/gvs_media.c src/gvs_video_reassembly.c
 DAEMON_SOURCES += src/gvs_audio_buffer.c
