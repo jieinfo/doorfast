@@ -93,14 +93,19 @@ static void status_callback(struct ubus_request *request, int type,
     parsed.generation = blobmsg_get_u64(call[CALL_GENERATION]);
     parsed.audio_tx_generation =
         blobmsg_get_u64(audio_tx[AUDIO_TX_GENERATION]);
-    if (blobmsg_get_u8(audio_tx[AUDIO_TX_ACTIVE]) > 1U ||
-        parsed.generation == 0U || parsed.audio_tx_generation == 0U ||
-        parsed.generation != parsed.audio_tx_generation)
+    if (blobmsg_get_u8(audio_tx[AUDIO_TX_ACTIVE]) > 1U)
         return;
+    parsed.audio_tx_active = blobmsg_get_bool(audio_tx[AUDIO_TX_ACTIVE]);
+    /* A fresh idle runtime legitimately has zero generations. Preserve that
+     * status so the HTTP core can reject the request with a conflict. */
+    if (strcmp(session, "talking") == 0 || parsed.audio_tx_active) {
+        if (parsed.generation == 0U || parsed.audio_tx_generation == 0U ||
+            parsed.generation != parsed.audio_tx_generation)
+            return;
+    }
 
     memcpy(parsed.runtime_id, runtime_id, sizeof(parsed.runtime_id));
     memcpy(parsed.call_state, session, strlen(session) + 1U);
-    parsed.audio_tx_active = blobmsg_get_bool(audio_tx[AUDIO_TX_ACTIVE]);
     context->parsed = parsed;
     context->valid = true;
 }

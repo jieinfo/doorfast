@@ -38,6 +38,14 @@ define Build/Compile
 		$(PKG_BUILD_DIR)/src/runtime_id.c \
 		$(PKG_BUILD_DIR)/src/gvs_pcm_ingress.c \
 		-lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-pcm-http
+	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE \
+		-DDF_PCM_HTTP_ACCEPTANCE -std=c17 -Wall -Wextra -Werror -pedantic \
+		-I$(PKG_BUILD_DIR)/src \
+		$(PKG_BUILD_DIR)/src/pcm_http.c \
+		$(PKG_BUILD_DIR)/src/pcm_http_main.c \
+		$(PKG_BUILD_DIR)/src/runtime_id.c \
+		$(PKG_BUILD_DIR)/src/gvs_pcm_ingress.c \
+		-o $(PKG_BUILD_DIR)/doorfast-pcm-http-acceptance
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_PCM_SUBMIT_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
 		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/pcm_submit_main.c $(PKG_BUILD_DIR)/src/gvs_pcm_ingress.c -o $(PKG_BUILD_DIR)/doorfast-pcm-submit
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -std=c17 -Wall -Wextra -Werror -pedantic -I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/event_relay.c $(PKG_BUILD_DIR)/event_relay_main.c -lssl -lcrypto -o $(PKG_BUILD_DIR)/doorfast-event-relay
