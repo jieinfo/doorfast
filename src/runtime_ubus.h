@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "doorfast.h"
+#include "runtime_id.h"
 #include "gvs_access.h"
 #include "gvs_elevator_control.h"
 #include "gvs_runtime_sync.h"
@@ -64,6 +65,7 @@ struct df_runtime_ubus {
     void *platform;
     uint64_t last_now_ms;
     uint64_t next_reconnect_ms;
+    char runtime_id[DF_RUNTIME_ID_HEX_LENGTH + 1U];
     bool started;
     bool active_host;
 };

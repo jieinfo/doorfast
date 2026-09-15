@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include "runtime_id.h"
 #include "runtime_ubus.h"
 #include "test.h"
 
@@ -55,6 +56,7 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     TEST_ASSERT_INT_EQ(
         DF_OK,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));
+    TEST_ASSERT_INT_EQ(1, df_runtime_id_is_valid(service.runtime_id) ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 1));
     TEST_ASSERT_INT_EQ(0, service.active_host ? 1 : 0);
     df_runtime_ubus_set_active_host(&service, true);
@@ -68,6 +70,7 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
                        df_runtime_ubus_process(&service, 9));
     TEST_ASSERT_INT_EQ(0, (int)calls);
     df_runtime_ubus_stop(&service);
+    TEST_ASSERT_INT_EQ(0, service.runtime_id[0]);
     df_runtime_ubus_stop(&service);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_ubus_process(&service, 12));
