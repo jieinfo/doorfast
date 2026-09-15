@@ -88,7 +88,7 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=37' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=38' package/doorfast/Makefile
 grep -Eq '^  USERID:=:doorfast$' package/doorfast/Makefile
 grep -Fq 'EVENT_DIR=/var/run/doorfast' package/doorfast/files/doorfast.init
 grep -Fq 'DF_EVENT_STREAM_DEFAULT_PATH "/var/run/doorfast/events.sock"' src/event_stream.h
@@ -97,6 +97,9 @@ grep -Fq 'group_exists doorfast || return 1' package/doorfast/files/doorfast.ini
 grep -Fq 'ensure_event_runtime || return 1' package/doorfast/files/doorfast.init
 grep -Fq 'ls -ldn "$1"' package/doorfast/files/doorfast-event-relay.init
 ! grep -Fq 'stat -c' package/doorfast/files/doorfast-event-relay.init
+grep -Fq '$(INSTALL_DIR) $(1)/etc/doorfast' package/doorfast/Makefile
+grep -Fq 'chmod 0750 $(1)/etc/doorfast' package/doorfast/Makefile
+grep -Fq 'mkdir -p /etc/doorfast || exit 1' package/doorfast/Makefile
 grep -Fq 'chown root:doorfast' package/doorfast/files/doorfast.init
 grep -Fq 'chmod 0750' package/doorfast/files/doorfast.init
 grep -Fq 'chmod(path, 0660)' src/event_stream.c
