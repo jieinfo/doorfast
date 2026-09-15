@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=36
+PKG_RELEASE:=37
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -13,6 +13,7 @@ define Package/doorfast
   CATEGORY:=Network
   TITLE:=Doorfast GVS integration daemon
   DEPENDS:=+libpcap +libuci +libjson-c +libopenssl +libubus +libubox +libblobmsg-json +jsonfilter
+  USERID:=:doorfast
 endef
 
 define Build/Prepare
@@ -60,6 +61,10 @@ endef
 
 define Package/doorfast/postinst
 #!/bin/sh
+if ! group_exists doorfast; then
+	group_add_next doorfast >/dev/null
+	group_exists doorfast || exit 1
+fi
 if [ -z "$${IPKG_INSTROOT}" ] && [ "$${PKG_UPGRADE}" = "1" ]; then
 	/etc/init.d/doorfast restart
 	/etc/init.d/doorfast-event-relay restart

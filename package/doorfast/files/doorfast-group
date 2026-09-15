@@ -1,9 +1,10 @@
 #!/bin/sh
 
-# The event stream is local-only and readable by the doorfast group.
-# addgroup is idempotent on BusyBox and keeps upgrades compatible.
-if command -v addgroup >/dev/null 2>&1; then
-	addgroup -S doorfast 2>/dev/null || true
+# Use OpenWrt's account helpers; BusyBox does not expose addgroup on all images.
+. /lib/functions.sh
+if ! group_exists doorfast; then
+	group_add_next doorfast >/dev/null
+	group_exists doorfast || exit 1
 fi
 
 exit 0
