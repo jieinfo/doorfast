@@ -11,7 +11,7 @@ if len(sys.argv) != 2:
 ssh = str(pathlib.Path(sys.argv[1]).resolve())
 
 def remote(command, *, check=True, input_text=None):
-    return subprocess.run([ssh, "-o", "ConnectTimeout=5", command], check=check,
+    return subprocess.run([ssh, command], check=check,
         input=input_text, capture_output=True, text=True, timeout=45)
 
 interfaces = ("br-door-test", "up-test", "down-test", "u-end-test", "d-end-test")
