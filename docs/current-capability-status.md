@@ -51,8 +51,8 @@ LuCI 当前只显示状态。接口选择、逻辑身份、主机模式、开锁
 
 ## 已知实现问题
 
-1. `call_elev_direction` 能被配置加载器解析和校验，但自动召梯运行路径固定传入 `up`。当前用户要求的来电自动向上不受影响，配置为 `down` 不会生效。
-2. ubus 状态中的 `call.handshake_mode` 固定显示 `simulated`，即使主机模式正在通过 UDP 发送握手；实际传输与显示不一致。
+1. 自动召梯运行路径固定传入 `up`；旧配置中的 `call_elev_direction` 会被兼容性忽略。当前用户要求的来电自动向上不受影响，向下召梯仍需另行设计和验证。
+2. ubus 状态已在 `active_host` 下报告 `call.handshake_mode=udp`，但部分历史事件日志仍写入 `mode=simulated`；这只影响诊断文字，不改变实际 UDP 发送。
 3. relay 当前仅接受 HTTPS authority 配置，目标路径固定为 `/api/doorfast/<entry_id>`；token 必须位于 root 所有的 0600 文件中。
 4. HTTP CGI 没有独立认证逻辑；包括 PCM 生产者在内的访问控制属于部署前置条件。PCM session token 不是通用 HTTP 身份凭据。
 
