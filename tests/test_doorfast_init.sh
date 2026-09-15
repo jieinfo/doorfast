@@ -8,6 +8,8 @@ current_config=
 doorfast_enabled=0
 doorfast_call_elev=1
 automation_call_elev=
+group_present=0
+group_creation_succeeds=1
 
 config_load() {
 	current_config=$1
@@ -37,12 +39,17 @@ uci() {
 	printf '%s\n' "$*" >>"$trace"
 }
 
-addgroup() { printf 'addgroup %s\n' "$*" >>"$trace"; }
+group_exists() { [ "$group_present" -eq 1 ]; }
+group_add_next() {
+	printf 'group_add_next %s\n' "$*" >>"$trace"
+	[ "$group_creation_succeeds" -eq 1 ] && group_present=1
+	return 0
+}
 mkdir() { printf 'mkdir %s\n' "$*" >>"$trace"; }
 chown() { printf 'chown %s\n' "$*" >>"$trace"; }
 chmod() { printf 'chmod %s\n' "$*" >>"$trace"; }
 
-procd_open_instance() { :; }
+procd_open_instance() { printf 'procd_open_instance\n' >>"$trace"; }
 procd_set_param() { :; }
 procd_close_instance() { :; }
 procd_add_reload_trigger() { :; }
@@ -67,7 +74,18 @@ grep -Fxq -- '-q set doorfast-automation.main.call_elev=0' "$trace"
 : >"$trace"
 doorfast_enabled=1
 start_service
-grep -Fq 'addgroup -S doorfast' "$trace"
+grep -Fq 'group_add_next doorfast' "$trace"
 grep -Fq 'mkdir -p /var/run/doorfast' "$trace"
 grep -Fq 'chown root:doorfast /var/run/doorfast' "$trace"
 grep -Fq 'chmod 0750 /var/run/doorfast' "$trace"
+
+: >"$trace"
+group_present=0
+group_creation_succeeds=0
+if start_service; then
+	echo 'start_service accepted a missing doorfast group' >&2
+	exit 1
+fi
+grep -Fq 'group_add_next doorfast' "$trace"
+! grep -Fq 'mkdir -p /var/run/doorfast' "$trace"
+! grep -Fq 'procd_open_instance' "$trace"

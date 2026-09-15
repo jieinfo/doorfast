@@ -82,15 +82,21 @@ grep -Eq 'doorfast-automation\.config.+/doorfast-automation' package/doorfast/Ma
 grep -Fq 'procd_add_reload_trigger doorfast doorfast-automation' package/doorfast/files/doorfast.init
 grep -Fq -- '--call-elev "$call_elev"' package/doorfast/files/doorfast.init
 sh tests/test_doorfast_init.sh
+sh tests/test_event_relay_init.sh
 grep -F "config state 'sync'" package/doorfast/files/doorfast-sync.config
 grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=36' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=37' package/doorfast/Makefile
+grep -Eq '^  USERID:=:doorfast$' package/doorfast/Makefile
 grep -Fq 'EVENT_DIR=/var/run/doorfast' package/doorfast/files/doorfast.init
 grep -Fq 'DF_EVENT_STREAM_DEFAULT_PATH "/var/run/doorfast/events.sock"' src/event_stream.h
-grep -Fq 'addgroup -S doorfast' package/doorfast/files/doorfast.init
+grep -Fq 'group_add_next doorfast' package/doorfast/files/doorfast.init
+grep -Fq 'group_exists doorfast || return 1' package/doorfast/files/doorfast.init
+grep -Fq 'ensure_event_runtime || return 1' package/doorfast/files/doorfast.init
+grep -Fq 'ls -ldn "$1"' package/doorfast/files/doorfast-event-relay.init
+! grep -Fq 'stat -c' package/doorfast/files/doorfast-event-relay.init
 grep -Fq 'chown root:doorfast' package/doorfast/files/doorfast.init
 grep -Fq 'chmod 0750' package/doorfast/files/doorfast.init
 grep -Fq 'chmod(path, 0660)' src/event_stream.c
