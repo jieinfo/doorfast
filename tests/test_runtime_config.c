@@ -7,7 +7,7 @@ void test_runtime_config_parses_main_gvs_section(void) {
     const char input[] =
         "config gvs 'main'\n"
         "\toption enabled '1'\n"
-        "\toption gvs_interface 'vlan-door.42'\n"
+        "\toption passive_interface 'vlan-door.42'\n"
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption uplink_interface 'br-home'\n"
         "\toption access_material '0d753ea99003cd5d'\n"
@@ -30,6 +30,21 @@ void test_runtime_config_parses_main_gvs_section(void) {
     TEST_ASSERT_INT_EQ(0, runtime.config.call_elev);
     TEST_ASSERT_INT_EQ(-1, runtime.config.unlock_delay_seconds);
     TEST_ASSERT_INT_EQ(-1, runtime.config.hangup_delay_seconds);
+}
+
+void test_runtime_config_selects_a_dedicated_host_interface(void) {
+    const char input[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption passive_interface 'br-observe'\n"
+        "\toption host_interface 'br-host'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption active_host '1'\n"
+        "\toption indoor_netmask '255.0.0.0'\n";
+    struct df_runtime_config runtime;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
+    TEST_ASSERT_INT_EQ(0, strcmp("br-host", runtime.config.gvs_interface));
 }
 
 void test_runtime_config_accepts_disabled_minimal_config(void) {

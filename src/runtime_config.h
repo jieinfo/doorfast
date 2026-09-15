@@ -14,6 +14,8 @@ struct df_runtime_config {
     char access_material[17];
     char brand[DF_RUNTIME_BRAND_MAX];
     char gvs_interface[DF_RUNTIME_INTERFACE_MAX];
+    char passive_interface[DF_RUNTIME_INTERFACE_MAX];
+    char host_interface[DF_RUNTIME_INTERFACE_MAX];
     char gvs_local_address[DF_RUNTIME_ADDRESS_MAX];
     char indoor_ipaddr[DF_RUNTIME_IPV4_MAX];
     char indoor_netmask[DF_RUNTIME_IPV4_MAX];

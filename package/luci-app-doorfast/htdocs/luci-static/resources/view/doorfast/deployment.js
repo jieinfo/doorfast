@@ -45,7 +45,7 @@ return view.extend({
 
         section = map.section(form.NamedSection, 'main', 'gvs', '被动观察配置');
 
-        option = section.option(form.Value, 'gvs_interface', '被动观察接口');
+        option = section.option(form.Value, 'passive_interface', '被动观察接口');
         option.rmempty = false;
         option.depends('active_host', '0');
         option.description = '仅用于抓取门禁网络报文；被动观察不绑定室内机 IP。';
@@ -66,7 +66,7 @@ return view.extend({
 
         section = map.section(form.NamedSection, 'main', 'gvs', '主机模式配置');
 
-        option = section.option(form.Value, 'gvs_interface', '主机模式接口');
+        option = section.option(form.Value, 'host_interface', '主机模式接口');
         option.rmempty = false;
         option.depends('active_host', '1');
         option.description = '填写物理口、VLAN、bridge 或 bond 的实际接口名。服务只在此接口临时添加室内机地址。';

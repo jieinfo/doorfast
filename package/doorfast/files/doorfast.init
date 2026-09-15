@@ -81,7 +81,10 @@ remove_host_address() {
 configure_host_address() {
 	config_get_bool active_host main active_host 0
 	[ "$active_host" -eq 1 ] || return 0
-	config_get host_interface main gvs_interface
+	config_get host_interface main host_interface
+	if [ -z "$host_interface" ]; then
+		config_get host_interface main gvs_interface
+	fi
 	config_get identity main gvs_local_address
 	config_get indoor_ip main indoor_ipaddr
 	config_get indoor_netmask main indoor_netmask
@@ -92,6 +95,21 @@ configure_host_address() {
 	remove_host_address || return 1
 	ip address add "$indoor_ip/$prefix" dev "$host_interface" || return 1
 	printf '%s %s/%s\n' "$host_interface" "$indoor_ip" "$prefix" >"$HOST_ADDRESS_STATE"
+}
+
+migrate_mode_interfaces() {
+	config_get legacy_interface main gvs_interface
+	config_get passive_interface main passive_interface
+	config_get host_interface main host_interface
+	config_get_bool active_host main active_host 0
+	[ -n "$legacy_interface" ] || return 0
+	if [ "$active_host" -eq 1 ] && [ -z "$host_interface" ]; then
+		uci -q set "doorfast.main.host_interface=$legacy_interface" || return 1
+		uci -q commit doorfast || return 1
+	elif [ "$active_host" -eq 0 ] && [ -z "$passive_interface" ]; then
+		uci -q set "doorfast.main.passive_interface=$legacy_interface" || return 1
+		uci -q commit doorfast || return 1
+	fi
 }
 
 ensure_event_runtime() {
@@ -119,6 +137,8 @@ load_auto_elevator() {
 }
 
 start_service() {
+	config_load doorfast
+	migrate_mode_interfaces || return 1
 	config_load doorfast
 	config_get_bool enabled main enabled 0
 	load_auto_elevator
