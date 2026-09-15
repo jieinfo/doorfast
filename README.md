@@ -28,6 +28,7 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的原生门禁网络观察与集�
 - 已实现 GVS 公共头解析、逻辑身份过滤及结束原因统计，并有合成和混合回放测试。
 - 直接开锁、手动向上/向下召梯、来电自动向上召梯和电梯状态查询已经接入运行服务；协议完成与实体动作确认分别报告。
 - UDP/8302 音频接收、增量 WAV 发布、会话绑定的 PCM 到 G.711 A-law 上行发送，以及 UDP/8303 JPEG 分片重组和最新画面发布已经接入运行服务。
+- 来电、通话建立、挂断、超时和抢占事件通过 generation 绑定的本地 Unix socket 发布；可选 relay 经 HTTPS 推送到 `doorfastforha`，HA 的五秒状态轮询继续兜底。
 - 生成经管理员审批才可使用的发现候选项。
 - 对自动化策略生成可审计的“允许 / 拒绝 / 延迟”决定。
 
@@ -54,6 +55,18 @@ config gvs 'main'
 `IS:楼栋-单元-房间-分机` 格式，例如 `IS:2-1-101-1`；它仅用于本机入站帧筛选。
 Doorfast 不会修改网络、路由或防火墙；主动发送仅针对由会话状态机提交的控制事务。
 修改 `/etc/config/doorfast` 后执行 `/etc/init.d/doorfast reload` 会停止旧实例并按新配置启动。
+
+## Home Assistant 主动事件
+
+事件 relay 默认关闭。将 Home Assistant 长期访问令牌写入 `/etc/doorfast/ha-token`，文件必须由 root 所有且权限为 `0600`；随后在 `/etc/config/doorfast-events` 设置 HTTPS authority、HA 配置项 ID 和 CA 文件。relay 固定投递到 `/api/doorfast/<entry_id>`，不会把 token 放入命令行或日志。事件失败不会阻塞 Doorfast 主服务，HA 仍使用状态轮询修复遗漏状态。
+
+VM 验收可运行：
+
+```sh
+python3 tests/run_doorfast_vm_event_relay.py /absolute/path/to/vm/ssh.sh
+```
+
+脚本使用一次性测试 CA 和 token，检查 HTTPS 投递、首次断开后的重试、组和 socket 权限，以及网络和防火墙配置保持不变。
 
 ## 透明串联部署预检查
 
