@@ -16,18 +16,19 @@ These tests establish transport behavior, not physical audio playback.
 
 import argparse
 import fcntl
+import io
 import json
 import os
 from pathlib import Path
 import re
 import select
-import shlex
 import signal
 import socket
 import stat
 import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 
@@ -380,6 +381,63 @@ def remote_run(ssh, text, data=None, timeout=15):
     return subprocess.run([ssh, text], input=data, capture_output=True, check=True, timeout=timeout)
 
 
+def remote_bundle(binary):
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w") as archive:
+        for name, contents, mode in (
+                ("doorfast-pcm-http-acceptance", binary.read_bytes(), 0o700),
+                ("runner.py", Path(__file__).read_bytes(), 0o600)):
+            entry = tarfile.TarInfo(name)
+            entry.size = len(contents)
+            entry.mode = mode
+            archive.addfile(entry, io.BytesIO(contents))
+    return output.getvalue()
+
+
+def remote_acceptance(ssh, bundle, timeout=55):
+    # One remote shell owns allocation, upload, execution and removal. Its EXIT
+    # trap therefore survives local launcher exceptions and SSH disconnects;
+    # the worker's alarm bounds cleanup if a disconnected session stays alive.
+    command_text = r'''set -eu
+root=
+cleanup() {
+    rc=$?
+    trap - EXIT HUP INT TERM
+    if [ -n "$root" ]; then
+        rm -rf "$root"
+        [ ! -e "$root" ] || rc=1
+    fi
+    exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+umask 077
+root=$(mktemp -d /tmp/df-pcm-vm.XXXXXXXX)
+case "$root" in /tmp/df-pcm-vm.*) ;; *) exit 1 ;; esac
+tar -x -f - -C "$root"
+test -x "$root/doorfast-pcm-http-acceptance"
+test -f "$root/runner.py"
+python3 "$root/runner.py" --worker "$root/doorfast-pcm-http-acceptance"
+'''
+    child = subprocess.Popen([ssh, command_text], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        stdout, stderr = child.communicate(bundle, timeout=timeout)
+    except BaseException:
+        child.terminate()
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+        raise
+    if child.returncode:
+        raise subprocess.CalledProcessError(child.returncode, child.args, stdout, stderr)
+    return stdout, stderr
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ssh", nargs="?", type=Path, help="existing VM SSH wrapper")
@@ -405,21 +463,21 @@ def main():
     binary = args.acceptance.resolve()
     check(binary.is_file(), "acceptance artifact does not exist")
     # Do not create remote artifacts until prerequisites are known to exist.
-    remote_run(ssh, "set -eu; test \"$(id -u)\" = 0; command -v python3; command -v ubus; command -v uci; command -v nft")
-    root = remote_run(ssh, "mktemp -d /tmp/df-pcm-vm.XXXXXXXX").stdout.decode().strip()
-    check(re.fullmatch(r"/tmp/df-pcm-vm\.[A-Za-z0-9]+", root), "unexpected remote temporary path")
-    q = shlex.quote
+    remote_run(ssh, "set -eu; test \"$(id -u)\" = 0; command -v python3; command -v ubus; command -v uci; command -v nft; command -v tar")
+    previous_handlers = {}
+    def interrupted(signum, _frame):
+        raise RuntimeError(f"VM acceptance launcher interrupted by signal {signum}")
+    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        previous_handlers[signum] = signal.signal(signum, interrupted)
     try:
-        remote_run(ssh, f"umask 077; cat > {q(root + '/doorfast-pcm-http-acceptance')}", binary.read_bytes())
-        remote_run(ssh, f"chmod 0700 {q(root + '/doorfast-pcm-http-acceptance')}")
-        remote_run(ssh, f"umask 077; cat > {q(root + '/runner.py')}", Path(__file__).read_bytes())
-        result = remote_run(ssh, f"python3 {q(root + '/runner.py')} --worker {q(root + '/doorfast-pcm-http-acceptance')}", timeout=55)
-        print(result.stdout.decode(), end="")
+        stdout, _ = remote_acceptance(ssh, remote_bundle(binary))
+        print(stdout.decode(), end="")
     except subprocess.CalledProcessError as error:
         sys.stderr.write(error.stdout.decode(errors="replace") + error.stderr.decode(errors="replace"))
         raise
     finally:
-        remote_run(ssh, f"rm -rf {q(root)}; test ! -e {q(root)}")
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == "__main__":

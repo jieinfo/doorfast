@@ -106,9 +106,14 @@ assert '$(1)/usr/sbin/doorfast-pcm-http\n' in installed
 assert "grep -Fxq '/usr/sbin/doorfast-pcm-http' \"$doorfast_list\"" in workflow
 assert "! grep -Fq 'doorfast-pcm-http-acceptance' \"$doorfast_list\"" in workflow
 assert 'cp \"$acceptance\" artifacts/doorfast-pcm-http-acceptance' in workflow
+assert 'test \"${#sdk_dirs[@]}\" -eq 1' in workflow
+assert 'test \"${#acceptance_files[@]}\" -eq 1' in workflow
+assert 'test \"${#doorfast_apks[@]}\" -eq 1' in workflow
+assert 'test \"${#luci_apks[@]}\" -eq 1' in workflow
 upload = workflow.split('uses: actions/upload-artifact@v4', 1)[1]
 assert 'artifacts/doorfast-pcm-http-acceptance' in upload
-assert 'doorfast-*.apk' in upload and 'luci-app-doorfast-*.apk' in upload
+assert 'artifacts/doorfast.apk' in upload and 'artifacts/luci-app-doorfast.apk' in upload
+assert '**/bin/packages/' not in upload
 # Fresh idle daemons report zero generations; only talking/active statuses
 # require a nonzero, matching TX generation. Target blobmsg parsing runs in VM.
 adapter = pathlib.Path('src/pcm_http_ubus.c').read_text()
