@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -151,6 +152,7 @@ static int handle_locked(const struct df_pcm_http_config *config,
     struct pcm_state state;
     bool present;
     uint64_t now;
+    uint64_t length = 0, sequence = 0;
     if (config->ops.read_status(&status, config->ops.context) != DF_OK ||
         status.runtime_id[16] != '\0' || !df_runtime_id_is_valid(status.runtime_id) ||
         memchr(status.call_state, '\0', sizeof(status.call_state)) == NULL)
@@ -171,7 +173,67 @@ static int handle_locked(const struct df_pcm_http_config *config,
     if (!status.audio_tx_active || status.audio_tx_generation != generation)
         return respond(response, 409, "audio_tx_inactive");
     now = config->ops.now_ms(config->ops.context);
-    if (request->operation == DF_PCM_HTTP_SESSION_OPEN) {
+    if (request->operation == DF_PCM_HTTP_SUBMIT) {
+        unsigned frames;
+        uint8_t body[DF_PCM_HTTP_FRAME_BYTES * DF_PCM_HTTP_MAX_FRAMES + 1U];
+        int16_t pcm[160];
+        if (request->content_type == NULL || strcmp(request->content_type, "application/octet-stream") != 0 ||
+            !parse_decimal(request->content_length, &length) ||
+            length < DF_PCM_HTTP_FRAME_BYTES ||
+            length > DF_PCM_HTTP_FRAME_BYTES * DF_PCM_HTTP_MAX_FRAMES ||
+            (length % DF_PCM_HTTP_FRAME_BYTES) != 0U ||
+            !parse_decimal(request->sequence, &sequence) ||
+            sequence > UINT64_MAX - length / DF_PCM_HTTP_FRAME_BYTES)
+            return respond(response, 400, "invalid_request");
+        frames = (unsigned)(length / DF_PCM_HTTP_FRAME_BYTES);
+        size_t used = 0;
+        while (used < length) {
+            ssize_t count = read(request->body_fd, body + used, length - used);
+            if (count > 0) { used += (size_t)count; continue; }
+            if (count < 0 && errno == EINTR) continue;
+            return respond(response, 400, "invalid_body");
+        }
+        for (;;) {
+            ssize_t count = read(request->body_fd, body + length, 1U);
+            if (count < 0 && errno == EINTR) continue;
+            if (count > 0) return respond(response, 400, "invalid_body");
+            if (count < 0) return respond(response, 400, "invalid_body");
+            break;
+        }
+        if (!matches) return respond(response, 409, "session_mismatch");
+        if (state.audio_session[0] == '\0' || now >= state.lease_deadline_ms)
+            return respond(response, 409, "session_expired");
+        if (strcmp(request->session_token, state.audio_session) != 0)
+            return respond(response, 409, "session_mismatch");
+        if (sequence != state.next_sequence)
+            return respond(response, 409, sequence < state.next_sequence ? "sequence_duplicate" : "sequence_gap");
+        uint64_t first_deadline = now;
+        response->next_sequence = sequence;
+        for (unsigned frame = 0; frame < frames; frame++) {
+            if (frame != 0U && config->ops.sleep_until_ms != NULL &&
+                config->ops.sleep_until_ms(first_deadline + (uint64_t)frame * 20U, config->ops.context) != DF_OK)
+                return respond(response, 503, "pacing_unavailable");
+            for (size_t sample = 0; sample < 160U; sample++) {
+                size_t offset = (size_t)frame * DF_PCM_HTTP_FRAME_BYTES + sample * 2U;
+                uint16_t raw = (uint16_t)body[offset] | ((uint16_t)body[offset + 1U] << 8U);
+                pcm[sample] = raw <= INT16_MAX ? (int16_t)raw :
+                    (int16_t)(-(int32_t)(UINT16_MAX - raw + 1U));
+            }
+            if (config->ops.send_pcm == NULL || config->ops.send_pcm(config->socket_path,
+                    generation, pcm, 160U, config->ops.context) != DF_OK)
+                return respond(response, 503, "send_unavailable");
+            state.next_sequence++;
+            response->accepted_frames++;
+            response->next_sequence = state.next_sequence;
+            now = config->ops.now_ms(config->ops.context);
+            if (now > UINT64_MAX - DF_PCM_HTTP_LEASE_MS)
+                return respond(response, 503, "clock_unavailable");
+            state.lease_deadline_ms = now + DF_PCM_HTTP_LEASE_MS;
+            if (!write_state(fd, &state)) return respond(response, 503, "state_unavailable");
+        }
+        response->lease_ms = DF_PCM_HTTP_LEASE_MS;
+        return respond(response, 200, "");
+    } else if (request->operation == DF_PCM_HTTP_SESSION_OPEN) {
         uint8_t bytes[16];
         static const char hex[] = "0123456789abcdef";
         if (matches && state.audio_session[0] != '\0' && now < state.lease_deadline_ms)
@@ -225,14 +287,15 @@ int df_pcm_http_handle(const struct df_pcm_http_config *config,
     }
     if (request->method == NULL || strcmp(request->method, "POST") != 0)
         return respond(response, 405, "method_not_allowed");
-    if (request->operation == DF_PCM_HTTP_SUBMIT)
-        return respond(response, 501, "not_implemented");
     if ((request->operation != DF_PCM_HTTP_SESSION_OPEN &&
+         request->operation != DF_PCM_HTTP_SUBMIT &&
          request->operation != DF_PCM_HTTP_SESSION_END) ||
         !df_runtime_id_is_valid(request->runtime_id) ||
         !parse_decimal(request->generation, &generation) || generation == 0U ||
-        !parse_decimal(request->content_length, &length) || length != 0U ||
-        (request->operation == DF_PCM_HTTP_SESSION_END && !token_valid(request->session_token)))
+        (request->operation != DF_PCM_HTTP_SUBMIT &&
+         (!parse_decimal(request->content_length, &length) || length != 0U)) ||
+        ((request->operation == DF_PCM_HTTP_SESSION_END || request->operation == DF_PCM_HTTP_SUBMIT) &&
+         !token_valid(request->session_token)))
         return respond(response, 400, "invalid_request");
     fd = open_state(config->state_path);
     if (fd < 0) return respond(response, 503, "state_unavailable");
