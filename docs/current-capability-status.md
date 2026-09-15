@@ -1,7 +1,8 @@
 # Doorfast 当前能力与验证状态
 
 更新日期：2026-09-15
-代码基线：`origin/main` 的 `5cd91ef`，软件包 `0.1.0-r39`
+代码基线：`origin/main` 的 `39d9c5d`，软件包 `0.1.0-r39`
+HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并）
 
 本文按当前已合并代码记录能力，不以历史路线图或单次构建结果代替实现核对。
 
@@ -31,18 +32,18 @@
 | 视频接收 | 接收 UDP/8303，校验媒体端点，重组不超过 1 MiB 的分片，校验 JPEG 并按会话缓存 | 静态材料、解析和重组测试 | 真实画面、丢片表现、延迟和长期资源使用 |
 | 视频访问 | HTTP 提供 generation 绑定的 `latest.jpg`，支持 ETag、过期代次拒绝和发布竞态保护 | HTTP 和文件发布测试 | 连续视频流和浏览器端音视频同步 |
 | 下行音频 | 接收 UDP/8302，统计丢包、重复和迟到帧，输出 generation 绑定的增量 WAV 块并保留最近四块 | 静态材料、解析、缓冲和 HTTP 测试 | 真机音频格式、实际播放质量和延迟 |
-| 上行音频核心 | 通话中接收本机 PCM 数据报，以 8 kHz、单声道、160 采样编码为 G.711 A-law 并发送 UDP/8302 | 编码、节奏、代次、socket、打包工具、HTTP 批次和发送测试 | 浏览器麦克风采集界面、回声消除和真机收听 |
-| HTTP PCM 生产者 | 三个 CGI 路由用 runtime、generation、单生产者 token、连续 sequence 和两秒租约接收每批 1–5 个 PCM 帧；失败保留已接收前缀供客户端恢复 | C/CLI/CGI 测试、Actions r39 交叉编译、ImmortalWrt VM 安装拒绝与隔离接收验收 | HA/浏览器端实际采集与重采样；实体扬声器可懂度、延迟、回声及长通话稳定性 |
+| 上行音频核心 | 通话中接收本机 PCM 数据报，以 8 kHz、单声道、160 采样编码为 G.711 A-law 并发送 UDP/8302 | 编码、节奏、代次、socket、打包工具、HTTP 批次和发送测试；HA 按住说话卡片已实现浏览器采集与重采样；隔离 GVS 对端 harness 已覆盖来电、接听确认、03/51 保活和音频帧采集 | 回声消除效果和真机收听；VM 环回只证明 Doorfast 生产发送链路，不证明实体扬声器可懂度 |
+| HTTP PCM 生产者 | 三个 CGI 路由用 runtime、generation、单生产者 token、连续 sequence 和两秒租约接收每批 1–5 个 PCM 帧；失败保留已接收前缀供客户端恢复 | C/CLI/CGI 测试、Actions r39 交叉编译、ImmortalWrt VM 安装拒绝与隔离接收验收；HA/VM 验收 runner 的 42 项真实 HA fixture 检查 | HA/浏览器端在实体通话中的实际采集与重采样；实体扬声器可懂度、延迟、回声及长通话稳定性 |
 | 本地控制接口 | ubus 和 HTTP 提供 `status`、`answer`、`hangup`、`unlock`、`call_elevator` | ubus 和 HTTP 测试 | HTTP CGI 自身没有独立令牌校验，部署端必须限制访问 |
 | 本地事件流 | `/var/run/doorfast/events.sock` 发布来电、通话建立、挂断、超时和抢占 JSON Lines；事件绑定 generation，每客户端队列上限 64，慢客户端断开 | C 测试、Actions、VM socket 属主和权限检查 | 实体门口机触发的连续事件序列 |
-| HA 主动事件 | 独立 relay 从本地 socket 读取事件，经 CA 和主机名校验的 HTTPS、Bearer token 投递到 HA；HA 刷新权威状态后去重和派发，五秒轮询兜底 | HA 35 项测试、Actions 交叉编译、VM TLS 投递和断线重试 | 真实 HA 实例、长期断网和高频来电运行 |
+| HA 主动事件 | 独立 relay 从本地 socket 读取事件，经 CA 和主机名校验的 HTTPS、Bearer token 投递到 HA；HA 刷新权威状态后去重和派发，五秒轮询兜底 | HA 35 项测试、Actions 交叉编译、VM TLS 投递和断线重试；真实 HA 2024.11.0 容器中 42 项 fixture 验收 | 实体门口机触发的连续事件、长期断网和高频来电运行 |
 | 管理与部署 | procd、UCI、只读 LuCI 状态页、部署预检查、证据记录器、站点清单、事件 relay 和 OpenWrt 用户组生命周期 | CLI、配置、记录器、LuCI、Actions 和 ImmortalWrt VM 测试 | LuCI relay 配置表单、自动升级和完整发布流程 |
 
 ## 当前对外使用边界
 
 主程序通过本地 Unix socket 主动发布呼叫事件。可选 `doorfast-event-relay` 使用 HTTPS 将事件送到 `doorfastforha` 的认证入口；HA 收到事件后仍先读取 `/api/v1/status`，因此事件只负责降低发现延迟，状态接口仍是权威来源。MQTT 和手机通知不在当前实现范围。
 
-视频接口提供最新 JPEG 画面，不是 HLS、RTSP 或 WebRTC 流。下行音频接口能提供增量 WAV 块；`doorfast-pcm-submit` 提供本机单帧入口，r39 的 HTTP PCM 接口提供带租约、序号和失败恢复的网络生产者入口。浏览器麦克风采集、8 kHz 重采样和 HA 端对该接口的消费仍未实现。
+视频接口提供最新 JPEG 画面，不是 HLS、RTSP 或 WebRTC 流。下行音频接口能提供增量 WAV 块；`doorfast-pcm-submit` 提供本机单帧入口，r39 的 HTTP PCM 接口提供带租约、序号和失败恢复的网络生产者入口。`doorfastforha` 现已提供经过 HA 身份验证 WebSocket 绑定的按住说话卡片、浏览器麦克风采集和 8 kHz 重采样；真实 HA fixture 已验证其生命周期和 PCM 契约，但尚未在实体 MT8157 通话中验证可懂度、延迟和回声。
 
 HTTP PCM 的 token 只协调一个生产者，不能代替认证或加密。部署时必须把 CGI 限制在可信 HA/路由网络，或放在经过认证的 HTTPS 后面。HTTP 成功只证明本地 Unix ingress 已接收帧，不代表门口机已经收到或播放音频。
 
@@ -50,14 +51,19 @@ LuCI 当前只显示状态。接口选择、逻辑身份、主机模式、开锁
 
 ## 已知实现问题
 
-1. `call_elev_direction` 能被配置加载器解析和校验，但自动召梯运行路径固定传入 `up`。当前用户要求的来电自动向上不受影响，配置为 `down` 不会生效。
-2. ubus 状态中的 `call.handshake_mode` 固定显示 `simulated`，即使主机模式正在通过 UDP 发送握手；实际传输与显示不一致。
-3. relay 当前仅接受 HTTPS authority 配置，目标路径固定为 `/api/doorfast/<entry_id>`；token 必须位于 root 所有的 0600 文件中。
-4. HTTP CGI 没有独立认证逻辑；包括 PCM 生产者在内的访问控制属于部署前置条件。PCM session token 不是通用 HTTP 身份凭据。
+1. 自动召梯运行路径固定传入 `up`；旧配置中的 `call_elev_direction` 会被兼容性忽略。当前用户要求的来电自动向上不受影响，向下召梯仍需另行设计和验证。
+2. relay 当前仅接受 HTTPS authority 配置，目标路径固定为 `/api/doorfast/<entry_id>`；token 必须位于 root 所有的 0600 文件中。
+3. HTTP CGI 没有独立认证逻辑；包括 PCM 生产者在内的访问控制属于部署前置条件。PCM session token 不是通用 HTTP 身份凭据。
+
+## 本轮 Slice 4 验收证据
+
+`doorfastforha` 的 `doorfast_ha_e2e` 是测试工具，不会进入 Doorfast 或 HA 的运行时安装包。它在同一 HA 容器内运行，避免 Docker/Colima 的主机 loopback 路由假设；2026-09-15 使用 HA `2024.11.0` 和 `doorfast` `a5fcca3` 完成 42 项检查。检查包括 REST config-flow 建项、四个静态前端资源、WebSocket start/submit/stop、断线与 generation 清理、双 entry 隔离、挂断清理以及 disable/re-enable unload/reload。JSONL 证据只保留布尔结果和脱敏摘要，不保存 token、PCM 或原始采集标识。该证据验证 HA 集成和网络契约，不等同于真实门口机音频验收。
+
+ImmortalWrt `25.12.1` VM 的主机模式测试使用隔离 GVS 对端 harness 注入合成来电，并观察 Doorfast 生产 UDP 控制和媒体帧。对端只绑定 loopback，发送 ACK 后回复 `03/51` 保活；证据可用于确认 Doorfast 的来电→接听确认→保活→PCM/UDP 发包时序，脱敏记录见 [`docs/evidence/2026-09-15-vm-gvs-talking.json`](evidence/2026-09-15-vm-gvs-talking.json)。本次 VM 为等待守护进程完成 talking 状态使用了 5 秒本地 settle 值，这不是厂商时序常量。它不证明 MT8157 实体设备接受回执、门锁/电梯动作、视频画面或扬声器可懂度。
 
 ## 当前验证结果
 
-当前 C 测试、主程序编译、CLI、HTTP、PCM 隔离验收、软件包清单、记录器、站点清单和 LuCI JavaScript 测试通过；`doorfastforha` 的 35 项 Python 测试通过。GitHub Actions [run 34943868811](https://github.com/jieinfo/doorfast/actions/runs/34943868811) 构建的是 PR head `958d93a5`；其相同代码树随后以合并提交 `5cd91ef` 进入主分支。该运行完成了 x86_64 ImmortalWrt 25.12.1 的 r39 交叉编译。下载产物的 SHA-256 为：
+当前 C 测试、主程序编译、CLI、HTTP、PCM 隔离验收、软件包清单、记录器、站点清单和 LuCI JavaScript 测试通过；`doorfastforha` 主线已包含 HA/VM 验收 runner 及其 5 项 runner 单元测试。GitHub Actions [run 34943868811](https://github.com/jieinfo/doorfast/actions/runs/34943868811) 构建的是 PR head `958d93a5`；其相同代码树随后以合并提交 `5cd91ef` 进入主分支。该运行完成了 x86_64 ImmortalWrt 25.12.1 的 r39 交叉编译。下载产物的 SHA-256 为：
 
 | 产物 | SHA-256 |
 |---|---|
@@ -75,7 +81,7 @@ VM 验收脚本依赖 Python 3；本次只在隔离 VM 中为运行验收安装 
 
 ## 下一步顺序
 
-1. 在真实 HA 实例验证认证入口、事件刷新、重载和长期断线恢复。
-2. 实现浏览器或 HA 端的麦克风采集与 8 kHz 重采样，按已完成的 HTTP PCM 契约处理 generation、sequence、单请求在途和断线恢复。
-3. 在 MT8157 离线的受控现场依次验收独立上线、来电回执、挂断、开锁、召梯、视频和双向音频。
-4. 修正自动召梯方向和握手状态显示，并补齐 LuCI 配置与操作入口。
+1. 补齐 LuCI 的主机模式、接口、逻辑身份、门禁材料与 relay 配置入口，并为接听、挂断、开锁和手动召梯提供受 ACL 约束的操作界面。
+2. 在 MT8157 离线的受控现场依次验收独立上线、来电回执、挂断、开锁、召梯、视频和双向音频。
+3. 使用现场 PCAP 回填仍缺失的 `08/82`、`08/83`、视频丢片和真实双向音频证据，不把厂商静态材料单独作为结论。
+4. 完成 HA 长期断网、高频来电、浏览器回声与实体音频质量验证，再整理可发布的软件包升级流程。

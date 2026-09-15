@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "date": "2026-09-15",
+  "source_refs": {
+    "doorfast": "a5fcca3",
+    "package": "0.1.0-r39",
+    "gvs_harness": "31163c0cbbbaa2c948fd7ffe6f55db0996dcf33b"
+  },
+  "environment": {
+    "image": "ImmortalWrt 25.12.1 x86_64",
+    "kernel": "Linux 6.12.94",
+    "interface": "lo",
+    "control": "127.0.0.1:8300",
+    "audio": "127.0.0.1:8302",
+    "pcm_socket": "/var/run/doorfast-audio.sock",
+    "package_sha256": "194e7f966b096a62581f11e36637a9d028f3e4883023c5868c42f48bc6241e4b"
+  },
+  "scenario": {
+    "type": "synthetic_gvs_peer",
+    "incoming_call_sent": true,
+    "incoming_call_echo_ignored": true,
+    "answer_ack_sent": true,
+    "answer_ack": "03/83",
+    "session_established": true,
+    "handshake_reply_sent": 2,
+    "audio_frames_captured": 3,
+    "audio_sequences": [33434, 33435, 33436],
+    "audio_payload_length": 160,
+    "audio_fields": {
+      "field_d": 1,
+      "field_e": 1,
+      "field_f": 256
+    },
+    "audio_payload_sha256": "b8c5f61ec21c39c91dc7de26d0e134cb2f2aaac29a0c0049a5e948258cd58eb6"
+  },
+  "daemon_snapshot": {
+    "mode": "active_host",
+    "call_session": "talking",
+    "generation": 1,
+    "handshake_mode": "udp",
+    "handshake_active": true,
+    "audio_tx_active": true,
+    "audio_tx_packets_sent": 3,
+    "audio_tx_packets_failed": 0
+  },
+  "limits": [
+    "The peer and all addresses were loopback-only synthetic fixtures.",
+    "The test proves Doorfast control, keepalive, PCM ingress, G.711 A-law encoding, and UDP media emission in the VM.",
+    "It does not prove MT8157 acceptance, door or elevator actuation, video interoperability, speaker intelligibility, echo behavior, or long-call stability."
+  ]
+}
