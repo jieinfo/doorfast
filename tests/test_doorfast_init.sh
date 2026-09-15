@@ -9,6 +9,8 @@ doorfast_enabled=0
 doorfast_call_elev=1
 doorfast_active_host=0
 doorfast_gvs_interface=door0
+doorfast_passive_interface=door0
+doorfast_host_interface=host0
 doorfast_gvs_identity=IS:2-1-101-1
 doorfast_indoor_ipaddr=
 doorfast_indoor_netmask=255.0.0.0
@@ -29,6 +31,8 @@ config_get() {
 	if [ "$current_config" = doorfast ]; then
 		case "$3" in
 			gvs_interface) value=$doorfast_gvs_interface ;;
+			passive_interface) value=$doorfast_passive_interface ;;
+			host_interface) value=$doorfast_host_interface ;;
 			gvs_local_address) value=$doorfast_gvs_identity ;;
 			indoor_ipaddr) value=$doorfast_indoor_ipaddr ;;
 			indoor_netmask) value=$doorfast_indoor_netmask ;;
@@ -117,13 +121,13 @@ doorfast_enabled=1
 doorfast_active_host=1
 doorfast_indoor_ipaddr=
 start_service
-grep -Fxq 'ip address add 10.5.65.0/8 dev door0' "$trace"
-test "$(cat "$HOST_ADDRESS_STATE")" = 'door0 10.5.65.0/8'
+grep -Fxq 'ip address add 10.5.65.0/8 dev host0' "$trace"
+test "$(cat "$HOST_ADDRESS_STATE")" = 'host0 10.5.65.0/8'
 stop_service
-grep -Fxq 'ip address del 10.5.65.0/8 dev door0' "$trace"
+grep -Fxq 'ip address del 10.5.65.0/8 dev host0' "$trace"
 
 : >"$trace"
 doorfast_indoor_ipaddr=10.99.1.7
 doorfast_indoor_netmask=255.255.255.0
 start_service
-grep -Fxq 'ip address add 10.99.1.7/24 dev door0' "$trace"
+grep -Fxq 'ip address add 10.99.1.7/24 dev host0' "$trace"

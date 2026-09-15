@@ -23,9 +23,11 @@ enum df_runtime_option {
     DF_SEEN_CALL_ELEV = 1U << 10,
     DF_SEEN_SYNC_STATE_PATH = 1U << 11,
     DF_SEEN_ACTIVE_HOST = 1U << 12,
-    DF_SEEN_ACCESS_MATERIAL = 1U << 13
-    ,DF_SEEN_INDOOR_IPADDR = 1U << 14
-    ,DF_SEEN_INDOOR_NETMASK = 1U << 15
+    DF_SEEN_ACCESS_MATERIAL = 1U << 13,
+    DF_SEEN_INDOOR_IPADDR = 1U << 14,
+    DF_SEEN_INDOOR_NETMASK = 1U << 15,
+    DF_SEEN_PASSIVE_INTERFACE = 1U << 16,
+    DF_SEEN_HOST_INTERFACE = 1U << 17
 };
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
@@ -189,6 +191,18 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_copy_option(runtime->gvs_interface, sizeof(runtime->gvs_interface), value);
     }
+    if (strcmp(name, "passive_interface") == 0) {
+        option = DF_SEEN_PASSIVE_INTERFACE;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->passive_interface,
+                              sizeof(runtime->passive_interface), value);
+    }
+    if (strcmp(name, "host_interface") == 0) {
+        option = DF_SEEN_HOST_INTERFACE;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->host_interface,
+                              sizeof(runtime->host_interface), value);
+    }
     if (strcmp(name, "gvs_local_address") == 0) {
         option = DF_SEEN_GVS_ADDRESS;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
@@ -310,6 +324,18 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
     }
     if (!found_main) {
         return DF_ERR_INVALID;
+    }
+    if (runtime->config.active_host) {
+        if (runtime->host_interface[0] != '\0') {
+            if (df_copy_option(runtime->gvs_interface,
+                               sizeof(runtime->gvs_interface),
+                               runtime->host_interface) != DF_OK)
+                return DF_ERR_INVALID;
+        }
+    } else if (runtime->passive_interface[0] != '\0') {
+        if (df_copy_option(runtime->gvs_interface, sizeof(runtime->gvs_interface),
+                           runtime->passive_interface) != DF_OK)
+            return DF_ERR_INVALID;
     }
     if (runtime->config.active_host && runtime->indoor_ipaddr[0] == '\0') {
         uint8_t identity[6];
