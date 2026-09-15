@@ -29,7 +29,7 @@ test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/dep
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
-grep -q 'PKG_RELEASE:=9' package/luci-app-doorfast/Makefile
+grep -q 'PKG_RELEASE:=10' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
 grep -q 'deployment configuration pages' package/luci-app-doorfast/Makefile
 grep -Fq 'deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js' package/luci-app-doorfast/Makefile
@@ -82,6 +82,8 @@ grep -F "config gvs 'main'" package/doorfast/files/doorfast.config
 grep -F "option enabled '0'" package/doorfast/files/doorfast.config
 grep -F "option gvs_interface ''" package/doorfast/files/doorfast.config
 grep -F "option gvs_local_address ''" package/doorfast/files/doorfast.config
+grep -F "option indoor_ipaddr ''" package/doorfast/files/doorfast.config
+grep -F "option indoor_netmask ''" package/doorfast/files/doorfast.config
 grep -F "option uplink_interface ''" package/doorfast/files/doorfast.config
 grep -F "option sync_state_path '/etc/config/doorfast-sync'" package/doorfast/files/doorfast.config
 grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
@@ -100,7 +102,10 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=39' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=40' package/doorfast/Makefile
+grep -q '+ip-full' package/doorfast/Makefile
+grep -Fq 'HOST_ADDRESS_STATE=' package/doorfast/files/doorfast.init
+grep -Fq 'configure_host_address || return 1' package/doorfast/files/doorfast.init
 grep -q 'doorfast-pcm-http.*usr/sbin/doorfast-pcm-http' package/doorfast/Makefile
 python3 - <<'ACCEPTANCE'
 import pathlib

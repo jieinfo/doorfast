@@ -396,7 +396,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_IO;
     }
     if (!runtime->config.passive_only || runtime->config.active_host) {
-        if (df_gvs_udp_sender_open(&udp_sender, "0.0.0.0", 8300,
+        if (df_gvs_udp_sender_open(&udp_sender, runtime->config.indoor_ipaddr, 8300,
                 df_gvs_vendor_header_fields, NULL) != DF_OK) {
             return DF_ERR_IO;
         }

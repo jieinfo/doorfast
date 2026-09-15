@@ -44,16 +44,23 @@ static int df_gvs_udp_resolve_destination(
 
 int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
     uint16_t port, df_gvs_header_provider_fn provider, void *context) {
+    struct sockaddr_in local;
+
     if (sender == NULL || host == NULL || provider == NULL || port == 0U)
         return DF_ERR_INVALID;
     memset(sender, 0, sizeof(*sender));
     sender->fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sender->fd < 0) return DF_ERR_IO;
-    sender->peer.sin_family = AF_INET;
-    sender->peer.sin_port = htons(port);
-    if (inet_pton(AF_INET, host, &sender->peer.sin_addr) != 1) {
+    memset(&local, 0, sizeof(local));
+    local.sin_family = AF_INET;
+    local.sin_port = htons(0);
+    if (inet_pton(AF_INET, host, &local.sin_addr) != 1 ||
+        bind(sender->fd, (const struct sockaddr *)&local, sizeof(local)) != 0) {
         close(sender->fd); sender->fd = -1; return DF_ERR_INVALID;
     }
+    sender->peer.sin_family = AF_INET;
+    sender->peer.sin_port = htons(port);
+    sender->peer.sin_addr.s_addr = htonl(INADDR_ANY);
     sender->provide_fields = provider;
     sender->fields_context = context;
     return DF_OK;
