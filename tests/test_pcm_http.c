@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -27,6 +28,17 @@ struct pcm_fake {
     unsigned random_seed;
     int status_result;
     int random_result;
+    unsigned sends;
+    unsigned sleeps;
+    unsigned fail_send;
+    unsigned fail_sleep;
+    uint64_t send_duration;
+    uint64_t send_times[10];
+    uint64_t deadlines[10];
+    int16_t samples[10][160];
+    const char *state_path;
+    uint64_t persisted_sequence[10];
+    uint64_t persisted_lease[10];
 };
 
 struct pcm_fixture {
@@ -55,6 +67,42 @@ static uint64_t pcm_now(void *context) {
     return ((struct pcm_fake *)context)->now;
 }
 
+static int pcm_sleep(uint64_t deadline, void *context) {
+    struct pcm_fake *fake = context;
+    TEST_ASSERT_INT_EQ(1, fake->sleeps < 10);
+    if (fake->sleeps >= 10) return DF_ERR_IO;
+    fake->deadlines[fake->sleeps++] = deadline;
+    if (fake->sleeps == fake->fail_sleep) return DF_ERR_IO;
+    if (fake->now < deadline) fake->now = deadline;
+    return DF_OK;
+}
+
+static int pcm_send(const char *path, uint64_t generation, const int16_t *pcm,
+                    size_t count, void *context) {
+    struct pcm_fake *fake = context;
+    TEST_ASSERT_INT_EQ(0, strcmp("/tmp/test-pcm.sock", path));
+    TEST_ASSERT_INT_EQ(1, generation == 42);
+    TEST_ASSERT_INT_EQ(160, (int)count);
+    TEST_ASSERT_INT_EQ(1, fake->sends < 10);
+    if (fake->sends >= 10 || count != 160) return DF_ERR_IO;
+    unsigned index = fake->sends++;
+    fake->send_times[index] = fake->now;
+    memcpy(fake->samples[index], pcm, sizeof(fake->samples[index]));
+    /* Observe the actual persisted prefix at each send boundary. */
+    FILE *state = fopen(fake->state_path, "r");
+    TEST_ASSERT_INT_EQ(1, state != NULL);
+    if (state != NULL) {
+        char line[128];
+        while (fgets(line, sizeof(line), state) != NULL) {
+            (void)sscanf(line, "next_sequence=%" SCNu64, &fake->persisted_sequence[index]);
+            (void)sscanf(line, "lease_deadline_ms=%" SCNu64, &fake->persisted_lease[index]);
+        }
+        fclose(state);
+    }
+    fake->now += fake->send_duration;
+    return fake->sends == fake->fail_send ? DF_ERR_IO : DF_OK;
+}
+
 static void pcm_fixture_init(struct pcm_fixture *fixture) {
     memset(fixture, 0, sizeof(*fixture));
     strcpy(fixture->directory, "/tmp/doorfast-http-XXXXXX");
@@ -67,9 +115,13 @@ static void pcm_fixture_init(struct pcm_fixture *fixture) {
     fixture->fake.status.audio_tx_generation = 42;
     fixture->fake.now = 1000;
     fixture->config.state_path = fixture->path;
+    fixture->fake.state_path = fixture->path;
+    fixture->config.socket_path = "/tmp/test-pcm.sock";
     fixture->config.ops.read_status = pcm_read_status;
     fixture->config.ops.fill_random = pcm_fill_random;
     fixture->config.ops.now_ms = pcm_now;
+    fixture->config.ops.sleep_until_ms = pcm_sleep;
+    fixture->config.ops.send_pcm = pcm_send;
     fixture->config.ops.context = &fixture->fake;
     fixture->request.operation = DF_PCM_HTTP_SESSION_OPEN;
     fixture->request.method = "POST";
@@ -80,6 +132,7 @@ static void pcm_fixture_init(struct pcm_fixture *fixture) {
 }
 
 static void pcm_fixture_clear(struct pcm_fixture *fixture) {
+    if (fixture->request.body_fd >= 0) close(fixture->request.body_fd);
     (void)unlink(fixture->path);
     (void)rmdir(fixture->path);
     TEST_ASSERT_INT_EQ(0, rmdir(fixture->directory));
@@ -114,6 +167,220 @@ static void pcm_assert_record(struct pcm_fixture *fixture, const char *expected)
     TEST_ASSERT_INT_EQ(0, close(fd));
 }
 
+static void pcm_submit_init(struct pcm_fixture *fixture) {
+    pcm_fixture_init(fixture);
+    pcm_write_record(fixture, RECORD);
+    fixture->request.operation = DF_PCM_HTTP_SUBMIT;
+    fixture->request.content_type = "application/octet-stream";
+    fixture->request.content_length = "320";
+    fixture->request.sequence = "100";
+    fixture->request.session_token = TOKEN;
+}
+
+static void pcm_body(struct pcm_fixture *fixture, const uint8_t *data, size_t size) {
+    int fds[2];
+    if (fixture->request.body_fd >= 0) close(fixture->request.body_fd);
+    TEST_ASSERT_INT_EQ(0, pipe(fds));
+    if (size != 0) TEST_ASSERT_INT_EQ((int)size, (int)write(fds[1], data, size));
+    close(fds[1]);
+    fixture->request.body_fd = fds[0];
+}
+
+static void pcm_assert_rejected(struct pcm_fixture *fixture, unsigned http_status) {
+    struct df_pcm_http_response response = pcm_handle(fixture, http_status);
+    TEST_ASSERT_INT_EQ(0, (int)response.accepted_frames);
+    TEST_ASSERT_INT_EQ(0, (int)fixture->fake.sends);
+    TEST_ASSERT_INT_EQ(0, (int)fixture->fake.sleeps);
+    pcm_assert_record(fixture, RECORD);
+}
+
+static void pcm_test_submit_validation(void) {
+    struct pcm_fixture fixture;
+    static const char *const bad_types[] = {NULL, "", "audio/pcm", "text/plain", "Application/octet-stream", "application/octet-stream; charset=utf-8"};
+    static const char *const bad_lengths[] = {NULL, "", "0", "1", "319", "321", "639", "641", "959", "961", "1279", "1281", "1599", "1601", "1920", "-320", "+320", "320 ", "320x", "18446744073709551616"};
+    static const char *const bad_sequences[] = {NULL, "", "-1", "+100", " 100", "100 ", "100x", "18446744073709551616", "000000000000000000100"};
+    static const char *const bad_tokens[] = {NULL, "", "bad", "000102030405060708090a0b0c0d0e0F"};
+    pcm_submit_init(&fixture);
+    for (size_t i = 0; i < sizeof(bad_types) / sizeof(*bad_types); i++) {
+        fixture.request.content_type = bad_types[i];
+        pcm_assert_rejected(&fixture, 400);
+    }
+    fixture.request.content_type = "application/octet-stream";
+    for (size_t i = 0; i < sizeof(bad_lengths) / sizeof(*bad_lengths); i++) {
+        fixture.request.content_length = bad_lengths[i];
+        pcm_assert_rejected(&fixture, 400);
+    }
+    fixture.request.content_length = "320";
+    fixture.request.generation = "0";
+    pcm_assert_rejected(&fixture, 400);
+    fixture.request.generation = "42";
+    for (size_t i = 0; i < sizeof(bad_sequences) / sizeof(*bad_sequences); i++) {
+        fixture.request.sequence = bad_sequences[i];
+        pcm_assert_rejected(&fixture, 400);
+    }
+    fixture.request.sequence = "18446744073709551615";
+    pcm_assert_rejected(&fixture, 400);
+    fixture.request.sequence = "18446744073709551611";
+    fixture.request.content_length = "1600";
+    pcm_assert_rejected(&fixture, 400);
+    fixture.request.sequence = "100";
+    fixture.request.content_length = "320";
+    for (size_t i = 0; i < sizeof(bad_tokens) / sizeof(*bad_tokens); i++) {
+        fixture.request.session_token = bad_tokens[i];
+        pcm_assert_rejected(&fixture, 400);
+    }
+    pcm_fixture_clear(&fixture);
+}
+
+static void pcm_test_body_admission(void) {
+    struct pcm_fixture fixture;
+    uint8_t body[1601] = {0};
+    static const size_t sizes[] = {0, 319, 321, 1601, 1599};
+    pcm_submit_init(&fixture);
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(*sizes); i++) {
+        fixture.request.content_length = i < 3 ? "320" : "1600";
+        pcm_body(&fixture, body, sizes[i]);
+        pcm_assert_rejected(&fixture, 400);
+    }
+    close(fixture.request.body_fd);
+    fixture.request.body_fd = -1;
+    pcm_assert_rejected(&fixture, 400);
+    pcm_fixture_clear(&fixture);
+}
+
+static void pcm_test_submit_admission(void) {
+    struct pcm_fixture fixture;
+    uint8_t body[320] = {0};
+    struct df_pcm_http_response response;
+    pcm_submit_init(&fixture);
+    for (unsigned scenario = 0; scenario < 10; scenario++) {
+        fixture.request.session_token = TOKEN;
+        fixture.fake.now = 1000;
+        strcpy(fixture.fake.status.runtime_id, RUNTIME);
+        fixture.fake.status.generation = 42;
+        strcpy(fixture.fake.status.call_state, "talking");
+        fixture.fake.status.audio_tx_active = true;
+        fixture.fake.status.audio_tx_generation = 42;
+        fixture.request.sequence = "100";
+        switch (scenario) {
+        case 0: fixture.request.session_token = "ffffffffffffffffffffffffffffffff"; break;
+        case 1: fixture.fake.now = 3000; break;
+        case 2: strcpy(fixture.fake.status.runtime_id, NEW_RUNTIME); break;
+        case 3: fixture.fake.status.generation = 43; break;
+        case 4: strcpy(fixture.fake.status.call_state, "ringing"); break;
+        case 5: fixture.fake.status.audio_tx_active = false; break;
+        case 6: fixture.fake.status.audio_tx_generation = 41; break;
+        case 7: fixture.request.sequence = "99"; break;
+        case 8: fixture.request.sequence = "101"; break;
+        case 9: fixture.request.runtime_id = NEW_RUNTIME; strcpy(fixture.fake.status.runtime_id, NEW_RUNTIME); break;
+        }
+        pcm_body(&fixture, body, sizeof(body));
+        response = pcm_handle(&fixture, 409);
+        TEST_ASSERT_INT_EQ(0, (int)response.accepted_frames);
+        TEST_ASSERT_INT_EQ(0, (int)fixture.fake.sends);
+        if (scenario == 7 || scenario == 8)
+            TEST_ASSERT_INT_EQ(100, (int)response.next_sequence);
+        pcm_assert_record(&fixture, RECORD);
+    }
+    pcm_fixture_clear(&fixture);
+}
+
+/* All samples vary by frame; boundary values also exercise signed LE decoding. */
+static void pcm_pattern(uint8_t body[1600], int16_t expected[5][160]) {
+    for (size_t frame = 0; frame < 5; frame++) {
+        for (size_t sample = 0; sample < 160; sample++) {
+            int16_t value = (int16_t)(-12345 + (int)frame * 1000 + (int)sample);
+            if (sample == 0) value = INT16_MIN;
+            if (sample == 1) value = INT16_MAX;
+            if (sample == 2) value = -1;
+            if (sample == 3) value = 0;
+            if (sample == 4) value = 1;
+            expected[frame][sample] = value;
+            uint16_t raw = (uint16_t)value;
+            size_t offset = frame * 320 + sample * 2;
+            body[offset] = (uint8_t)raw;
+            body[offset + 1] = (uint8_t)(raw >> 8);
+        }
+    }
+}
+
+static void pcm_test_pacing_and_recovery(void) {
+    uint8_t body[1600];
+    int16_t expected[5][160];
+    static const char *const lengths[] = {"320", "640", "960", "1280", "1600"};
+    pcm_pattern(body, expected);
+    for (unsigned frames = 1; frames <= 5; frames++) {
+        struct pcm_fixture fixture;
+        pcm_submit_init(&fixture);
+        fixture.request.content_length = lengths[frames - 1];
+        fixture.fake.send_duration = 7;
+        pcm_body(&fixture, body, frames * 320);
+        struct df_pcm_http_response response = pcm_handle(&fixture, 200);
+        TEST_ASSERT_INT_EQ((int)frames, (int)response.accepted_frames);
+        TEST_ASSERT_INT_EQ((int)(100 + frames), (int)response.next_sequence);
+        TEST_ASSERT_INT_EQ((int)frames, (int)fixture.fake.sends);
+        TEST_ASSERT_INT_EQ((int)frames - 1, (int)fixture.fake.sleeps);
+        for (unsigned i = 0; i < frames; i++) {
+            TEST_ASSERT_INT_EQ(1000 + (int)i * 20, (int)fixture.fake.send_times[i]);
+            if (i != 0) TEST_ASSERT_INT_EQ(1000 + (int)i * 20, (int)fixture.fake.deadlines[i - 1]);
+            TEST_ASSERT_INT_EQ(0, memcmp(expected[i], fixture.fake.samples[i], sizeof(expected[i])));
+            TEST_ASSERT_INT_EQ(100 + (int)i, (int)fixture.fake.persisted_sequence[i]);
+            TEST_ASSERT_INT_EQ(i == 0 ? 3000 : 3007 + ((int)i - 1) * 20,
+                               (int)fixture.fake.persisted_lease[i]);
+        }
+        char record[256];
+        snprintf(record, sizeof(record), "runtime_id=" RUNTIME "\ngeneration=42\nnext_sequence=%u\naudio_session=" TOKEN "\nlease_deadline_ms=%u\n", 100 + frames, 3007 + (frames - 1) * 20);
+        pcm_assert_record(&fixture, record);
+        pcm_fixture_clear(&fixture);
+    }
+    struct pcm_fixture fixture;
+    pcm_submit_init(&fixture);
+    fixture.request.content_length = "1600";
+    fixture.fake.fail_send = 3;
+    pcm_body(&fixture, body, sizeof(body));
+    struct df_pcm_http_response response = pcm_handle(&fixture, 503);
+    TEST_ASSERT_INT_EQ(2, (int)response.accepted_frames);
+    TEST_ASSERT_INT_EQ(102, (int)response.next_sequence);
+    TEST_ASSERT_INT_EQ(3, (int)fixture.fake.sends);
+    pcm_assert_record(&fixture, "runtime_id=" RUNTIME "\ngeneration=42\nnext_sequence=102\naudio_session=" TOKEN "\nlease_deadline_ms=3020\n");
+    /* An ambiguous/lost response may replay the old batch; it must send nothing. */
+    pcm_body(&fixture, body, sizeof(body));
+    response = pcm_handle(&fixture, 409);
+    TEST_ASSERT_INT_EQ(0, (int)response.accepted_frames);
+    TEST_ASSERT_INT_EQ(102, (int)response.next_sequence);
+    TEST_ASSERT_INT_EQ(3, (int)fixture.fake.sends);
+    fixture.request.sequence = "102";
+    fixture.request.content_length = "960";
+    pcm_body(&fixture, body + 640, 960);
+    response = pcm_handle(&fixture, 200);
+    TEST_ASSERT_INT_EQ(3, (int)response.accepted_frames);
+    TEST_ASSERT_INT_EQ(105, (int)response.next_sequence);
+    TEST_ASSERT_INT_EQ(6, (int)fixture.fake.sends);
+    for (unsigned i = 0; i < 3; i++)
+        TEST_ASSERT_INT_EQ(0, memcmp(expected[i + 2], fixture.fake.samples[i + 3], sizeof(expected[0])));
+    pcm_assert_record(&fixture, "runtime_id=" RUNTIME "\ngeneration=42\nnext_sequence=105\naudio_session=" TOKEN "\nlease_deadline_ms=3080\n");
+    pcm_fixture_clear(&fixture);
+}
+
+static void pcm_test_submit_provider_failure(void) {
+    uint8_t body[1600] = {0};
+    for (unsigned scenario = 0; scenario < 3; scenario++) {
+        struct pcm_fixture fixture;
+        pcm_submit_init(&fixture);
+        fixture.request.content_length = "1600";
+        if (scenario == 0) fixture.fake.fail_send = 1;
+        if (scenario == 1) fixture.fake.fail_sleep = 2;
+        if (scenario == 2) fixture.fake.status_result = DF_ERR_IO;
+        pcm_body(&fixture, body, sizeof(body));
+        struct df_pcm_http_response response = pcm_handle(&fixture, 503);
+        TEST_ASSERT_INT_EQ(scenario == 1 ? 2 : 0, (int)response.accepted_frames);
+        TEST_ASSERT_INT_EQ(scenario == 2 ? 0 : scenario == 1 ? 102 : 100, (int)response.next_sequence);
+        TEST_ASSERT_INT_EQ(scenario == 2 ? 0 : scenario == 1 ? 2 : 1, (int)fixture.fake.sends);
+        if (scenario != 1) pcm_assert_record(&fixture, RECORD);
+        pcm_fixture_clear(&fixture);
+    }
+}
+
 void test_pcm_http_validates_session_requests(void) {
     struct pcm_fixture fixture;
     static const char *const bad_methods[] = {NULL, "", "GET", "post", "POST ", "POST\n"};
@@ -141,10 +408,14 @@ void test_pcm_http_validates_session_requests(void) {
         (void)pcm_handle(&fixture, 400);
     }
     fixture.request.content_length = "0";
-    fixture.request.operation = DF_PCM_HTTP_SUBMIT;
-    (void)pcm_handle(&fixture, 501);
     TEST_ASSERT_INT_EQ(-1, access(fixture.path, F_OK));
     pcm_fixture_clear(&fixture);
+    /* Keep registration in the existing entry point: Task 3 touches two files. */
+    pcm_test_submit_validation();
+    pcm_test_body_admission();
+    pcm_test_submit_admission();
+    pcm_test_pacing_and_recovery();
+    pcm_test_submit_provider_failure();
 }
 
 void test_pcm_http_requires_authoritative_talking_transmitter(void) {
