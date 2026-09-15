@@ -5,11 +5,15 @@ test -f package/doorfast/Makefile
 test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast-group
 test -f package/doorfast/files/doorfast-recorder.init
+test -f package/doorfast/files/doorfast-event-relay.init
+test -f package/doorfast/files/doorfast-events.config
 test -f package/doorfast/files/doorfast-site-inventory.sh
 grep -q 'doorfast-site-inventory.*usr/libexec/doorfast' package/doorfast/Makefile
 grep -q 'doorfast-site-inventory.impl.sh' scripts/prepare-sdk-package.sh
 grep -q 'doorfast-recorder.*usr/sbin/doorfast-recorder' package/doorfast/Makefile
 grep -q 'doorfast-pcm-submit.*usr/sbin/doorfast-pcm-submit' package/doorfast/Makefile
+grep -q 'doorfast-event-relay.*usr/sbin/doorfast-event-relay' package/doorfast/Makefile
+grep -q 'doorfast-events.config.*doorfast-events' package/doorfast/Makefile
 ! grep -q 'respawn' package/doorfast/files/doorfast-recorder.init
 test -f package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-sync.config
@@ -83,7 +87,7 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=35' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=36' package/doorfast/Makefile
 grep -Fq 'EVENT_DIR=/var/run/doorfast' package/doorfast/files/doorfast.init
 grep -Fq 'DF_EVENT_STREAM_DEFAULT_PATH "/var/run/doorfast/events.sock"' src/event_stream.h
 grep -Fq 'addgroup -S doorfast' package/doorfast/files/doorfast.init

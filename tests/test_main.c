@@ -1,4 +1,5 @@
 #include "test.h"
+void test_event_relay(void);
 void test_gvs_call_runtime_idle_deadlines(void);
 void test_gvs_call_runtime_tick_is_atomic(void);
 void test_gvs_call_control_answer_reaches_confirmation(void);
@@ -200,6 +201,7 @@ void test_gvs_call_control_handshake_memory_lifecycle(void);
 void test_gvs_call_control_handshake_receive_and_retry(void);
 int main(void) {
     void test_gvs_replay_handshake_gap_and_eof(void);
+    test_event_relay();
     test_gvs_replay_handshake_gap_and_eof();
     test_gvs_call_control_handshake_memory_lifecycle();
     test_gvs_call_control_handshake_receive_and_retry();
