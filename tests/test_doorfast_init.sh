@@ -111,6 +111,8 @@ grep -Fq 'group_add_next doorfast' "$trace"
 ! grep -Fq 'procd_open_instance' "$trace"
 
 : >"$trace"
+group_present=1
+group_creation_succeeds=1
 doorfast_enabled=1
 doorfast_active_host=1
 doorfast_indoor_ipaddr=
