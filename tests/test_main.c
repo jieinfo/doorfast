@@ -201,7 +201,24 @@ int test_suite_count(void) {
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
 void test_gvs_call_control_handshake_receive_and_retry(void);
+void test_pcm_http_validates_session_requests(void);
+void test_pcm_http_requires_authoritative_talking_transmitter(void);
+void test_pcm_http_opens_and_releases_producer_lease(void);
+void test_pcm_http_expires_and_preserves_sequence(void);
+void test_pcm_http_only_open_can_replace_runtime_or_generation(void);
+void test_pcm_http_rejects_unsafe_and_malformed_state(void);
+void test_pcm_http_provider_failures_do_not_change_state(void);
+void test_pcm_http_stale_open_waiting_on_lock_cannot_revert_state(void);
+
 int main(void) {
+    test_pcm_http_validates_session_requests();
+    test_pcm_http_requires_authoritative_talking_transmitter();
+    test_pcm_http_opens_and_releases_producer_lease();
+    test_pcm_http_expires_and_preserves_sequence();
+    test_pcm_http_only_open_can_replace_runtime_or_generation();
+    test_pcm_http_rejects_unsafe_and_malformed_state();
+    test_pcm_http_provider_failures_do_not_change_state();
+    test_pcm_http_stale_open_waiting_on_lock_cannot_revert_state();
     void test_gvs_replay_handshake_gap_and_eof(void);
     test_event_relay();
     test_gvs_replay_handshake_gap_and_eof();

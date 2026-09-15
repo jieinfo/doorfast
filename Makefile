@@ -50,6 +50,8 @@ TEST_SOURCES += src/gvs_pcm_pump.c
 TEST_SOURCES += tests/test_g711_alaw.c src/g711_alaw.c
 TEST_SOURCES += tests/test_gvs_audio_chunk_store.c src/gvs_audio_chunk_store.c
 TEST_SOURCES += tests/test_runtime_id.c src/runtime_id.c
+TEST_SOURCES += tests/test_pcm_http.c src/pcm_http.c
+build/doorfast-tests: src/pcm_http.h
 DAEMON_SOURCES += src/runtime_id.c
 DAEMON_SOURCES += src/gvs_video_snapshot.c
 DAEMON_SOURCES += src/gvs_media.c src/gvs_video_reassembly.c
