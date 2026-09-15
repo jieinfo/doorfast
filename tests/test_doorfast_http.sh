@@ -39,6 +39,41 @@ case "$expression" in
 esac
 EOF
 chmod +x "$fakebin/ubus" "$fakebin/jsonfilter"
+
+test_script="$workspace/doorfast-http.sh"
+helper="$workspace/pcm-http-helper"
+sed "s|^helper=/usr/sbin/doorfast-pcm-http$|helper=$helper|" \
+  package/doorfast/files/doorfast-http.sh >"$test_script"
+cat >"$helper" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$PATH_INFO" >"$DOORFAST_PCM_HTTP_PATH"
+cat >"$DOORFAST_PCM_HTTP_STDIN"
+EOF
+chmod +x "$test_script" "$helper"
+for audio_path in \
+  /api/v1/audio/session \
+  /api/v1/audio/submit.pcm \
+  /api/v1/audio/session/end
+do
+  python3 - <<'PY' >"$workspace/audio-body"
+import sys
+sys.stdout.buffer.write(b"pcm\0body")
+PY
+  PATH_INFO="$audio_path" CONTENT_LENGTH=8 \
+    DOORFAST_PCM_HTTP_PATH="$workspace/audio-path" \
+    DOORFAST_PCM_HTTP_STDIN="$workspace/audio-stdin" \
+    sh "$test_script" <"$workspace/audio-body" >"$workspace/audio-output"
+  grep -Fxq "$audio_path" "$workspace/audio-path"
+  cmp "$workspace/audio-body" "$workspace/audio-stdin"
+  test ! -s "$workspace/audio-output"
+done
+rm -f "$workspace/audio-path" "$workspace/audio-stdin"
+PATH_INFO=/api/v1/audio/session/ DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_PCM_HTTP_PATH="$workspace/audio-path" \
+  DOORFAST_PCM_HTTP_STDIN="$workspace/audio-stdin" \
+  sh "$test_script" </dev/null >/dev/null
+test ! -e "$workspace/audio-path"
+test ! -e "$workspace/audio-stdin"
 run() {
   (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" PATH_INFO="$1" CONTENT_LENGTH="${#2}"; printf '%s' "$2" | sh package/doorfast/files/doorfast-http.sh >/dev/null)
 }

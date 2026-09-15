@@ -18,6 +18,7 @@ SIM_SOURCES := tools/gvs-peer-sim.c tests/support/gvs_peer_sim.c \
 UDP_INJECT_SOURCES := tools/gvs-peer-udp-inject.c \
 	$(filter-out tools/gvs-peer-sim.c,$(SIM_SOURCES))
 PCM_SUBMIT_SOURCES := src/pcm_submit_main.c src/gvs_pcm_ingress.c
+PCM_HTTP_TEST_SOURCES := src/pcm_http.c src/runtime_id.c src/pcm_http_main.c
 
 TEST_SOURCES += tests/test_gvs_priority.c src/gvs_priority.c
 TEST_SOURCES += tests/test_gvs_peer_sim.c tests/support/gvs_peer_sim.c
@@ -106,7 +107,7 @@ build/doorfast-tests build/doorfast: src/gvs_call_ack.h
 DAEMON_SOURCES += src/gvs_call_dispatch.c
 build/doorfast-tests build/doorfast: src/gvs_call_dispatch.h
 
-.PHONY: test doorfast peer-sim peer-udp-inject pcm-submit clean
+.PHONY: test doorfast peer-sim peer-udp-inject pcm-submit pcm-http-test clean
 
 RECORDER_SOURCES := src/recorder_main.c src/evidence_recorder.c src/pcap_ring.c src/evidence_classifier.c src/capture.c src/gvs_packet.c src/gvs_frame.c src/event.c src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/runtime_config.c src/config.c src/gvs_identity.c
 recorder: build/doorfast-recorder
@@ -146,6 +147,11 @@ build/gvs-peer-udp-inject: $(UDP_INJECT_SOURCES) | build
 
 build/doorfast-pcm-submit: $(PCM_SUBMIT_SOURCES) src/gvs_pcm_ingress.h | build
 	$(CC) $(CPPFLAGS) -DDF_PCM_SUBMIT_PROGRAM $(CFLAGS) $(PCM_SUBMIT_SOURCES) -o $@
+
+pcm-http-test: build/doorfast-pcm-http
+
+build/doorfast-pcm-http: $(PCM_HTTP_TEST_SOURCES) src/pcm_http.h | build
+	$(CC) $(CPPFLAGS) -DDF_PCM_HTTP_TEST_PROGRAM $(CFLAGS) $(PCM_HTTP_TEST_SOURCES) -o $@
 
 clean:
 	rm -rf build

@@ -88,7 +88,16 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=38' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=39' package/doorfast/Makefile
+grep -q 'doorfast-pcm-http.*usr/sbin/doorfast-pcm-http' package/doorfast/Makefile
+! grep -q 'acceptance' package/doorfast/Makefile
+grep -Fq -- '-DDF_WITH_UBUS -DDF_PCM_HTTP_PROGRAM' package/doorfast/Makefile
+grep -Fq 'src/pcm_http.c' package/doorfast/Makefile
+grep -Fq 'src/pcm_http_ubus.c' package/doorfast/Makefile
+grep -Fq 'src/pcm_http_main.c' package/doorfast/Makefile
+grep -Fq 'src/runtime_id.c' package/doorfast/Makefile
+grep -Fq 'src/gvs_pcm_ingress.c' package/doorfast/Makefile
+grep -Fq -- '-lubus -lubox -lblobmsg_json' package/doorfast/Makefile
 grep -Eq '^  USERID:=:doorfast$' package/doorfast/Makefile
 grep -Fq 'EVENT_DIR=/var/run/doorfast' package/doorfast/files/doorfast.init
 grep -Fq 'DF_EVENT_STREAM_DEFAULT_PATH "/var/run/doorfast/events.sock"' src/event_stream.h
