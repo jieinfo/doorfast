@@ -48,6 +48,7 @@ group_add_next() {
 mkdir() { printf 'mkdir %s\n' "$*" >>"$trace"; }
 chown() { printf 'chown %s\n' "$*" >>"$trace"; }
 chmod() { printf 'chmod %s\n' "$*" >>"$trace"; }
+rm() { printf 'rm %s\n' "$*" >>"$trace"; }
 
 procd_open_instance() { printf 'procd_open_instance\n' >>"$trace"; }
 procd_set_param() { :; }
@@ -78,6 +79,9 @@ grep -Fq 'group_add_next doorfast' "$trace"
 grep -Fq 'mkdir -p /var/run/doorfast' "$trace"
 grep -Fq 'chown root:doorfast /var/run/doorfast' "$trace"
 grep -Fq 'chmod 0750 /var/run/doorfast' "$trace"
+cleanup_line=$(grep -nFx -- 'rm -f /tmp/doorfast-pcm-http.state' "$trace" | cut -d: -f1)
+open_line=$(grep -nFx -- 'procd_open_instance' "$trace" | cut -d: -f1)
+test "$cleanup_line" -lt "$open_line"
 
 : >"$trace"
 group_present=0

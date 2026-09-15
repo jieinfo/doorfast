@@ -3,6 +3,12 @@ helper=/usr/sbin/doorfast-pcm-http
 path="${PATH_INFO:-}"
 [ -n "$path" ] || path="${QUERY_STRING#path=}"
 
+case "$path" in
+  /api/v1/audio/session|/api/v1/audio/submit.pcm|/api/v1/audio/session/end)
+    exec "$helper"
+    ;;
+esac
+
 json_field() {
   jsonfilter -s "$1" -e "$2" 2>/dev/null
 }
