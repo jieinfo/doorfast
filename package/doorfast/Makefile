@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=37
+PKG_RELEASE:=38
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -57,6 +57,8 @@ define Package/doorfast/install
 	$(INSTALL_CONF) ./files/doorfast-sync.config $(1)/etc/config/doorfast-sync
 	$(INSTALL_CONF) ./files/doorfast-deployment.config $(1)/etc/config/doorfast-deployment
 	$(INSTALL_CONF) ./files/doorfast-events.config $(1)/etc/config/doorfast-events
+	$(INSTALL_DIR) $(1)/etc/doorfast
+	chmod 0750 $(1)/etc/doorfast
 endef
 
 define Package/doorfast/postinst
@@ -64,6 +66,10 @@ define Package/doorfast/postinst
 if ! group_exists doorfast; then
 	group_add_next doorfast >/dev/null
 	group_exists doorfast || exit 1
+fi
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	mkdir -p /etc/doorfast || exit 1
+	chmod 0750 /etc/doorfast || exit 1
 fi
 if [ -z "$${IPKG_INSTROOT}" ] && [ "$${PKG_UPGRADE}" = "1" ]; then
 	/etc/init.d/doorfast restart
