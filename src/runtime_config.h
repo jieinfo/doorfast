@@ -6,6 +6,7 @@
 #define DF_RUNTIME_BRAND_MAX 16
 #define DF_RUNTIME_INTERFACE_MAX 64
 #define DF_RUNTIME_ADDRESS_MAX 64
+#define DF_RUNTIME_IPV4_MAX 16
 #define DF_RUNTIME_PATH_MAX 256
 
 struct df_runtime_config {
@@ -14,6 +15,8 @@ struct df_runtime_config {
     char brand[DF_RUNTIME_BRAND_MAX];
     char gvs_interface[DF_RUNTIME_INTERFACE_MAX];
     char gvs_local_address[DF_RUNTIME_ADDRESS_MAX];
+    char indoor_ipaddr[DF_RUNTIME_IPV4_MAX];
+    char indoor_netmask[DF_RUNTIME_IPV4_MAX];
     char uplink_interface[DF_RUNTIME_INTERFACE_MAX];
     char sync_state_path[DF_RUNTIME_PATH_MAX];
 };

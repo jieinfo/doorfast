@@ -45,13 +45,24 @@ const byName = name => rendered.options.find(option => option.optionName === nam
 assert.equal(rendered.config, 'doorfast');
 assert.deepEqual(rendered.options.map(option => option.optionName), [
     'enabled', 'active_host', 'gvs_interface',
-    'uplink_interface', 'gvs_local_address', 'access_material'
+    'uplink_interface', 'gvs_local_address', 'indoor_ipaddr',
+    'indoor_netmask', 'access_material'
 ]);
 assert.equal(byName('enabled').optionType, Flag);
 assert.equal(byName('active_host').optionType, Flag);
 assert.equal(byName('gvs_interface').optionType, Value);
 assert.equal(byName('uplink_interface').optionType, Value);
 assert.equal(byName('gvs_local_address').datatype, 'string');
+assert.equal(byName('gvs_local_address').label, 'GVS 逻辑身份');
+assert.match(byName('gvs_local_address').description, /IS:楼栋-单元-房间-分机/);
+assert.equal(byName('gvs_local_address').validate('main', 'IS:2-1-101-1'), true);
+assert.match(byName('gvs_local_address').validate('main', 'IS:2-1-133-1'), /房间/);
+assert.equal(byName('indoor_ipaddr').datatype, 'ip4addr');
+assert.equal(byName('indoor_ipaddr').rmempty, true);
+assert.match(byName('indoor_ipaddr').description, /自动推导/);
+assert.equal(byName('indoor_netmask').datatype, 'ip4addr');
+assert.equal(byName('indoor_netmask').rmempty, true);
+assert.match(byName('indoor_netmask').description, /主机模式/);
 assert.equal(byName('access_material').password, true);
 assert.equal(byName('access_material').datatype, 'hexstring');
 assert.equal(byName('access_material').rmempty, true);

@@ -1,4 +1,5 @@
 #include "runtime_config.h"
+#include "gvs_identity.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -23,6 +24,8 @@ enum df_runtime_option {
     DF_SEEN_SYNC_STATE_PATH = 1U << 11,
     DF_SEEN_ACTIVE_HOST = 1U << 12,
     DF_SEEN_ACCESS_MATERIAL = 1U << 13
+    ,DF_SEEN_INDOOR_IPADDR = 1U << 14
+    ,DF_SEEN_INDOOR_NETMASK = 1U << 15
 };
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
@@ -33,6 +36,8 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.capture_interface = runtime->gvs_interface;
     runtime->config.gvs_interface = runtime->gvs_interface;
     runtime->config.gvs_local_address = runtime->gvs_local_address;
+    runtime->config.indoor_ipaddr = runtime->indoor_ipaddr;
+    runtime->config.indoor_netmask = runtime->indoor_netmask;
     runtime->config.uplink_interface = runtime->uplink_interface;
     runtime->config.sync_state_path = runtime->sync_state_path;
     (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
@@ -189,6 +194,18 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_copy_option(runtime->gvs_local_address, sizeof(runtime->gvs_local_address), value);
     }
+    if (strcmp(name, "indoor_ipaddr") == 0) {
+        option = DF_SEEN_INDOOR_IPADDR;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->indoor_ipaddr,
+                              sizeof(runtime->indoor_ipaddr), value);
+    }
+    if (strcmp(name, "indoor_netmask") == 0) {
+        option = DF_SEEN_INDOOR_NETMASK;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->indoor_netmask,
+                              sizeof(runtime->indoor_netmask), value);
+    }
     if (strcmp(name, "uplink_interface") == 0) {
         option = DF_SEEN_UPLINK_INTERFACE;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
@@ -293,6 +310,14 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
     }
     if (!found_main) {
         return DF_ERR_INVALID;
+    }
+    if (runtime->config.active_host && runtime->indoor_ipaddr[0] == '\0') {
+        uint8_t identity[6];
+
+        if (df_gvs_identity_parse(runtime->gvs_local_address, identity) != DF_OK ||
+            df_gvs_identity_unicast_ip(identity, runtime->indoor_ipaddr) != DF_OK) {
+            return DF_ERR_INVALID;
+        }
     }
     return df_config_validate(&runtime->config);
 }

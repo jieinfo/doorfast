@@ -1,7 +1,7 @@
 # Doorfast 当前能力与验证状态
 
 更新日期：2026-09-15
-代码基线：`origin/main` 的 `39d9c5d`，软件包 `0.1.0-r39`
+代码基线：`origin/main` 的 `459acbe`，软件包 `0.1.0-r39`
 HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并）
 
 本文按当前已合并代码记录能力，不以历史路线图或单次构建结果代替实现核对。
@@ -21,7 +21,7 @@ HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并�
 
 | 能力 | 当前实现 | 已有证据 | 尚未证明 |
 |---|---|---|---|
-| 主机模式传输 | `active_host` 打开 UDP/8300，生成厂商公共头，学习已观察对端路由并发送控制、在线和同步报文 | 代码、单元测试、历史目标系统测试 | 门口机在 MT8157 离线后的冷启动识别和长期在线 |
+| 主机模式传输 | `active_host` 打开 UDP/8300，生成厂商公共头，学习已观察对端路由并发送控制、在线和同步报文；室内机 IP 由有效 GVS 身份推导或由管理员覆盖，服务只在门禁口临时挂载并绑定该地址 | 代码、单元测试、历史目标系统测试 | 门口机在 MT8157 离线后的冷启动识别和长期在线 |
 | 来电 | 解析 `03/01`，建立带 generation 的会话，每次有效来电发送 `03/81` 回执 | 静态材料、PCAP、回放和运行时测试 | 真实门口机接受 Doorfast 回执 |
 | 接听与挂断 | `03/03 → 03/83`、`03/02 → 03/82`，绑定会话 generation，包含有限重试、确认和超时 | PCAP、构帧测试、状态机测试 | 实体通话闭环、忙线、转接和跨固件行为 |
 | 通话保活 | `03/51`/`03/52` 已接入 UDP 发送和运行时会话清理 | 静态材料、PCAP、测试 | 真机长时间通话和断网恢复 |
@@ -37,7 +37,7 @@ HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并�
 | 本地控制接口 | ubus 和 HTTP 提供 `status`、`answer`、`hangup`、`unlock`、`call_elevator` | ubus 和 HTTP 测试 | HTTP CGI 自身没有独立令牌校验，部署端必须限制访问 |
 | 本地事件流 | `/var/run/doorfast/events.sock` 发布来电、通话建立、挂断、超时和抢占 JSON Lines；事件绑定 generation，每客户端队列上限 64，慢客户端断开 | C 测试、Actions、VM socket 属主和权限检查 | 实体门口机触发的连续事件序列 |
 | HA 主动事件 | 独立 relay 从本地 socket 读取事件，经 CA 和主机名校验的 HTTPS、Bearer token 投递到 HA；HA 刷新权威状态后去重和派发，五秒轮询兜底 | HA 35 项测试、Actions 交叉编译、VM TLS 投递和断线重试；真实 HA 2024.11.0 容器中 42 项 fixture 验收 | 实体门口机触发的连续事件、长期断网和高频来电运行 |
-| 管理与部署 | procd、UCI、只读 LuCI 状态页、部署预检查、证据记录器、站点清单、事件 relay 和 OpenWrt 用户组生命周期 | CLI、配置、记录器、LuCI、Actions 和 ImmortalWrt VM 测试 | LuCI relay 配置表单、自动升级和完整发布流程 |
+| 管理与部署 | procd、UCI、只读 LuCI 状态页、LuCI 部署/自动化/relay 配置页、部署预检查、证据记录器、站点清单、事件 relay 和 OpenWrt 用户组生命周期 | CLI、配置、记录器、LuCI、Actions 和 ImmortalWrt VM 测试 | 主机模式临时地址在真实门禁口的验收、自动升级和完整发布流程 |
 
 ## 当前对外使用边界
 
@@ -47,7 +47,7 @@ HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并�
 
 HTTP PCM 的 token 只协调一个生产者，不能代替认证或加密。部署时必须把 CGI 限制在可信 HA/路由网络，或放在经过认证的 HTTPS 后面。HTTP 成功只证明本地 Unix ingress 已接收帧，不代表门口机已经收到或播放音频。
 
-LuCI 当前只显示状态。接口选择、逻辑身份、主机模式、开锁材料和自动召梯仍需编辑 UCI；接听、挂断、开锁和召梯需通过 ubus、HTTP 或 Home Assistant 调用。
+LuCI 提供部署、来电自动化和 HA relay 配置；主机模式使用有效的 GVS 逻辑身份，室内机 IP 可由身份推导或手动覆盖，室内机子网掩码需按现场配置。接听、挂断、开锁和召梯由 Home Assistant 经本地接口调用，不在 LuCI 重复提供操作页。
 
 ## 已知实现问题
 

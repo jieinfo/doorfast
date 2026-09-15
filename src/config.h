@@ -15,6 +15,8 @@ struct df_config {
     bool capture_promiscuous;
     const char *gvs_interface;
     const char *gvs_local_address;
+    const char *indoor_ipaddr;
+    const char *indoor_netmask;
     const char *uplink_interface;
     const char *sync_state_path;
     const char *access_material;

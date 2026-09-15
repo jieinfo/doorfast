@@ -99,6 +99,7 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption active_host '1'\n"
         "\toption passive_only '0'\n"
+        "\toption indoor_netmask '255.0.0.0'\n"
         "\toption call_elev '1'\n";
     struct df_runtime_config runtime;
 
@@ -125,10 +126,53 @@ void test_runtime_config_ignores_legacy_elevator_direction(void) {
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption passive_only '0'\n"
         "\toption active_host '1'\n"
+        "\toption indoor_netmask '255.0.0.0'\n"
         "\toption call_elev '1'\n"
         "\toption call_elev_direction 'down'\n";
     struct df_runtime_config runtime;
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
     TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
+}
+
+void test_runtime_config_derives_active_host_ip_and_requires_netmask(void) {
+    const char derived[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'door0'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption active_host '1'\n"
+        "\toption indoor_netmask '255.0.0.0'\n";
+    const char manual[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'door0'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption active_host '1'\n"
+        "\toption indoor_ipaddr '10.99.1.7'\n"
+        "\toption indoor_netmask '255.255.255.0'\n";
+    const char missing_mask[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'door0'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption active_host '1'\n";
+    const char malformed_mask[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption gvs_interface 'door0'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption active_host '1'\n"
+        "\toption indoor_netmask '255.0.255.0'\n";
+    struct df_runtime_config runtime;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(derived, &runtime));
+    TEST_ASSERT_INT_EQ(0, strcmp(runtime.config.indoor_ipaddr, "10.5.65.0"));
+    TEST_ASSERT_INT_EQ(0, strcmp(runtime.config.indoor_netmask, "255.0.0.0"));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(manual, &runtime));
+    TEST_ASSERT_INT_EQ(0, strcmp(runtime.config.indoor_ipaddr, "10.99.1.7"));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_config_parse(missing_mask, &runtime));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_config_parse(malformed_mask, &runtime));
 }

@@ -2,11 +2,30 @@
 #include "gvs_identity.h"
 
 #include <stdio.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
 
 static bool df_delay_is_valid(int delay_seconds) {
     return delay_seconds >= -1 && delay_seconds <= 9;
+}
+
+static bool df_ipv4_is_valid(const char *text) {
+    struct in_addr address;
+
+    return text != NULL && inet_pton(AF_INET, text, &address) == 1;
+}
+
+static bool df_netmask_is_valid(const char *text) {
+    struct in_addr address;
+    uint32_t value;
+    uint32_t inverse;
+
+    if (!df_ipv4_is_valid(text) || inet_pton(AF_INET, text, &address) != 1)
+        return false;
+    value = ntohl(address.s_addr);
+    inverse = ~value;
+    return value != 0U && (inverse & (inverse + 1U)) == 0U;
 }
 
 int df_config_validate(const struct df_config *config) {
@@ -18,6 +37,11 @@ int df_config_validate(const struct df_config *config) {
     if (config->access_material != NULL && config->access_material[0] != '\0' &&
         (strlen(config->access_material) != 16U ||
          strspn(config->access_material, "0123456789abcdefABCDEF") != 16U))
+        return DF_ERR_INVALID;
+    if ((config->indoor_ipaddr != NULL && config->indoor_ipaddr[0] != '\0' &&
+         !df_ipv4_is_valid(config->indoor_ipaddr)) ||
+        (config->indoor_netmask != NULL && config->indoor_netmask[0] != '\0' &&
+         !df_netmask_is_valid(config->indoor_netmask)))
         return DF_ERR_INVALID;
     if (!config->enabled) {
         return DF_OK;
@@ -33,6 +57,9 @@ int df_config_validate(const struct df_config *config) {
         config->sync_state_path[sizeof("/etc/config/doorfast-") - 1U] == '\0' ||
         strstr(config->sync_state_path, "..") != NULL ||
         (!config->passive_only && !config->active_host) ||
+        (config->active_host &&
+         (config->indoor_ipaddr == NULL || config->indoor_ipaddr[0] == '\0' ||
+          config->indoor_netmask == NULL || config->indoor_netmask[0] == '\0')) ||
         df_gvs_identity_parse(config->gvs_local_address, identity) != DF_OK) {
         return DF_ERR_INVALID;
     }

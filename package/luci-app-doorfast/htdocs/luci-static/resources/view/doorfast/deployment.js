@@ -26,11 +26,36 @@ return view.extend({
         option = section.option(form.Value, 'uplink_interface', '上行接口（可选）');
         option.rmempty = true;
 
-        option = section.option(form.Value, 'gvs_local_address', '本机逻辑身份');
+        option = section.option(form.Value, 'gvs_local_address', 'GVS 逻辑身份');
         option.datatype = 'string';
         option.rmempty = false;
         option.placeholder = 'IS:2-1-101-1';
-        option.description = '格式为 IS:楼栋-单元-房间-分机，用于入站帧筛选。';
+        option.description = '正确格式：IS:楼栋-单元-房间-分机，例如 IS:2-1-101-1。主机模式必须填写有效身份。';
+        option.validate = function(sectionId, value) {
+            var match = /^IS:(\d+)-(\d+)-(\d+)-(\d+)$/.exec(value);
+            var room;
+
+            if (match === null)
+                return 'GVS 逻辑身份格式应为 IS:楼栋-单元-房间-分机。';
+            room = Number(match[3]);
+            if (Number(match[1]) < 1 || Number(match[1]) > 99 ||
+                Number(match[2]) < 1 || Number(match[2]) > 9 ||
+                room < 101 || room > 6332 || room % 100 === 0 ||
+                room % 100 > 32 || Number(match[4]) < 1 ||
+                Number(match[4]) > 4)
+                return 'GVS 逻辑身份中的楼栋、单元、房间或分机号无效。';
+            return true;
+        };
+
+        option = section.option(form.Value, 'indoor_ipaddr', '室内机 IP 地址');
+        option.datatype = 'ip4addr';
+        option.rmempty = true;
+        option.description = '仅在主机模式使用。留空时按 GVS 逻辑身份自动推导；填写后覆盖自动值。';
+
+        option = section.option(form.Value, 'indoor_netmask', '室内机子网掩码');
+        option.datatype = 'ip4addr';
+        option.rmempty = true;
+        option.description = '仅在主机模式使用。厂商材料未证明通用自动掩码，首次请按现场室内机填写。';
 
         option = section.option(form.Value, 'access_material', '门禁材料（可选）');
         option.datatype = 'hexstring';
