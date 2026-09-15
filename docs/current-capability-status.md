@@ -1,7 +1,7 @@
 # Doorfast 当前能力与验证状态
 
 更新日期：2026-09-15
-代码基线：`origin/main` 的 `97fb41c`，软件包 `0.1.0-r38`
+代码基线：`origin/main` 的 `5cd91ef`，软件包 `0.1.0-r39`
 
 本文按当前已合并代码记录能力，不以历史路线图或单次构建结果代替实现核对。
 
@@ -31,7 +31,8 @@
 | 视频接收 | 接收 UDP/8303，校验媒体端点，重组不超过 1 MiB 的分片，校验 JPEG 并按会话缓存 | 静态材料、解析和重组测试 | 真实画面、丢片表现、延迟和长期资源使用 |
 | 视频访问 | HTTP 提供 generation 绑定的 `latest.jpg`，支持 ETag、过期代次拒绝和发布竞态保护 | HTTP 和文件发布测试 | 连续视频流和浏览器端音视频同步 |
 | 下行音频 | 接收 UDP/8302，统计丢包、重复和迟到帧，输出 generation 绑定的增量 WAV 块并保留最近四块 | 静态材料、解析、缓冲和 HTTP 测试 | 真机音频格式、实际播放质量和延迟 |
-| 上行音频核心 | 通话中接收本机 PCM 数据报，以 8 kHz、单声道、160 采样编码为 G.711 A-law 并发送 UDP/8302 | 编码、节奏、代次、socket、打包工具和发送测试 | 浏览器或 HA 麦克风桥、回声消除和真机收听 |
+| 上行音频核心 | 通话中接收本机 PCM 数据报，以 8 kHz、单声道、160 采样编码为 G.711 A-law 并发送 UDP/8302 | 编码、节奏、代次、socket、打包工具、HTTP 批次和发送测试 | 浏览器麦克风采集界面、回声消除和真机收听 |
+| HTTP PCM 生产者 | 三个 CGI 路由用 runtime、generation、单生产者 token、连续 sequence 和两秒租约接收每批 1–5 个 PCM 帧；失败保留已接收前缀供客户端恢复 | C/CLI/CGI 测试、Actions r39 交叉编译、ImmortalWrt VM 安装拒绝与隔离接收验收 | HA/浏览器端实际采集与重采样；实体扬声器可懂度、延迟、回声及长通话稳定性 |
 | 本地控制接口 | ubus 和 HTTP 提供 `status`、`answer`、`hangup`、`unlock`、`call_elevator` | ubus 和 HTTP 测试 | HTTP CGI 自身没有独立令牌校验，部署端必须限制访问 |
 | 本地事件流 | `/var/run/doorfast/events.sock` 发布来电、通话建立、挂断、超时和抢占 JSON Lines；事件绑定 generation，每客户端队列上限 64，慢客户端断开 | C 测试、Actions、VM socket 属主和权限检查 | 实体门口机触发的连续事件序列 |
 | HA 主动事件 | 独立 relay 从本地 socket 读取事件，经 CA 和主机名校验的 HTTPS、Bearer token 投递到 HA；HA 刷新权威状态后去重和派发，五秒轮询兜底 | HA 35 项测试、Actions 交叉编译、VM TLS 投递和断线重试 | 真实 HA 实例、长期断网和高频来电运行 |
@@ -41,7 +42,9 @@
 
 主程序通过本地 Unix socket 主动发布呼叫事件。可选 `doorfast-event-relay` 使用 HTTPS 将事件送到 `doorfastforha` 的认证入口；HA 收到事件后仍先读取 `/api/v1/status`，因此事件只负责降低发现延迟，状态接口仍是权威来源。MQTT 和手机通知不在当前实现范围。
 
-视频接口提供最新 JPEG 画面，不是 HLS、RTSP 或 WebRTC 流。音频接口能提供增量 WAV 块；`doorfast-pcm-submit` 已随软件包提供，但浏览器或 HA 到 PCM socket 的麦克风生产者仍未实现。
+视频接口提供最新 JPEG 画面，不是 HLS、RTSP 或 WebRTC 流。下行音频接口能提供增量 WAV 块；`doorfast-pcm-submit` 提供本机单帧入口，r39 的 HTTP PCM 接口提供带租约、序号和失败恢复的网络生产者入口。浏览器麦克风采集、8 kHz 重采样和 HA 端对该接口的消费仍未实现。
+
+HTTP PCM 的 token 只协调一个生产者，不能代替认证或加密。部署时必须把 CGI 限制在可信 HA/路由网络，或放在经过认证的 HTTPS 后面。HTTP 成功只证明本地 Unix ingress 已接收帧，不代表门口机已经收到或播放音频。
 
 LuCI 当前只显示状态。接口选择、逻辑身份、主机模式、开锁材料和自动召梯仍需编辑 UCI；接听、挂断、开锁和召梯需通过 ubus、HTTP 或 Home Assistant 调用。
 
@@ -50,19 +53,29 @@ LuCI 当前只显示状态。接口选择、逻辑身份、主机模式、开锁
 1. `call_elev_direction` 能被配置加载器解析和校验，但自动召梯运行路径固定传入 `up`。当前用户要求的来电自动向上不受影响，配置为 `down` 不会生效。
 2. ubus 状态中的 `call.handshake_mode` 固定显示 `simulated`，即使主机模式正在通过 UDP 发送握手；实际传输与显示不一致。
 3. relay 当前仅接受 HTTPS authority 配置，目标路径固定为 `/api/doorfast/<entry_id>`；token 必须位于 root 所有的 0600 文件中。
-4. HTTP CGI 将请求直接转给 ubus，没有独立认证逻辑；访问控制属于部署前置条件。
+4. HTTP CGI 没有独立认证逻辑；包括 PCM 生产者在内的访问控制属于部署前置条件。PCM session token 不是通用 HTTP 身份凭据。
 
 ## 当前验证结果
 
-当前 C 测试、主程序编译、CLI、HTTP、软件包清单、记录器、站点清单和 LuCI JavaScript 测试通过；`doorfastforha` 的 35 项 Python 测试通过。Actions 已完成 x86_64 ImmortalWrt 25.12.1 的 r38 交叉编译。
+当前 C 测试、主程序编译、CLI、HTTP、PCM 隔离验收、软件包清单、记录器、站点清单和 LuCI JavaScript 测试通过；`doorfastforha` 的 35 项 Python 测试通过。GitHub Actions [run 34943868811](https://github.com/jieinfo/doorfast/actions/runs/34943868811) 构建的是 PR head `958d93a5`；其相同代码树随后以合并提交 `5cd91ef` 进入主分支。该运行完成了 x86_64 ImmortalWrt 25.12.1 的 r39 交叉编译。下载产物的 SHA-256 为：
+
+| 产物 | SHA-256 |
+|---|---|
+| `doorfast-pcm-http-acceptance` | `027cfdbcdaafca65e52f4e0f5401929f80b5f2e8fd714cf513dc2c79baf828ad` |
+| `doorfast.apk` | `194e7f966b096a62581f11e36637a9d028f3e4883023c5868c42f48bc6241e4b` |
+| `luci-app-doorfast.apk` | `4846db90a193a2ec9bab91e827fb3c67cdc4db6902abbcd479939f2ab0932262` |
 
 `gvs-incoming-three-20260907.pcap` 原始抓包缺少初始 `03/01`。只读分析确认其中出现 `03/02`、`03/03`、`03/51`、`03/52`、`03/55`、`03/56`、`03/57`、`03/81`、`03/82`、`03/83`、`04/09` 和 `04/89`。补入六个明确标为合成的初始请求后，当前回放器得到六次来电、四次进入通话、四次挂断和两次超时。该实验验证状态机与已捕获后续报文相容，不证明合成请求就是丢失报文，也不证明实体设备互操作。
 
 本次在 `127.0.0.1:2222` 的 ImmortalWrt 25.12.1 VM 使用 Actions 产出的 r38 APK 完成 r37→r38 升级。升级前移走手工目录后，软件包正确创建空的 `/etc/doorfast`，属主为 `root:root`、权限为 `0750`；APK 的 `.rusers` 为 `:doorfast`，`/var/run/doorfast` 为 `root:doorfast 0750`，事件 socket 为 `root:doorfast 0660`。合并后的 VM 验收脚本也已通过：一次性测试 CA 下，relay 校验 CA 和主机名，携带 Bearer token 投递 generation 绑定的准确 JSON；接收端首次断开后，同一请求体按退避重试并成功送达；token 权限为 `0600` 时可用、放宽为 `0640` 时被拒绝；测试前后网络 UCI 和防火墙结构未变化。
 
+HTTP PCM 本次在 Linux `6.12.94`、ImmortalWrt `25.12.1`、`x86_64` 的隔离 VM 上用上述 Actions 产物完成 r38→r39 升级。实际安装的 CGI 在空闲状态完成过期 generation、错误方法、短正文和超限正文的入口拒绝与无状态变化检查；由于空闲状态检查先于正文校验，这里的短正文和超限正文均返回 `409`，不构成已安装 helper 的正文校验证据。非安装的验收程序在私有临时目录验证了 talking 状态下的正文长度、短正文和尾随字节拒绝，并完成单生产者排他、释放与超时接管、五帧顺序和精确 `DFPCM01` 内容、部分失败恢复、锁等待后的旧请求拒绝以及重复序号不重放。四个实测帧间隔为 `20.112104`、`21.093111`、`21.360112`、`21.619112` ms。验收前后 Doorfast PID、服务、调用/音频状态、网络 UCI、防火墙和 nftables 保持一致，生产状态与临时上传目录均完成清理。
+
+VM 验收脚本依赖 Python 3；本次只在隔离 VM 中为运行验收安装 Python 3，它不是 `doorfast` APK 的运行依赖。上述结果证明 r39 包安装、拒绝路径、本地 Unix 数据报接收、节奏、恢复和清理行为，不包含实体 MT8157 播放测试，也不证明扬声器格式、可懂度、端到端延迟、回声或长通话稳定性。
+
 ## 下一步顺序
 
 1. 在真实 HA 实例验证认证入口、事件刷新、重载和长期断线恢复。
-2. 增加浏览器或 HA 到 PCM socket 的受控麦克风桥，并完成 generation、节奏和断线处理。
+2. 实现浏览器或 HA 端的麦克风采集与 8 kHz 重采样，按已完成的 HTTP PCM 契约处理 generation、sequence、单请求在途和断线恢复。
 3. 在 MT8157 离线的受控现场依次验收独立上线、来电回执、挂断、开锁、召梯、视频和双向音频。
 4. 修正自动召梯方向和握手状态显示，并补齐 LuCI 配置与操作入口。
