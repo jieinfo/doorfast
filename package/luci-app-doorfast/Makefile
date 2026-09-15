@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=8
+PKG_RELEASE:=9
 PKGARCH:=all
 
 include $(INCLUDE_DIR)/package.mk
@@ -16,7 +16,7 @@ define Package/luci-app-doorfast
 endef
 
 define Package/luci-app-doorfast/description
-  Doorfast runtime status page and access-controlled local call API.
+  Doorfast runtime status and deployment configuration pages.
 endef
 
 define Build/Compile
@@ -32,6 +32,8 @@ define Package/luci-app-doorfast/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/doorfast
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/status.js $(1)/www/luci-static/resources/view/doorfast/status.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/settings.js $(1)/www/luci-static/resources/view/doorfast/settings.js
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/relay.js $(1)/www/luci-static/resources/view/doorfast/relay.js
 endef
 
 $(eval $(call BuildPackage,luci-app-doorfast))

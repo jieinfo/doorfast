@@ -18,11 +18,27 @@
     }
   },
   "admin/services/doorfast/settings": {
-    "title": "设置",
+    "title": "来电自动化",
     "order": 20,
     "action": {
       "type": "view",
       "path": "doorfast/settings"
+    }
+  },
+  "admin/services/doorfast/deployment": {
+    "title": "部署配置",
+    "order": 20,
+    "action": {
+      "type": "view",
+      "path": "doorfast/deployment"
+    }
+  },
+  "admin/services/doorfast/relay": {
+    "title": "HA 事件 relay",
+    "order": 30,
+    "action": {
+      "type": "view",
+      "path": "doorfast/relay"
     }
   }
 }
