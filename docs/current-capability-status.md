@@ -1,7 +1,7 @@
 # Doorfast 当前能力与验证状态
 
 更新日期：2026-09-15
-代码基线：`origin/main` 的 `459acbe`，软件包 `0.1.0-r39`
+代码基线：`origin/main` 的 `3ed7979`，软件包 `0.1.0-r40`
 HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并）
 
 本文按当前已合并代码记录能力，不以历史路线图或单次构建结果代替实现核对。
@@ -21,7 +21,7 @@ HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并�
 
 | 能力 | 当前实现 | 已有证据 | 尚未证明 |
 |---|---|---|---|
-| 主机模式传输 | `active_host` 打开 UDP/8300，生成厂商公共头，学习已观察对端路由并发送控制、在线和同步报文；室内机 IP 由有效 GVS 身份推导或由管理员覆盖，服务只在门禁口临时挂载并绑定该地址 | 代码、单元测试、历史目标系统测试 | 门口机在 MT8157 离线后的冷启动识别和长期在线 |
+| 主机模式传输 | `active_host` 打开 UDP/8300，生成厂商公共头，学习已观察对端路由并发送控制、在线和同步报文；室内机 IP 由有效 GVS 身份推导或由管理员覆盖，服务只在门禁口临时挂载并绑定该地址 | 代码、单元测试、r40 Actions 构建、隔离 ImmortalWrt VM 的地址生命周期、UDP bind 与控制回环 | 门口机在 MT8157 离线后的冷启动识别和长期在线 |
 | 来电 | 解析 `03/01`，建立带 generation 的会话，每次有效来电发送 `03/81` 回执 | 静态材料、PCAP、回放和运行时测试 | 真实门口机接受 Doorfast 回执 |
 | 接听与挂断 | `03/03 → 03/83`、`03/02 → 03/82`，绑定会话 generation，包含有限重试、确认和超时 | PCAP、构帧测试、状态机测试 | 实体通话闭环、忙线、转接和跨固件行为 |
 | 通话保活 | `03/51`/`03/52` 已接入 UDP 发送和运行时会话清理 | 静态材料、PCAP、测试 | 真机长时间通话和断网恢复 |
@@ -37,7 +37,7 @@ HA 集成基线：`doorfastforha` 的 `081c4b3`（HA/VM 验收 runner 已合并�
 | 本地控制接口 | ubus 和 HTTP 提供 `status`、`answer`、`hangup`、`unlock`、`call_elevator` | ubus 和 HTTP 测试 | HTTP CGI 自身没有独立令牌校验，部署端必须限制访问 |
 | 本地事件流 | `/var/run/doorfast/events.sock` 发布来电、通话建立、挂断、超时和抢占 JSON Lines；事件绑定 generation，每客户端队列上限 64，慢客户端断开 | C 测试、Actions、VM socket 属主和权限检查 | 实体门口机触发的连续事件序列 |
 | HA 主动事件 | 独立 relay 从本地 socket 读取事件，经 CA 和主机名校验的 HTTPS、Bearer token 投递到 HA；HA 刷新权威状态后去重和派发，五秒轮询兜底 | HA 35 项测试、Actions 交叉编译、VM TLS 投递和断线重试；真实 HA 2024.11.0 容器中 42 项 fixture 验收 | 实体门口机触发的连续事件、长期断网和高频来电运行 |
-| 管理与部署 | procd、UCI、只读 LuCI 状态页、LuCI 部署/自动化/relay 配置页、部署预检查、证据记录器、站点清单、事件 relay 和 OpenWrt 用户组生命周期 | CLI、配置、记录器、LuCI、Actions 和 ImmortalWrt VM 测试 | 主机模式临时地址在真实门禁口的验收、自动升级和完整发布流程 |
+| 管理与部署 | procd、UCI、只读 LuCI 状态页、LuCI 部署/自动化/relay 配置页、部署预检查、证据记录器、站点清单、事件 relay 和 OpenWrt 用户组生命周期 | CLI、配置、记录器、LuCI、Actions 和 ImmortalWrt VM 测试；r40 已验证主机模式临时地址精确清理 | 主机模式临时地址在真实门禁口的验收、自动升级和完整发布流程 |
 
 ## 当前对外使用边界
 
@@ -61,9 +61,17 @@ LuCI 提供部署、来电自动化和 HA relay 配置；主机模式使用有�
 
 ImmortalWrt `25.12.1` VM 的主机模式测试使用隔离 GVS 对端 harness 注入合成来电，并观察 Doorfast 生产 UDP 控制和媒体帧。对端只绑定 loopback，发送 ACK 后回复 `03/51` 保活；证据可用于确认 Doorfast 的来电→接听确认→保活→PCM/UDP 发包时序，脱敏记录见 [`docs/evidence/2026-09-15-vm-gvs-talking.json`](evidence/2026-09-15-vm-gvs-talking.json)。本次 VM 为等待守护进程完成 talking 状态使用了 5 秒本地 settle 值，这不是厂商时序常量。它不证明 MT8157 实体设备接受回执、门锁/电梯动作、视频画面或扬声器可懂度。
 
+## 本轮 Slice 5：主机模式网络身份验收
+
+GitHub Actions [run 34980186142](https://github.com/jieinfo/doorfast/actions/runs/34980186142) 为提交 `79bc7eb` 构建 `doorfast` r40 与 `luci-app-doorfast` r10；该提交以合并提交 `3ed7979` 进入主线。2026-09-15 在 QEMU 用户态 NAT 的隔离 ImmortalWrt `25.12.1` x86_64 VM 安装这两个产物。VM 只使用 `127.0.0.1:2222` SSH 和回环 UDP 转发，没有桥接物理门禁网络。
+
+验收临时将 `br-lan` 设为测试门禁口。身份 `IS:2-1-101-2`、空室内机 IP、掩码 `255.0.0.0` 启动后，init 脚本记录并添加 `br-lan 10.5.65.32/8`；内核 `/proc/<doorfast-pid>/net/udp` 显示 Doorfast 的 UDP socket 绑定到该地址。停止服务后状态文件和该地址均消失。随后以手工 `10.99.1.7` 与 `255.255.255.0` 复验，得到 `br-lan 10.99.1.7/24` 和相同的 UDP 绑定/停止清理行为。该地址是 QEMU 内的临时测试地址，测试结束后 VM 恢复 `active_host=0`、`passive_only=1`，并移除两个室内机配置项和全部临时地址。
+
+同一隔离 VM 用合成来电完成既有来电→接听→挂断 UDP 回环，证明 r40 的新源地址绑定没有阻断控制帧提交。它只证明 Doorfast 在目标系统中添加和清理自己的地址、绑定本地 UDP socket，并能提交合成对端的协议帧；QEMU NAT 会改写出站报文，不能用此测试证明真实门口机看到的源地址，也不能证明物业网络分配地址、真实上线、门锁/电梯动作、视频或实体音频。
+
 ## 当前验证结果
 
-当前 C 测试、主程序编译、CLI、HTTP、PCM 隔离验收、软件包清单、记录器、站点清单和 LuCI JavaScript 测试通过；`doorfastforha` 主线已包含 HA/VM 验收 runner 及其 5 项 runner 单元测试。GitHub Actions [run 34943868811](https://github.com/jieinfo/doorfast/actions/runs/34943868811) 构建的是 PR head `958d93a5`；其相同代码树随后以合并提交 `5cd91ef` 进入主分支。该运行完成了 x86_64 ImmortalWrt 25.12.1 的 r39 交叉编译。下载产物的 SHA-256 为：
+当前 C 测试、主程序编译、CLI、HTTP、PCM 隔离验收、软件包清单、记录器、站点清单和 LuCI JavaScript 测试通过；`doorfastforha` 主线已包含 HA/VM 验收 runner 及其 5 项 runner 单元测试。r39 的历史 PCM 构建与验收仍保留如下；当前主线的 r40 构建和网络身份 VM 验收见“本轮 Slice 5”。GitHub Actions [run 34943868811](https://github.com/jieinfo/doorfast/actions/runs/34943868811) 构建的是 PR head `958d93a5`；其相同代码树随后以合并提交 `5cd91ef` 进入主分支。该运行完成了 x86_64 ImmortalWrt 25.12.1 的 r39 交叉编译。下载产物的 SHA-256 为：
 
 | 产物 | SHA-256 |
 |---|---|
@@ -81,7 +89,7 @@ VM 验收脚本依赖 Python 3；本次只在隔离 VM 中为运行验收安装 
 
 ## 下一步顺序
 
-1. 补齐 LuCI 的主机模式、接口、逻辑身份、门禁材料与 relay 配置入口，并为接听、挂断、开锁和手动召梯提供受 ACL 约束的操作界面。
-2. 在 MT8157 离线的受控现场依次验收独立上线、来电回执、挂断、开锁、召梯、视频和双向音频。
-3. 使用现场 PCAP 回填仍缺失的 `08/82`、`08/83`、视频丢片和真实双向音频证据，不把厂商静态材料单独作为结论。
+1. 在 MT8157 离线、与真实门禁网隔离的受控现场验证身份/IP/掩码的实际部署值；先记录 PCAP 和地址冲突，再验证冷启动上线。
+2. 以现场 PCAP 回填仍缺失的 `08/82`、`08/83`、视频丢片和真实双向音频证据，不把厂商静态材料单独作为结论。
+3. 按风险由低到高验收来电回执、挂断、开锁、召梯、视频和双向音频；每项协议回复与实体动作分开记录。
 4. 完成 HA 长期断网、高频来电、浏览器回声与实体音频质量验证，再整理可发布的软件包升级流程。
