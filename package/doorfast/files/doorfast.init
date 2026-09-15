@@ -35,6 +35,7 @@ start_service() {
 	load_auto_elevator
 	[ "$enabled" -eq 1 ] || return 0
 	ensure_event_runtime || return 1
+	rm -f /tmp/doorfast-pcm-http.state
 
 	procd_open_instance
 	procd_set_param command /usr/sbin/doorfast --config /etc/config/doorfast --call-elev "$call_elev"

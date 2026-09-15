@@ -1,4 +1,5 @@
 #!/bin/sh
+helper=/usr/sbin/doorfast-pcm-http
 path="${PATH_INFO:-}"
 [ -n "$path" ] || path="${QUERY_STRING#path=}"
 

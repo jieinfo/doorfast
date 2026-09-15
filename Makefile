@@ -149,3 +149,5 @@ build/doorfast-pcm-submit: $(PCM_SUBMIT_SOURCES) src/gvs_pcm_ingress.h | build
 
 clean:
 	rm -rf build
+pcm-http-test: | build
+	$(CC) $(CPPFLAGS) -DDF_PCM_HTTP_TEST_PROGRAM $(CFLAGS) src/pcm_http.c src/runtime_id.c src/pcm_http_main.c src/pcm_http_ubus.c src/gvs_pcm_ingress.c -o build/doorfast-pcm-http
