@@ -60,7 +60,7 @@ LuCI 当前只显示状态。接口选择、逻辑身份、主机模式、开锁
 
 `doorfastforha` 的 `doorfast_ha_e2e` 是测试工具，不会进入 Doorfast 或 HA 的运行时安装包。它在同一 HA 容器内运行，避免 Docker/Colima 的主机 loopback 路由假设；2026-09-15 使用 HA `2024.11.0` 和 `doorfast` `a5fcca3` 完成 42 项检查。检查包括 REST config-flow 建项、四个静态前端资源、WebSocket start/submit/stop、断线与 generation 清理、双 entry 隔离、挂断清理以及 disable/re-enable unload/reload。JSONL 证据只保留布尔结果和脱敏摘要，不保存 token、PCM 或原始采集标识。该证据验证 HA 集成和网络契约，不等同于真实门口机音频验收。
 
-ImmortalWrt `25.12.1` VM 的主机模式测试使用隔离 GVS 对端 harness 注入合成来电，并观察 Doorfast 生产 UDP 控制和媒体帧。对端只绑定 loopback，发送 ACK 后回复 `03/51` 保活；证据可用于确认 Doorfast 的来电→接听确认→保活→PCM/UDP 发包时序。它不证明 MT8157 实体设备接受回执、门锁/电梯动作、视频画面或扬声器可懂度。
+ImmortalWrt `25.12.1` VM 的主机模式测试使用隔离 GVS 对端 harness 注入合成来电，并观察 Doorfast 生产 UDP 控制和媒体帧。对端只绑定 loopback，发送 ACK 后回复 `03/51` 保活；证据可用于确认 Doorfast 的来电→接听确认→保活→PCM/UDP 发包时序，脱敏记录见 [`docs/evidence/2026-09-15-vm-gvs-talking.json`](evidence/2026-09-15-vm-gvs-talking.json)。本次 VM 为等待守护进程完成 talking 状态使用了 5 秒本地 settle 值，这不是厂商时序常量。它不证明 MT8157 实体设备接受回执、门锁/电梯动作、视频画面或扬声器可懂度。
 
 ## 当前验证结果
 
