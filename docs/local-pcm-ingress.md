@@ -43,5 +43,23 @@ producer | doorfast-pcm-submit <generation>
 An optional second argument overrides the socket path for isolated tests. The
 sender accepts only a real Unix datagram socket owned by its effective user with
 mode `0600`; it rejects symbolic links and broader permissions. One invocation
-produces one atomic datagram. A future HTTP or WebRTC bridge must pace calls at
-20 ms and must not retry a frame after a successful exit.
+produces one atomic datagram. Network bridges must pace calls at 20 ms and must
+not retry a frame after a successful exit. The installed HTTP bridge described
+below performs that pacing; any later WebRTC producer must preserve the same
+rule.
+
+Package release `0.1.0-r39` installs the network-facing
+`doorfast-pcm-http` helper behind the existing CGI. Its session, batch and
+release contract is documented in [Doorfast HTTP bridge](doorfast-http-bridge.md#submit-microphone-pcm).
+It converts validated HTTP batches into the same `DFPCM01` datagrams and keeps
+the Unix socket private. The producer token, runtime ID, generation, continuous
+sequence, two-second lease and state-file lock prevent accidental mixing or
+replay by concurrent clients; they do not replace access control for the CGI.
+
+There are two separate acceptance boundaries. A successful HTTP response means
+the helper submitted the indicated frames to this local Unix ingress. The main
+daemon then performs another talking-state and generation check before it
+encodes accepted samples as G.711 A-law and sends UDP/8302. Neither local Unix
+acceptance nor a successful UDP send proves that an MT8157 speaker decoded or
+played intelligible audio. Speaker format, audible quality, latency, echo and
+long-call stability remain physical-device acceptance items.
