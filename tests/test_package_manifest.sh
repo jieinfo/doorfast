@@ -90,7 +90,35 @@ grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makef
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
 grep -q 'PKG_RELEASE:=39' package/doorfast/Makefile
 grep -q 'doorfast-pcm-http.*usr/sbin/doorfast-pcm-http' package/doorfast/Makefile
-! grep -q 'acceptance' package/doorfast/Makefile
+python3 - <<'ACCEPTANCE'
+import pathlib
+package = pathlib.Path('package/doorfast/Makefile').read_text()
+workflow = pathlib.Path('.github/workflows/build-apk.yml').read_text()
+compile_block = package.split('define Build/Compile\n', 1)[1].split('endef', 1)[0]
+commands = compile_block.replace('\\\n', ' ').splitlines()
+acceptance = [line for line in commands if '-o $(PKG_BUILD_DIR)/doorfast-pcm-http-acceptance' in line]
+assert len(acceptance) == 1, 'missing distinct acceptance target compiler command'
+assert '$(TARGET_CC)' in acceptance[0] and '-DDF_PCM_HTTP_ACCEPTANCE' in acceptance[0]
+assert 'src/pcm_http.c' in acceptance[0] and 'src/pcm_http_main.c' in acceptance[0]
+installed = package.split('define Package/doorfast/install\n', 1)[1].split('endef', 1)[0]
+assert 'doorfast-pcm-http-acceptance' not in installed, 'acceptance binary must stay out of APK'
+assert '$(1)/usr/sbin/doorfast-pcm-http\n' in installed
+assert "grep -Fxq '/usr/sbin/doorfast-pcm-http' \"$doorfast_list\"" in workflow
+assert "! grep -Fq 'doorfast-pcm-http-acceptance' \"$doorfast_list\"" in workflow
+assert 'cp \"$acceptance\" artifacts/doorfast-pcm-http-acceptance' in workflow
+assert 'test \"${#sdk_dirs[@]}\" -eq 1' in workflow
+assert 'test \"${#acceptance_files[@]}\" -eq 1' in workflow
+assert 'test \"${#doorfast_apks[@]}\" -eq 1' in workflow
+assert 'test \"${#luci_apks[@]}\" -eq 1' in workflow
+upload = workflow.split('uses: actions/upload-artifact@v4', 1)[1]
+assert 'artifacts/doorfast-pcm-http-acceptance' in upload
+assert 'artifacts/doorfast.apk' in upload and 'artifacts/luci-app-doorfast.apk' in upload
+assert '**/bin/packages/' not in upload
+# Fresh idle daemons report zero generations; only talking/active statuses
+# require a nonzero, matching TX generation. Target blobmsg parsing runs in VM.
+adapter = pathlib.Path('src/pcm_http_ubus.c').read_text()
+assert 'if (strcmp(session, "talking") == 0 || parsed.audio_tx_active)' in adapter, 'idle zero-generation status must remain parseable'
+ACCEPTANCE
 grep -Fq -- '-DDF_WITH_UBUS -DDF_PCM_HTTP_PROGRAM' package/doorfast/Makefile
 grep -Fq 'src/pcm_http.c' package/doorfast/Makefile
 grep -Fq 'src/pcm_http_ubus.c' package/doorfast/Makefile

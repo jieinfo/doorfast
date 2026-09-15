@@ -33,6 +33,8 @@ struct pcm_fake {
     unsigned fail_send;
     unsigned fail_sleep;
     uint64_t send_duration;
+    uint64_t first_sleep_overshoot;
+    uint64_t send_clock_override;
     uint64_t send_times[10];
     uint64_t deadlines[10];
     int16_t samples[10][160];
@@ -74,6 +76,7 @@ static int pcm_sleep(uint64_t deadline, void *context) {
     fake->deadlines[fake->sleeps++] = deadline;
     if (fake->sleeps == fake->fail_sleep) return DF_ERR_IO;
     if (fake->now < deadline) fake->now = deadline;
+    if (fake->sleeps == 1) fake->now += fake->first_sleep_overshoot;
     return DF_OK;
 }
 
@@ -100,6 +103,7 @@ static int pcm_send(const char *path, uint64_t generation, const int16_t *pcm,
         fclose(state);
     }
     fake->now += fake->send_duration;
+    if (fake->send_clock_override != 0) fake->now = fake->send_clock_override;
     return fake->sends == fake->fail_send ? DF_ERR_IO : DF_OK;
 }
 
@@ -321,15 +325,15 @@ static void pcm_test_pacing_and_recovery(void) {
         TEST_ASSERT_INT_EQ((int)frames, (int)fixture.fake.sends);
         TEST_ASSERT_INT_EQ((int)frames - 1, (int)fixture.fake.sleeps);
         for (unsigned i = 0; i < frames; i++) {
-            TEST_ASSERT_INT_EQ(1000 + (int)i * 20, (int)fixture.fake.send_times[i]);
-            if (i != 0) TEST_ASSERT_INT_EQ(1000 + (int)i * 20, (int)fixture.fake.deadlines[i - 1]);
+            TEST_ASSERT_INT_EQ(1000 + (int)i * 27, (int)fixture.fake.send_times[i]);
+            if (i != 0) TEST_ASSERT_INT_EQ(1000 + (int)i * 27, (int)fixture.fake.deadlines[i - 1]);
             TEST_ASSERT_INT_EQ(0, memcmp(expected[i], fixture.fake.samples[i], sizeof(expected[i])));
             TEST_ASSERT_INT_EQ(100 + (int)i, (int)fixture.fake.persisted_sequence[i]);
-            TEST_ASSERT_INT_EQ(i == 0 ? 3000 : 3007 + ((int)i - 1) * 20,
+            TEST_ASSERT_INT_EQ(i == 0 ? 3000 : 3007 + ((int)i - 1) * 27,
                                (int)fixture.fake.persisted_lease[i]);
         }
         char record[256];
-        snprintf(record, sizeof(record), "runtime_id=" RUNTIME "\ngeneration=42\nnext_sequence=%u\naudio_session=" TOKEN "\nlease_deadline_ms=%u\n", 100 + frames, 3007 + (frames - 1) * 20);
+        snprintf(record, sizeof(record), "runtime_id=" RUNTIME "\ngeneration=42\nnext_sequence=%u\naudio_session=" TOKEN "\nlease_deadline_ms=%u\n", 100 + frames, 3007 + (frames - 1) * 27);
         pcm_assert_record(&fixture, record);
         pcm_fixture_clear(&fixture);
     }
@@ -359,6 +363,35 @@ static void pcm_test_pacing_and_recovery(void) {
     for (unsigned i = 0; i < 3; i++)
         TEST_ASSERT_INT_EQ(0, memcmp(expected[i + 2], fixture.fake.samples[i + 3], sizeof(expected[0])));
     pcm_assert_record(&fixture, "runtime_id=" RUNTIME "\ngeneration=42\nnext_sequence=105\naudio_session=" TOKEN "\nlease_deadline_ms=3080\n");
+    pcm_fixture_clear(&fixture);
+}
+
+static void pcm_test_pacing_does_not_compress_after_oversleep(void) {
+    struct pcm_fixture fixture;
+    uint8_t body[960] = {0};
+    pcm_submit_init(&fixture);
+    fixture.request.content_length = "960";
+    fixture.fake.first_sleep_overshoot = 15;
+    pcm_body(&fixture, body, sizeof(body));
+    struct df_pcm_http_response response = pcm_handle(&fixture, 200);
+    TEST_ASSERT_INT_EQ(3, (int)response.accepted_frames);
+    TEST_ASSERT_INT_EQ(1020, (int)fixture.fake.deadlines[0]);
+    TEST_ASSERT_INT_EQ(1035, (int)fixture.fake.send_times[1]);
+    TEST_ASSERT_INT_EQ(1055, (int)fixture.fake.deadlines[1]);
+    TEST_ASSERT_INT_EQ(1055, (int)fixture.fake.send_times[2]);
+    pcm_fixture_clear(&fixture);
+
+    pcm_submit_init(&fixture);
+    fixture.request.content_length = "960";
+    fixture.fake.send_clock_override = UINT64_MAX - 10;
+    pcm_body(&fixture, body, sizeof(body));
+    response = pcm_handle(&fixture, 503);
+    TEST_ASSERT_INT_EQ(0, strcmp("clock_unavailable", response.error));
+    TEST_ASSERT_INT_EQ(1, (int)response.accepted_frames);
+    TEST_ASSERT_INT_EQ(101, (int)response.next_sequence);
+    TEST_ASSERT_INT_EQ(1, (int)fixture.fake.sends);
+    TEST_ASSERT_INT_EQ(0, (int)fixture.fake.sleeps);
+    pcm_assert_record(&fixture, "runtime_id=" RUNTIME "\ngeneration=42\nnext_sequence=101\naudio_session=" TOKEN "\nlease_deadline_ms=18446744073709551605\n");
     pcm_fixture_clear(&fixture);
 }
 
@@ -415,6 +448,7 @@ void test_pcm_http_validates_session_requests(void) {
     pcm_test_body_admission();
     pcm_test_submit_admission();
     pcm_test_pacing_and_recovery();
+    pcm_test_pacing_does_not_compress_after_oversleep();
     pcm_test_submit_provider_failure();
 }
 

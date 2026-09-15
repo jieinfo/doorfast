@@ -24,6 +24,15 @@ jobs:
       - run: sh tests/test_main_cli.sh
       - run: sh tests/test_recorder_cli.sh
       - run: sh tests/test_pcm_submit_cli.sh
+      - run: sh tests/test_pcm_http_cli.sh
+      - name: Check PCM acceptance fixtures on host
+        run: |
+          python3 -m py_compile tests/run_doorfast_vm_pcm_http.py
+          python3 -B -m unittest tests/test_pcm_http_vm_runner.py
+          cc -D_DEFAULT_SOURCE -DDF_PCM_HTTP_ACCEPTANCE -std=c17 -Wall -Wextra -Werror -pedantic -Isrc \
+            src/pcm_http.c src/pcm_http_main.c src/runtime_id.c src/gvs_pcm_ingress.c \
+            -o build/doorfast-pcm-http-acceptance-host
+          python3 -B tests/run_doorfast_vm_pcm_http.py --isolated build/doorfast-pcm-http-acceptance-host
       - run: sh tests/test_site_inventory.sh
       - run: sh tests/test_package_manifest.sh
       - run: sh tests/test_doorfast_http.sh
@@ -50,8 +59,9 @@ jobs:
           tar --zstd -xf ".cache/$sdk"
       - name: Build APK
         run: |
-          sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
-          test -n "$sdk_dir"
+          mapfile -t sdk_dirs < <(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' -print)
+          test "${#sdk_dirs[@]}" -eq 1
+          sdk_dir=${sdk_dirs[0]}
           (
             cd "$sdk_dir"
             ./scripts/feeds update -a
@@ -64,22 +74,44 @@ jobs:
           make -C "$sdk_dir" package/luci-app-doorfast/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
       - name: Verify generated APK file lists
         run: |
-          sdk_dir=$(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' | head -n 1)
+          mapfile -t sdk_dirs < <(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' -print)
+          test "${#sdk_dirs[@]}" -eq 1
+          sdk_dir=${sdk_dirs[0]}
           doorfast_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/doorfast/lib/apk/packages/doorfast.list' | head -n 1)
           luci_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/luci-app-doorfast/lib/apk/packages/luci-app-doorfast.list' | head -n 1)
           test -n "$doorfast_list"
           test -n "$luci_list"
           grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-recorder' "$doorfast_list"
+          grep -Fxq '/usr/sbin/doorfast-pcm-http' "$doorfast_list"
+          ! grep -Fq 'doorfast-pcm-http-acceptance' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-pcm-submit' "$doorfast_list"
           grep -Fxq '/etc/init.d/doorfast-recorder' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-site-inventory' "$doorfast_list"
           grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"
           ! grep -Fq 'gvs-peer-' "$doorfast_list" "$luci_list"
+      - name: Stage non-installed PCM acceptance executable
+        run: |
+          mapfile -t sdk_dirs < <(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' -print)
+          test "${#sdk_dirs[@]}" -eq 1
+          sdk_dir=${sdk_dirs[0]}
+          mapfile -t acceptance_files < <(find "$sdk_dir/build_dir" -type f -path '*/doorfast-*/doorfast-pcm-http-acceptance' -print)
+          test "${#acceptance_files[@]}" -eq 1
+          acceptance=${acceptance_files[0]}
+          test -x "$acceptance"
+          mkdir -p artifacts
+          cp "$acceptance" artifacts/doorfast-pcm-http-acceptance
+          mapfile -t doorfast_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'doorfast-*.apk' -print)
+          mapfile -t luci_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'luci-app-doorfast-*.apk' -print)
+          test "${#doorfast_apks[@]}" -eq 1
+          test "${#luci_apks[@]}" -eq 1
+          cp "${doorfast_apks[0]}" artifacts/doorfast.apk
+          cp "${luci_apks[0]}" artifacts/luci-app-doorfast.apk
       - uses: actions/upload-artifact@v4
         with:
           name: doorfast-apk
           path: |
-            **/bin/packages/x86_64/base/doorfast-*.apk
-            **/bin/packages/x86_64/base/luci-app-doorfast-*.apk
+            artifacts/doorfast.apk
+            artifacts/luci-app-doorfast.apk
+            artifacts/doorfast-pcm-http-acceptance
           if-no-files-found: error

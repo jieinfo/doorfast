@@ -1,6 +1,10 @@
 #include "pcm_http.h"
 
-#if defined(DF_PCM_HTTP_PROGRAM) || defined(DF_PCM_HTTP_TEST_PROGRAM)
+#if defined(DF_PCM_HTTP_PROGRAM) || defined(DF_PCM_HTTP_TEST_PROGRAM) || defined(DF_PCM_HTTP_ACCEPTANCE)
+
+#if (defined(DF_PCM_HTTP_PROGRAM) + defined(DF_PCM_HTTP_TEST_PROGRAM) + defined(DF_PCM_HTTP_ACCEPTANCE)) != 1
+#error "PCM HTTP program modes are mutually exclusive"
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -11,8 +15,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifndef DF_PCM_HTTP_TEST_PROGRAM
+#ifdef DF_PCM_HTTP_PROGRAM
 #include "pcm_http_ubus.h"
+#endif
+#ifdef DF_PCM_HTTP_ACCEPTANCE
+#include <sys/stat.h>
+#include "gvs_pcm_ingress.h"
+#include "runtime_id.h"
 #endif
 
 #define DF_PCM_HTTP_STATE_PATH "/tmp/doorfast-pcm-http.state"
@@ -151,10 +160,12 @@ static int test_send_pcm(const char *path, uint64_t generation,
 
 #else
 
+#ifdef DF_PCM_HTTP_PROGRAM
 static int production_status(struct df_pcm_http_status *status, void *context)
 {
     return df_pcm_http_ubus_status(status, context);
 }
+#endif
 
 static int production_random(uint8_t *bytes, size_t length, void *context)
 {
@@ -178,6 +189,149 @@ static int production_random(uint8_t *bytes, size_t length, void *context)
         return -1;
     }
     return close(fd) == 0 ? 0 : -1;
+}
+
+#endif
+
+#ifdef DF_PCM_HTTP_ACCEPTANCE
+
+static bool acceptance_decimal(const char *text, uint64_t *value)
+{
+    uint64_t parsed = 0;
+    size_t digits = 0;
+
+    if (*text == '\0')
+        return false;
+    for (; *text != '\0'; text++) {
+        unsigned digit = (unsigned)(*text - '0');
+        if (digit > 9U || ++digits > 20U ||
+            parsed > (UINT64_MAX - digit) / 10U)
+            return false;
+        parsed = parsed * 10U + digit;
+    }
+    *value = parsed;
+    return true;
+}
+
+static int acceptance_status(struct df_pcm_http_status *status, void *context)
+{
+    const char *path = context;
+    struct stat info;
+    struct df_pcm_http_status parsed = {0};
+    char record[256];
+    size_t used = 0;
+    unsigned seen = 0;
+    /* NONBLOCK prevents a FIFO fixture from hanging before the type check. */
+    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+
+    if (fd < 0)
+        return -1;
+    if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) ||
+        info.st_uid != geteuid() || (info.st_mode & 07777) != 0600) {
+        (void)close(fd);
+        return -1;
+    }
+    while (used < sizeof(record)) {
+        ssize_t count = read(fd, record + used, sizeof(record) - used);
+        if (count > 0) {
+            used += (size_t)count;
+            continue;
+        }
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count < 0) {
+            (void)close(fd);
+            return -1;
+        }
+        break;
+    }
+    if (close(fd) != 0 || used == 0U || used == sizeof(record) ||
+        record[used - 1U] != '\n' || memchr(record, '\0', used) != NULL)
+        return -1;
+    record[used] = '\0';
+    char *line = record;
+    while (*line != '\0') {
+        char *newline = strchr(line, '\n');
+        char *equals = strchr(line, '=');
+        unsigned field;
+        if (newline == NULL || equals == NULL || equals > newline)
+            return -1;
+        *newline = '\0';
+        *equals++ = '\0';
+        if (strcmp(line, "runtime_id") == 0) {
+            field = 1U;
+            if (!df_runtime_id_is_valid(equals))
+                return -1;
+            memcpy(parsed.runtime_id, equals, sizeof(parsed.runtime_id));
+        } else if (strcmp(line, "call_state") == 0) {
+            field = 2U;
+            if (strcmp(equals, "idle") != 0 && strcmp(equals, "preview") != 0 &&
+                strcmp(equals, "ringing") != 0 && strcmp(equals, "talking") != 0 &&
+                strcmp(equals, "ended") != 0)
+                return -1;
+            (void)snprintf(parsed.call_state, sizeof(parsed.call_state), "%s", equals);
+        } else if (strcmp(line, "generation") == 0) {
+            field = 4U;
+            if (!acceptance_decimal(equals, &parsed.generation))
+                return -1;
+        } else if (strcmp(line, "audio_tx_active") == 0) {
+            field = 8U;
+            if (strcmp(equals, "0") != 0 && strcmp(equals, "1") != 0)
+                return -1;
+            parsed.audio_tx_active = *equals == '1';
+        } else if (strcmp(line, "audio_tx_generation") == 0) {
+            field = 16U;
+            if (!acceptance_decimal(equals, &parsed.audio_tx_generation))
+                return -1;
+        } else {
+            return -1;
+        }
+        if ((seen & field) != 0U)
+            return -1;
+        seen |= field;
+        line = newline + 1;
+    }
+    if (seen != 31U)
+        return -1;
+    *status = parsed;
+    return 0;
+}
+
+static int acceptance_send(const char *path, uint64_t generation,
+                           const int16_t *pcm, size_t sample_count, void *context)
+{
+    (void)context;
+    return df_gvs_pcm_ingress_send(path, generation, pcm, sample_count);
+}
+
+static bool acceptance_arguments(int argc, char **argv, const char **status_path,
+                                 const char **state_path, const char **socket_path)
+{
+    unsigned seen = 0;
+
+    if (argc != 7)
+        return false;
+    for (int index = 1; index < argc; index += 2) {
+        unsigned field;
+        const char **destination;
+        if (strcmp(argv[index], "--status-file") == 0) {
+            field = 1U;
+            destination = status_path;
+        } else if (strcmp(argv[index], "--state") == 0) {
+            field = 2U;
+            destination = state_path;
+        } else if (strcmp(argv[index], "--socket") == 0) {
+            field = 4U;
+            destination = socket_path;
+        } else {
+            return false;
+        }
+        if ((seen & field) != 0U || argv[index + 1][0] == '\0')
+            return false;
+        seen |= field;
+        *destination = argv[index + 1];
+    }
+    return seen == 7U;
 }
 
 #endif
@@ -303,7 +457,11 @@ static void render_simple_error(unsigned status, const char *error)
     render_response(&response);
 }
 
+#ifdef DF_PCM_HTTP_ACCEPTANCE
+int main(int argc, char **argv)
+#else
 int main(void)
+#endif
 {
     enum df_pcm_http_operation operation;
     struct query_fields fields;
@@ -314,6 +472,13 @@ int main(void)
     const char *state_path = DF_PCM_HTTP_STATE_PATH;
     const char *socket_path = DF_PCM_HTTP_SOCKET_PATH;
 
+#ifdef DF_PCM_HTTP_ACCEPTANCE
+    const char *status_path = NULL;
+    if (!acceptance_arguments(argc, argv, &status_path, &state_path, &socket_path)) {
+        render_simple_error(500U, "invalid_config");
+        return 0;
+    }
+#endif
     if (!operation_for_path(path, &operation)) {
         render_simple_error(404U, "not_found");
         return 0;
@@ -350,6 +515,11 @@ int main(void)
     config.ops.read_status = test_status;
     config.ops.fill_random = test_random;
     config.ops.send_pcm = test_send_pcm;
+#elif defined(DF_PCM_HTTP_ACCEPTANCE)
+    config.ops.read_status = acceptance_status;
+    config.ops.fill_random = production_random;
+    config.ops.send_pcm = acceptance_send;
+    config.ops.context = (void *)status_path;
 #else
     config.ops.read_status = production_status;
     config.ops.fill_random = production_random;

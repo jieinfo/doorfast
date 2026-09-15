@@ -208,10 +208,11 @@ static int handle_locked(const struct df_pcm_http_config *config,
         if (sequence != state.next_sequence)
             return respond(response, 409, sequence < state.next_sequence ? "sequence_duplicate" : "sequence_gap");
         uint64_t first_deadline = now;
+        uint64_t next_deadline = now;
         response->next_sequence = sequence;
         for (unsigned frame = 0; frame < frames; frame++) {
             if (frame != 0U && config->ops.sleep_until_ms != NULL &&
-                config->ops.sleep_until_ms(first_deadline + (uint64_t)frame * 20U, config->ops.context) != DF_OK)
+                config->ops.sleep_until_ms(next_deadline, config->ops.context) != DF_OK)
                 return respond(response, 503, "pacing_unavailable");
             for (size_t sample = 0; sample < 160U; sample++) {
                 size_t offset = (size_t)frame * DF_PCM_HTTP_FRAME_BYTES + sample * 2U;
@@ -226,10 +227,24 @@ static int handle_locked(const struct df_pcm_http_config *config,
             response->accepted_frames++;
             response->next_sequence = state.next_sequence;
             now = config->ops.now_ms(config->ops.context);
-            if (now > UINT64_MAX - DF_PCM_HTTP_LEASE_MS)
-                return respond(response, 503, "clock_unavailable");
-            state.lease_deadline_ms = now + DF_PCM_HTTP_LEASE_MS;
+            bool clock_overflow = now > UINT64_MAX - DF_PCM_HTTP_LEASE_MS;
+            /* Even a clock failure must persist the accepted prefix. Expire
+             * the lease instead of wrapping it and permitting replay. */
+            state.lease_deadline_ms = clock_overflow ? now : now + DF_PCM_HTTP_LEASE_MS;
             if (!write_state(fd, &state)) return respond(response, 503, "state_unavailable");
+            if (clock_overflow)
+                return respond(response, 503, "clock_unavailable");
+            if (frame + 1U < frames) {
+                uint64_t offset = (uint64_t)(frame + 1U) * 20U;
+                if (first_deadline > UINT64_MAX - offset)
+                    return respond(response, 503, "clock_unavailable");
+                uint64_t scheduled = first_deadline + offset;
+                /* Retain absolute sleeps, but never compress the next gap
+                 * after an oversleep or a slow successful send. */
+                next_deadline = now + 20U;
+                if (next_deadline < scheduled)
+                    next_deadline = scheduled;
+            }
         }
         response->lease_ms = DF_PCM_HTTP_LEASE_MS;
         return respond(response, 200, "");
