@@ -22,7 +22,8 @@ static void stop_relay(int signal_number) { (void)signal_number; running = 0; }
 static int post_event(const char *url, const char *entry, const char *token,
                       const char *ca_file, const struct df_relay_event *event) {
     char host[256], authority[256], port[16], path[512], request[4096];
-    const char *p = url + 8;
+    const int https = strncmp(url, "https://", 8) == 0;
+    const char *p = url + (https ? 8 : 7);
     const char *slash = strchr(p, '/');
     int fd = -1, status = 0;
     struct addrinfo hints, *results = NULL, *item;
@@ -33,7 +34,7 @@ static int post_event(const char *url, const char *entry, const char *token,
     if ((slash && (size_t)(slash - p) >= sizeof(authority)) || (!slash && strlen(p) >= sizeof(authority))) return -1;
     if (slash) { memcpy(authority, p, (size_t)(slash - p)); authority[slash - p] = '\0'; }
     else strcpy(authority, p);
-    strcpy(port, "443");
+    strcpy(port, https ? "443" : "80");
     colon = strrchr(authority, ':');
     if (colon && strchr(colon + 1, ':') == NULL) {
         size_t host_len = (size_t)(colon - authority);
@@ -69,20 +70,29 @@ static int post_event(const char *url, const char *entry, const char *token,
     { struct timeval timeout = { .tv_sec = 5, .tv_usec = 0 };
       setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)); }
-    ctx = SSL_CTX_new(TLS_client_method());
-    if (!ctx || !SSL_CTX_load_verify_locations(ctx, ca_file, NULL)) goto done;
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    ssl = SSL_new(ctx);
-    if (!ssl || !SSL_set_tlsext_host_name(ssl, host) || !SSL_set1_host(ssl, host) ||
-        !SSL_set_fd(ssl, fd) || SSL_connect(ssl) != 1) goto done;
-    while (offset < strlen(request)) {
-        int written = SSL_write(ssl, request + offset, (int)(strlen(request) - offset));
-        if (written <= 0) goto done;
-        offset += (size_t)written;
+    if (https) {
+        ctx = SSL_CTX_new(TLS_client_method());
+        if (!ctx || ca_file == NULL || !SSL_CTX_load_verify_locations(ctx, ca_file, NULL)) goto done;
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+        ssl = SSL_new(ctx);
+        if (!ssl || !SSL_set_tlsext_host_name(ssl, host) || !SSL_set1_host(ssl, host) ||
+            !SSL_set_fd(ssl, fd) || SSL_connect(ssl) != 1) goto done;
+        while (offset < strlen(request)) {
+            int written = SSL_write(ssl, request + offset, (int)(strlen(request) - offset));
+            if (written <= 0) goto done;
+            offset += (size_t)written;
+        }
+    } else {
+        while (offset < strlen(request)) {
+            ssize_t written = write(fd, request + offset, strlen(request) - offset);
+            if (written <= 0) goto done;
+            offset += (size_t)written;
+        }
     }
     {
         char response[256] = {0};
-        int n = SSL_read(ssl, response, sizeof(response) - 1);
+        int n = https ? SSL_read(ssl, response, sizeof(response) - 1) :
+            (int)read(fd, response, sizeof(response) - 1);
         if (n > 12 && sscanf(response, "HTTP/%*s %d", &status) != 1) status = 0;
     }
 done:
@@ -119,7 +129,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--ca-file")) ca_file = argv[i + 1];
         else return 2;
     }
-    if (!url || !entry || !token_path || !ca_file || df_relay_validate_https_url(url) ||
+    if (!url || !entry || !token_path || df_relay_validate_url(url) ||
         df_relay_validate_entry_id(entry) || df_relay_token_file_ok(token_path)) return 2;
     {
         FILE *file = fopen(token_path, "r"); size_t n;

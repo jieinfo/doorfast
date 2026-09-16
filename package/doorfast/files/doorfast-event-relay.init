@@ -8,17 +8,33 @@ token_file_secure() {
 	[ "$1" = '-rw-------' ] && [ "$3" = '0' ]
 }
 
+store_token() {
+	[ -n "$1" ] || return 0
+	case "$1" in *'\n'*|*'\r'*) return 1 ;; esac
+	(umask 077; printf '%s\n' "$1" > "$2") || return 1
+	chown root:root "$2" 2>/dev/null || return 1
+	chmod 0600 "$2" || return 1
+	uci -q delete doorfast-events.main.token
+	uci -q commit doorfast-events
+}
+
 start_service() {
 	config_load doorfast-events
 	config_get_bool enabled relay enabled 0
 	config_get url relay url
 	config_get entry_id relay entry_id
+	config_get token relay token
 	config_get token_file relay token_file
 	config_get ca_file relay ca_file
 	[ "$enabled" -eq 1 ] || return 0
 	[ -n "$url" ] && [ -n "$entry_id" ] || return 0
+	store_token "$token" "$token_file" || return 0
 	token_file_secure "$token_file" || return 0
-	[ -r "$ca_file" ] || return 0
+	case "$url" in
+		https://*) [ -r "$ca_file" ] || return 0 ;;
+		http://*) ;;
+		*) return 0 ;;
+	esac
 	procd_open_instance
 	procd_set_param command /usr/sbin/doorfast-event-relay --socket /var/run/doorfast/events.sock --url "$url" --entry-id "$entry_id" --token-file "$token_file" --ca-file "$ca_file"
 	# Root is required to read the root-owned 0600 bearer token; the relay has no inbound listener.
