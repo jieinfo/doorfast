@@ -121,23 +121,34 @@ int df_relay_token_file_ok(const char *path) {
     return 0;
 }
 
-int df_relay_validate_https_url(const char *url) {
+int df_relay_validate_url(const char *url) {
     const char *p, *colon;
-    unsigned long port = 443;
-    if (!url || strncmp(url, "https://", 8) != 0 || url[8] == '\0') return -1;
-    for (p = url + 8; *p; p++) {
+    size_t scheme_length;
+    unsigned long port;
+    if (!url) return -1;
+    if (strncmp(url, "https://", 8) == 0) {
+        scheme_length = 8U;
+        port = 443;
+    } else if (strncmp(url, "http://", 7) == 0) {
+        scheme_length = 7U;
+        port = 80;
+    } else return -1;
+    if (url[scheme_length] == '\0') return -1;
+    for (p = url + scheme_length; *p; p++) {
         unsigned char c = (unsigned char)*p;
         if (c <= 0x20 || c == 0x7f || *p == '/') return -1;
     }
-    colon = strrchr(url + 8, ':');
+    colon = strrchr(url + scheme_length, ':');
     if (colon) {
         char *end;
-        if (colon == url + 8 || !colon[1]) return -1;
+        if (colon == url + scheme_length || !colon[1]) return -1;
         errno = 0; port = strtoul(colon + 1, &end, 10);
         if (errno || *end || port == 0 || port > 65535) return -1;
     }
-    if (!strncmp(url + 8, "localhost", 9) && (url[17] == '\0' || url[17] == ':')) return 0;
-    if (url[8] == ':') return -1;
+    if (!strncmp(url + scheme_length, "localhost", 9) &&
+        (url[scheme_length + 9U] == '\0' ||
+         url[scheme_length + 9U] == ':')) return 0;
+    if (url[scheme_length] == ':') return -1;
     return 0;
 }
 

@@ -44,14 +44,16 @@ const byName = name => rendered.options.find(option => option.optionName === nam
 
 assert.equal(rendered.config, 'doorfast-events');
 assert.deepEqual(rendered.options.map(option => option.optionName), [
-    'enabled', 'url', 'entry_id', 'token_file', 'ca_file'
+    'enabled', 'url', 'entry_id', 'token', 'ca_file'
 ]);
 assert.equal(byName('enabled').optionType, Flag);
 assert.equal(byName('url').datatype, 'url');
 assert.equal(byName('url').validate('main', 'https://ha.example:8443'), true);
-assert.match(byName('url').validate('main', 'http://ha.example'), /HTTPS/);
+assert.equal(byName('url').validate('main', 'http://ha.example:8123'), true);
 assert.match(byName('url').validate('main', 'https://ha.example/path'), /路径/);
 assert.equal(byName('entry_id').datatype, 'string');
-assert.equal(byName('token_file').datatype, 'file');
+assert.equal(byName('token').password, true);
+assert.equal(byName('token').rmempty, true);
+assert.equal(byName('token').cfgvalue('main'), '');
 assert.equal(byName('ca_file').datatype, 'file');
 assert.doesNotMatch(source, /require rpc|rpc\.declare|form\.Button/);

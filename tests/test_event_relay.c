@@ -37,11 +37,13 @@ static void test_policy(void) {
     TEST_ASSERT_INT_EQ(0, df_relay_retryable_status(401));
     TEST_ASSERT_INT_EQ(4000, (int)df_relay_backoff_ms(2, 10000));
     TEST_ASSERT_INT_EQ(10000, (int)df_relay_backoff_ms(8, 10000));
-    TEST_ASSERT_INT_EQ(0, df_relay_validate_https_url("https://example"));
-    TEST_ASSERT_INT_EQ(0, df_relay_validate_https_url("https://example:8443"));
-    TEST_ASSERT_INT_EQ(-1, df_relay_validate_https_url("https://example/base"));
-    TEST_ASSERT_INT_EQ(-1, df_relay_validate_https_url("https://example\r\nX"));
-    TEST_ASSERT_INT_EQ(-1, df_relay_validate_https_url("http://example"));
+    TEST_ASSERT_INT_EQ(0, df_relay_validate_url("https://example"));
+    TEST_ASSERT_INT_EQ(0, df_relay_validate_url("https://example:8443"));
+    TEST_ASSERT_INT_EQ(0, df_relay_validate_url("http://example"));
+    TEST_ASSERT_INT_EQ(0, df_relay_validate_url("http://example:8123"));
+    TEST_ASSERT_INT_EQ(-1, df_relay_validate_url("https://example/base"));
+    TEST_ASSERT_INT_EQ(-1, df_relay_validate_url("https://example\r\nX"));
+    TEST_ASSERT_INT_EQ(-1, df_relay_validate_url("ftp://example"));
     TEST_ASSERT_INT_EQ(0, df_relay_validate_entry_id("entry_1"));
     TEST_ASSERT_INT_EQ(-1, df_relay_validate_entry_id("entry/1"));
 }

@@ -33,7 +33,7 @@ int df_relay_queue_pop(struct df_relay_queue *queue,
 int df_relay_retryable_status(int status_code);
 uint64_t df_relay_backoff_ms(unsigned attempt, uint64_t max_ms);
 int df_relay_token_file_ok(const char *path);
-int df_relay_validate_https_url(const char *url);
+int df_relay_validate_url(const char *url);
 int df_relay_validate_entry_id(const char *entry_id);
 
 #endif
