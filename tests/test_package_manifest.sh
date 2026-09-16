@@ -109,7 +109,7 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=46' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=47' package/doorfast/Makefile
 grep -Fq "option token ''" package/doorfast/files/doorfast-events.config
 grep -Fq 'store_token "$token" "$token_file"' package/doorfast/files/doorfast-event-relay.init
 grep -Fq 'http://*) ;;' package/doorfast/files/doorfast-event-relay.init

@@ -179,7 +179,8 @@ int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *action,
      * serializer has no wire encoding for these notifications, so they must
      * not be treated as a failed UDP transmission by the runtime. */
     if (action->type == DF_GVS_PRESENCE_PEER_ONLINE ||
-        action->type == DF_GVS_PRESENCE_PEER_OFFLINE) {
+        action->type == DF_GVS_PRESENCE_PEER_OFFLINE ||
+        action->type == DF_GVS_PRESENCE_PERIODIC_SYNC) {
         return DF_OK;
     }
     if (ctx == NULL || ctx->sender == NULL ||
