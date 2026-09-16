@@ -2,6 +2,7 @@
 #define DOORFAST_RUNTIME_UBUS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "doorfast.h"
@@ -13,6 +14,15 @@
 #include "gvs_audio_buffer.h"
 #include "gvs_audio_tx.h"
 #include "gvs_video_frame_cache.h"
+
+#define DF_RUNTIME_UBUS_LOG_CAPACITY 128U
+#define DF_RUNTIME_UBUS_LOG_MESSAGE_MAX 160U
+
+struct df_runtime_log_entry {
+    uint64_t sequence;
+    uint64_t timestamp_ms;
+    char message[DF_RUNTIME_UBUS_LOG_MESSAGE_MAX];
+};
 
 typedef int (*df_runtime_status_provider_fn)(
     struct df_gvs_runtime_sync_status *status, void *context);
@@ -68,6 +78,10 @@ struct df_runtime_ubus {
     char runtime_id[DF_RUNTIME_ID_HEX_LENGTH + 1U];
     bool started;
     bool active_host;
+    struct df_runtime_log_entry log_entries[DF_RUNTIME_UBUS_LOG_CAPACITY];
+    size_t log_count;
+    size_t log_next;
+    uint64_t log_sequence;
 };
 
 int df_runtime_ubus_start(struct df_runtime_ubus *service,
@@ -107,5 +121,10 @@ int df_runtime_ubus_bind_video(struct df_runtime_ubus *,
     struct df_gvs_video_frame_cache *);
 int df_runtime_ubus_read_video_status(struct df_runtime_ubus *,
     struct df_gvs_video_status *);
+int df_runtime_ubus_log_event(struct df_runtime_ubus *, uint64_t,
+    const char *);
+size_t df_runtime_ubus_log_count(const struct df_runtime_ubus *);
+int df_runtime_ubus_log_get(const struct df_runtime_ubus *, size_t,
+    struct df_runtime_log_entry *);
 
 #endif

@@ -91,6 +91,18 @@ static uint64_t df_monotonic_ms(void) {
     return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
 }
 
+static void df_runtime_log_public_event(struct df_runtime_ubus *ubus,
+    uint64_t now_ms, const char *event, uint64_t generation) {
+    char message[DF_RUNTIME_UBUS_LOG_MESSAGE_MAX];
+    int written;
+
+    if (ubus == NULL || event == NULL) return;
+    written = snprintf(message, sizeof(message),
+        "event=%s generation=%llu", event, (unsigned long long)generation);
+    if (written > 0 && (size_t)written < sizeof(message))
+        (void)df_runtime_ubus_log_event(ubus, now_ms, message);
+}
+
 static void df_log_transition(const struct df_gvs_transition_event *event) {
     (void)printf("doorfast: event=%s generation=%llu\n",
                  df_event_type_name(event->type),
@@ -440,6 +452,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
+        df_runtime_log_public_event(&ubus, started_ms,
+            runtime->config.active_host ? "service_started_active_host" :
+                "service_started_passive", 0);
     } else {
         df_runtime_ubus_stop(&ubus);
         (void)fputs("doorfast: event=ubus_start_failed\n", stderr);
@@ -955,18 +970,24 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                                  (unsigned long long)session.generation);
                     df_runtime_publish_event(&event_stream, "call_established",
                         session.generation, now_ms);
+                    df_runtime_log_public_event(&ubus, now_ms,
+                        "call_established", session.generation);
                 }
                 if (result->observed_hangup) {
                     (void)printf("doorfast: event=hangup generation=%llu\n",
                                  (unsigned long long)session.generation);
                     df_runtime_publish_event(&event_stream, "hangup",
                         session.generation, now_ms);
+                    df_runtime_log_public_event(&ubus, now_ms, "hangup",
+                        session.generation);
                 }
                 if (result->timed_out_transition) {
                     (void)printf("doorfast: event=session_timeout generation=%llu\n",
                                  (unsigned long long)session.generation);
                     df_runtime_publish_event(&event_stream, "timeout",
                         session.generation, now_ms);
+                    df_runtime_log_public_event(&ubus, now_ms, "session_timeout",
+                        session.generation);
                 }
                 if ((!runtime->config.passive_only || runtime->config.active_host) &&
                     df_gvs_audio_tx_sync(

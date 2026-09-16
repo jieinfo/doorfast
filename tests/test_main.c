@@ -143,6 +143,7 @@ void test_runtime_ubus_access_requires_active_host(void);
 void test_runtime_ubus_elevator_requires_active_host_and_owns_ids(void);
 void test_runtime_ubus_elevator_status_is_bounded_and_aged(void);
 void test_runtime_ubus_audio_status_tracks_buffer(void);
+void test_runtime_ubus_keeps_bounded_redacted_event_log(void);
 void test_gvs_access_failed_send_and_late_reply(void);
 void test_gvs_access_control_sends_once_and_requires_material(void);
 void test_gvs_access_serializes_vendor_direct_unlock_shape(void);
@@ -241,6 +242,7 @@ int main(void) {
     test_g711_alaw();
     test_gvs_audio_chunk_store();
     test_runtime_ubus_audio_status_tracks_buffer();
+    test_runtime_ubus_keeps_bounded_redacted_event_log();
     test_gvs_media();
     test_gvs_media_admission_requires_current_exact_endpoints();
     test_gvs_media_lifecycle_isolates_generations_and_endings();

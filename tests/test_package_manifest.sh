@@ -27,13 +27,15 @@ test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/sta
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/deployment.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
-grep -q 'PKG_RELEASE:=11' package/luci-app-doorfast/Makefile
+grep -q 'PKG_RELEASE:=12' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
 grep -q 'deployment configuration pages' package/luci-app-doorfast/Makefile
 grep -Fq 'deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js' package/luci-app-doorfast/Makefile
 grep -Fq 'relay.js $(1)/www/luci-static/resources/view/doorfast/relay.js' package/luci-app-doorfast/Makefile
+grep -Fq 'logs.js $(1)/www/luci-static/resources/view/doorfast/logs.js' package/luci-app-doorfast/Makefile
 grep -q '+libubus +libubox +libblobmsg-json' package/doorfast/Makefile
 grep -q -- '-DDF_WITH_UBUS' package/doorfast/Makefile
 grep -q -- '-lubus -lubox -lblobmsg_json' package/doorfast/Makefile
@@ -50,7 +52,7 @@ import json
 acl = json.load(open('package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json'))['luci-app-doorfast']
 assert acl['read']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
 assert acl['write']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
-assert set(acl['read']['ubus']['doorfast']) == {'status'}
+assert set(acl['read']['ubus']['doorfast']) == {'status', 'logs'}
 assert 'ubus' not in acl['write']
 assert set(acl['read']) == {'uci', 'ubus'}
 assert set(acl['write']) == {'uci'}
@@ -61,15 +63,18 @@ assert menu['admin/services/doorfast/status']['action']['path'] == 'doorfast/sta
 assert menu['admin/services/doorfast/settings']['action']['path'] == 'doorfast/settings'
 assert menu['admin/services/doorfast/deployment']['action']['path'] == 'doorfast/deployment'
 assert menu['admin/services/doorfast/relay']['action']['path'] == 'doorfast/relay'
+assert menu['admin/services/doorfast/logs']['action']['path'] == 'doorfast/logs'
 PY
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/deployment.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 node tests/test_luci_settings.js
 node tests/test_luci_deployment.js
 node tests/test_luci_relay.js
+node tests/test_luci_logs.js
 grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/workflows/build-apk.yml
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
@@ -104,7 +109,7 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=41' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=42' package/doorfast/Makefile
 grep -q '+ip-full' package/doorfast/Makefile
 grep -Fq 'HOST_ADDRESS_STATE=' package/doorfast/files/doorfast.init
 grep -Fq 'configure_host_address || return 1' package/doorfast/files/doorfast.init

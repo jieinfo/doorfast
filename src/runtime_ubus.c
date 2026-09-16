@@ -5,10 +5,50 @@
 
 #define DF_RUNTIME_UBUS_RECONNECT_MS 5000U
 
+static bool df_runtime_ubus_log_safe(const char *message) {
+    return message != NULL && strstr(message, "access_material") == NULL &&
+        strstr(message, "token=") == NULL && strstr(message, "pcm=") == NULL;
+}
+
+int df_runtime_ubus_log_event(struct df_runtime_ubus *service,
+    uint64_t timestamp_ms, const char *message) {
+    struct df_runtime_log_entry *entry;
+    size_t length;
+
+    if (service == NULL || !df_runtime_ubus_log_safe(message)) return DF_ERR_INVALID;
+    length = strlen(message);
+    if (length == 0U || length >= DF_RUNTIME_UBUS_LOG_MESSAGE_MAX)
+        return DF_ERR_INVALID;
+    entry = &service->log_entries[service->log_next];
+    service->log_sequence++;
+    entry->sequence = service->log_sequence;
+    entry->timestamp_ms = timestamp_ms;
+    memcpy(entry->message, message, length + 1U);
+    service->log_next = (service->log_next + 1U) % DF_RUNTIME_UBUS_LOG_CAPACITY;
+    if (service->log_count < DF_RUNTIME_UBUS_LOG_CAPACITY) service->log_count++;
+    return DF_OK;
+}
+
+size_t df_runtime_ubus_log_count(const struct df_runtime_ubus *service) {
+    return service == NULL ? 0U : service->log_count;
+}
+
+int df_runtime_ubus_log_get(const struct df_runtime_ubus *service,
+    size_t index, struct df_runtime_log_entry *entry) {
+    size_t first;
+    if (service == NULL || entry == NULL || index >= service->log_count)
+        return DF_ERR_INVALID;
+    first = (service->log_next + DF_RUNTIME_UBUS_LOG_CAPACITY - service->log_count) %
+        DF_RUNTIME_UBUS_LOG_CAPACITY;
+    *entry = service->log_entries[(first + index) % DF_RUNTIME_UBUS_LOG_CAPACITY];
+    return DF_OK;
+}
+
 #ifdef DF_WITH_UBUS
 
 #include <errno.h>
 #include <poll.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include <libubox/blobmsg_json.h>
@@ -277,6 +317,38 @@ static int df_runtime_ubus_status_handler(
     return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
 }
 
+static int df_runtime_ubus_logs_handler(
+    struct ubus_context *context, struct ubus_object *object,
+    struct ubus_request_data *request, const char *method,
+    struct blob_attr *message) {
+    struct df_runtime_ubus_platform *platform =
+        container_of(object, struct df_runtime_ubus_platform, object);
+    struct df_runtime_log_entry entry;
+    size_t index;
+    void *entries;
+    void *table;
+    int result;
+
+    (void)method;
+    (void)message;
+    blob_buf_init(&platform->response, 0);
+    blobmsg_add_u32(&platform->response, "capacity", DF_RUNTIME_UBUS_LOG_CAPACITY);
+    entries = blobmsg_open_array(&platform->response, "entries");
+    for (index = 0; index < df_runtime_ubus_log_count(platform->owner); index++) {
+        if (df_runtime_ubus_log_get(platform->owner, index, &entry) != DF_OK)
+            continue;
+        table = blobmsg_open_table(&platform->response, NULL);
+        blobmsg_add_u64(&platform->response, "sequence", entry.sequence);
+        blobmsg_add_u64(&platform->response, "timestamp_ms", entry.timestamp_ms);
+        blobmsg_add_string(&platform->response, "message", entry.message);
+        blobmsg_close_table(&platform->response, table);
+    }
+    blobmsg_close_array(&platform->response, entries);
+    result = ubus_send_reply(context, request, platform->response.head);
+    blob_buf_free(&platform->response);
+    return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+}
+
 enum {
     DF_UBUS_ANSWER_GENERATION,
     DF_UBUS_ANSWER_PRIMARY_PORT,
@@ -336,6 +408,12 @@ static int df_runtime_ubus_submit_reply(
         return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT
                                         : UBUS_STATUS_UNKNOWN_ERROR;
     }
+    if (call->type == DF_GVS_CALL_COMMAND_ANSWER)
+        (void)df_runtime_ubus_log_event(platform->owner,
+            platform->owner->last_now_ms, "event=answer_queued");
+    else if (call->type == DF_GVS_CALL_COMMAND_HANGUP)
+        (void)df_runtime_ubus_log_event(platform->owner,
+            platform->owner->last_now_ms, "event=hangup_queued");
     blob_buf_init(&platform->response, 0);
     blobmsg_add_u8(&platform->response, "queued", 1);
     blobmsg_add_u64(&platform->response, "generation",
@@ -449,6 +527,8 @@ static int df_runtime_ubus_unlock_handler(
     if (status != DF_OK)
         return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT :
                                          UBUS_STATUS_UNKNOWN_ERROR;
+    (void)df_runtime_ubus_log_event(platform->owner,
+        platform->owner->last_now_ms, "event=unlock_submitted");
     blob_buf_init(&platform->response, 0);
     blobmsg_add_u8(&platform->response, "submitted", 1);
     blobmsg_add_u64(&platform->response, "generation", generation);
@@ -488,6 +568,10 @@ static int df_runtime_ubus_elevator_handler(
     if (status != DF_OK)
         return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT :
                                          UBUS_STATUS_UNKNOWN_ERROR;
+    (void)df_runtime_ubus_log_event(platform->owner,
+        platform->owner->last_now_ms,
+        value == DF_GVS_ELEVATOR_UP ? "event=elevator_up_submitted" :
+            "event=elevator_down_submitted");
     blob_buf_init(&platform->response, 0);
     blobmsg_add_u8(&platform->response, "submitted", 1);
     blobmsg_add_u64(&platform->response, "transaction_id", transaction_id);
@@ -501,6 +585,7 @@ static const struct ubus_method df_runtime_ubus_methods[] = {
     UBUS_METHOD("unlock", df_runtime_ubus_unlock_handler,
                 df_runtime_ubus_unlock_policy),
     UBUS_METHOD_NOARG("status", df_runtime_ubus_status_handler),
+    UBUS_METHOD_NOARG("logs", df_runtime_ubus_logs_handler),
     UBUS_METHOD("answer", df_runtime_ubus_answer_handler,
                 df_runtime_ubus_answer_policy),
     UBUS_METHOD("hangup", df_runtime_ubus_hangup_handler,
