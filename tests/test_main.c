@@ -94,6 +94,7 @@ void test_pcap_ring_rotates_and_recovers_oldest_slot(void);
 void test_gvs_udp_prefix_handles_vlan_and_truncation(void);
 void test_gvs_udp_sender_replies_to_observed_peer_route(void);
 void test_gvs_udp_sender_binds_configured_source_address(void);
+void test_gvs_udp_presence_treats_offline_notification_as_local_only(void);
 void test_gvs_udp_sender_emits_elevator_request_to_observed_route(void);
 void test_gvs_udp_sender_emits_audio_to_observed_peer_port(void);
 void test_gvs_multicast_prepares_group_from_local_identity(void);
@@ -264,6 +265,7 @@ int main(void) {
     test_runtime_config_ignores_legacy_elevator_direction();
     test_gvs_udp_sender_emits_elevator_request_to_observed_route();
     test_gvs_udp_sender_binds_configured_source_address();
+    test_gvs_udp_presence_treats_offline_notification_as_local_only();
     test_gvs_udp_sender_emits_audio_to_observed_peer_port();
     test_gvs_multicast_prepares_group_from_local_identity();
     test_gvs_local_pcm_reaches_observed_peer_audio_route();

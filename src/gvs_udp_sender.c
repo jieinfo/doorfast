@@ -172,7 +172,17 @@ int df_gvs_udp_presence_emit(const struct df_gvs_presence_action *action,
     char host[DF_GVS_IPV4_TEXT_SIZE];
     struct sockaddr_in destination;
     ssize_t written;
-    if (action == NULL || ctx == NULL || ctx->sender == NULL ||
+    if (action == NULL) {
+        return DF_ERR_INVALID;
+    }
+    /* Presence tracks peer transitions locally.  The observed GVS control
+     * serializer has no wire encoding for these notifications, so they must
+     * not be treated as a failed UDP transmission by the runtime. */
+    if (action->type == DF_GVS_PRESENCE_PEER_ONLINE ||
+        action->type == DF_GVS_PRESENCE_PEER_OFFLINE) {
+        return DF_OK;
+    }
+    if (ctx == NULL || ctx->sender == NULL ||
         ctx->sender->fd < 0 || ctx->source == NULL ||
         df_gvs_presence_action_serialize(action, ctx->source, ctx->sync_version,
             frame, sizeof(frame), &length, ctx->sender->provide_fields,
