@@ -96,6 +96,7 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void);
 void test_gvs_udp_sender_binds_configured_source_address(void);
 void test_gvs_udp_sender_emits_elevator_request_to_observed_route(void);
 void test_gvs_udp_sender_emits_audio_to_observed_peer_port(void);
+void test_gvs_multicast_prepares_group_from_local_identity(void);
 void test_gvs_local_pcm_reaches_observed_peer_audio_route(void);
 void test_evidence_classifier_separates_recent_and_control(void);
 void test_evidence_classifier_keeps_observed_incoming_call(void);
@@ -264,6 +265,7 @@ int main(void) {
     test_gvs_udp_sender_emits_elevator_request_to_observed_route();
     test_gvs_udp_sender_binds_configured_source_address();
     test_gvs_udp_sender_emits_audio_to_observed_peer_port();
+    test_gvs_multicast_prepares_group_from_local_identity();
     test_gvs_local_pcm_reaches_observed_peer_audio_route();
     test_runtime_ubus_elevator_requires_active_host_and_owns_ids();
     test_runtime_ubus_elevator_status_is_bounded_and_aged();
