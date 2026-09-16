@@ -121,6 +121,7 @@ doorfast_enabled=1
 doorfast_active_host=1
 doorfast_indoor_ipaddr=
 start_service
+grep -Fxq 'ip link set dev host0 up' "$trace"
 grep -Fxq 'ip address add 10.5.65.0/8 dev host0' "$trace"
 test "$(cat "$HOST_ADDRESS_STATE")" = 'host0 10.5.65.0/8'
 stop_service

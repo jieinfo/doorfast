@@ -93,6 +93,7 @@ configure_host_address() {
 	[ -n "$indoor_ip" ] || indoor_ip=$(host_identity_ip "$identity") || return 1
 	prefix=$(host_netmask_prefix "$indoor_netmask") || return 1
 	remove_host_address || return 1
+	ip link set dev "$host_interface" up || return 1
 	ip address add "$indoor_ip/$prefix" dev "$host_interface" || return 1
 	printf '%s %s/%s\n' "$host_interface" "$indoor_ip" "$prefix" >"$HOST_ADDRESS_STATE"
 }
