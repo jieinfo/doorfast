@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=11
+PKG_RELEASE:=12
 PKGARCH:=all
 
 include $(INCLUDE_DIR)/package.mk
@@ -34,6 +34,7 @@ define Package/luci-app-doorfast/install
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/settings.js $(1)/www/luci-static/resources/view/doorfast/settings.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/relay.js $(1)/www/luci-static/resources/view/doorfast/relay.js
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/doorfast/logs.js $(1)/www/luci-static/resources/view/doorfast/logs.js
 endef
 
 $(eval $(call BuildPackage,luci-app-doorfast))

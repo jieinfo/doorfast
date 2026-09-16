@@ -76,6 +76,29 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
                        df_runtime_ubus_process(&service, 12));
 }
 
+void test_runtime_ubus_keeps_bounded_redacted_event_log(void) {
+    struct df_runtime_ubus service = {0};
+    struct df_runtime_log_entry entry = {0};
+    unsigned index;
+
+    for (index = 0; index < DF_RUNTIME_UBUS_LOG_CAPACITY + 2U; index++) {
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_log_event(
+            &service, index, "event=call generation=1"));
+    }
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_UBUS_LOG_CAPACITY,
+                       df_runtime_ubus_log_count(&service));
+    TEST_ASSERT_INT_EQ(DF_OK,
+                       df_runtime_ubus_log_get(&service, 0, &entry));
+    TEST_ASSERT_INT_EQ(3, entry.sequence);
+    TEST_ASSERT_INT_EQ(2, entry.timestamp_ms);
+    TEST_ASSERT_INT_EQ(0, strcmp("event=call generation=1", entry.message));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
+        &service, 3, "event=unlock access_material=secret"));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_ubus_log_get(&service,
+                           DF_RUNTIME_UBUS_LOG_CAPACITY, &entry));
+}
+
 void test_runtime_ubus_validates_and_routes_call_requests(void) {
     struct df_runtime_ubus service = {0};
     struct call_binding_test test = {0};

@@ -40,5 +40,13 @@
       "type": "view",
       "path": "doorfast/relay"
     }
+  },
+  "admin/services/doorfast/logs": {
+    "title": "日志",
+    "order": 40,
+    "action": {
+      "type": "view",
+      "path": "doorfast/logs"
+    }
   }
 }

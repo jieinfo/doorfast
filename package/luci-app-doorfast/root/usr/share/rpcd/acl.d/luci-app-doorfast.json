@@ -4,7 +4,7 @@
     "read": {
       "uci": ["doorfast", "doorfast-automation", "doorfast-events"],
       "ubus": {
-        "doorfast": ["status"]
+        "doorfast": ["status", "logs"]
       }
     },
     "write": {
