@@ -13,6 +13,7 @@
 #include "gvs_identity.h"
 #include "gvs_incoming_reply.h"
 #include "gvs_memory_sender.h"
+#include "gvs_multicast.h"
 #include "gvs_call_control.h"
 #include "gvs_packet.h"
 #include "gvs_receive.h"
@@ -324,6 +325,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_elevator_control elevator = {0};
     struct df_gvs_elevator_query elevator_query = {0};
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
+    struct df_gvs_multicast multicast = {.fd = -1};
     struct df_gvs_udp_presence_context presence_context = {0};
     struct df_gvs_runtime_sync sync = {0};
     struct df_gvs_video_reassembly video = {0};
@@ -418,15 +420,23 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             df_gvs_udp_send_attempt, &udp_sender);
         presence_context.sender = &udp_sender;
         presence_context.source = identity;
+        if (df_gvs_multicast_open(&multicast, identity,
+                                  runtime->config.indoor_ipaddr) != DF_OK) {
+            df_gvs_udp_sender_close(&udp_sender);
+            df_gvs_runtime_sync_stop(&sync);
+            return DF_ERR_IO;
+        }
     }
     if (df_gvs_elevator_query_init(&elevator_query, identity,
             runtime->config.active_host, started_ms,
             df_gvs_udp_elevator_emit, &udp_sender) != DF_OK) {
+        df_gvs_multicast_close(&multicast);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_INVALID;
     }
     if (df_runtime_capture_open(runtime, &capture) != DF_OK) {
+        df_gvs_multicast_close(&multicast);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
@@ -435,6 +445,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_gvs_pcm_ingress_open(
             &pcm_ingress, DF_GVS_PCM_INGRESS_DEFAULT_PATH) != DF_OK) {
         df_capture_close(capture);
+        df_gvs_multicast_close(&multicast);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
@@ -469,6 +480,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_event_stream_stop(&event_stream);
         df_gvs_pcm_ingress_close(&pcm_ingress);
         df_capture_close(capture);
+        df_gvs_multicast_close(&multicast);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
@@ -478,6 +490,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                  runtime->config.gvs_interface,
                  (runtime->config.passive_only && !runtime->config.active_host)
                      ? "passive" : "active_host");
+    if (multicast.joined) {
+        (void)printf("doorfast: event=multicast_joined group=%s port=%u\n",
+                     multicast.group, (unsigned)multicast.port);
+    }
     while (!df_runtime_stopping) {
         struct df_capture_record capture_record;
         const uint8_t *packet = NULL;
@@ -1009,6 +1025,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
 done:
     df_runtime_media_clear(&video, &video_cache, &audio, 0);
     df_gvs_pcm_ingress_close(&pcm_ingress);
+    df_gvs_multicast_close(&multicast);
     df_gvs_udp_sender_close(&udp_sender);
     df_event_stream_stop(&event_stream);
     df_runtime_ubus_stop(&ubus);
