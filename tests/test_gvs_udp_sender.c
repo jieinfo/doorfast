@@ -40,6 +40,26 @@ void test_gvs_udp_sender_binds_configured_source_address(void) {
     df_gvs_udp_sender_close(&sender);
 }
 
+void test_gvs_udp_presence_treats_offline_notification_as_local_only(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    struct df_gvs_udp_presence_context context = {
+        .sender = &sender,
+        .source = local,
+        .sync_version = 0,
+    };
+    struct df_gvs_presence_action action = {
+        .type = DF_GVS_PRESENCE_PEER_OFFLINE,
+        .target = {0x61, 2, 1, 1, 1, 2},
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "127.0.0.1",
+        8300, udp_sender_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_presence_emit(&action, &context));
+    TEST_ASSERT_INT_EQ(0, (int)sender.failed);
+    df_gvs_udp_sender_close(&sender);
+}
+
 static size_t udp_sender_packet(uint8_t *packet, size_t capacity,
     const uint8_t destination[6], const uint8_t source[6],
     const uint8_t source_ipv4[4]) {
