@@ -2,6 +2,19 @@
 set -eu
 
 test -f package/doorfast/Makefile
+test -f package/doorfast-media/Makefile
+grep -Fq 'DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libcurl +ca-bundle +libx264' package/doorfast-media/Makefile
+grep -Fq '/usr/lib/doorfast/media-v1.so' package/doorfast-media/Makefile
+test "$(grep -Ec '^\s*\$\(INSTALL_(BIN|DATA|CONF)\)' package/doorfast-media/Makefile)" -eq 1
+! find package/doorfast-media -name '*init*' -print -quit | grep .
+grep -Fq -- '-fPIC -shared' package/doorfast-media/Makefile
+grep -Fq -- '-Wl,-z,defs' package/doorfast-media/Makefile
+grep -Fq 'gvs_video_reassembly.c' package/doorfast-media/Makefile
+grep -Fq 'media_module.c' package/doorfast-media/Makefile
+grep -Fq 'media_relay.c' package/doorfast-media/Makefile
+! grep -Fq '$(wildcard $(PKG_BUILD_DIR)/src/*.c)' package/doorfast/Makefile
+grep -Fq '$(RM) $(DF_MEDIA_MODULE_SOURCES)' package/doorfast/Makefile
+test "$(grep -Fc '$(PKG_BUILD_DIR)/src/*.c' package/doorfast/Makefile)" -eq 2
 test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast-group
 test -f package/doorfast/files/doorfast-recorder.init
@@ -30,9 +43,9 @@ test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/rel
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
-grep -q 'PKG_RELEASE:=13' package/luci-app-doorfast/Makefile
+grep -q 'PKG_RELEASE:=14' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
-grep -q 'deployment configuration pages' package/luci-app-doorfast/Makefile
+grep -q 'preview media configuration' package/luci-app-doorfast/Makefile
 grep -Fq 'deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js' package/luci-app-doorfast/Makefile
 grep -Fq 'relay.js $(1)/www/luci-static/resources/view/doorfast/relay.js' package/luci-app-doorfast/Makefile
 grep -Fq 'logs.js $(1)/www/luci-static/resources/view/doorfast/logs.js' package/luci-app-doorfast/Makefile
@@ -53,9 +66,9 @@ acl = json.load(open('package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-a
 assert acl['read']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
 assert acl['write']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
 assert set(acl['read']['ubus']['doorfast']) == {'status', 'logs'}
-assert 'ubus' not in acl['write']
+assert set(acl['write']['ubus']['doorfast']) == {'media_credentials'}
 assert set(acl['read']) == {'uci', 'ubus'}
-assert set(acl['write']) == {'uci'}
+assert set(acl['write']) == {'uci', 'ubus'}
 
 menu = json.load(open('package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.json'))
 assert menu['admin/services/doorfast']['action']['type'] == 'firstchild'
@@ -72,6 +85,7 @@ node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfas
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 node tests/test_luci_settings.js
+node tests/test_luci_media_view.js
 node tests/test_luci_deployment.js
 node tests/test_luci_relay.js
 node tests/test_luci_logs.js
@@ -79,7 +93,7 @@ grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/work
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
 grep -q 'sh tests/test_site_inventory.sh' .github/workflows/build-apk.yml
-grep -q 'doorfast-\*.apk' .github/workflows/build-apk.yml
+grep -Fq -- "-name 'doorfast-[0-9]*.apk'" .github/workflows/build-apk.yml
 ! grep -q 'bin/packages/\*\*/\*.apk' .github/workflows/build-apk.yml
 grep -q 'config_load doorfast' package/doorfast/files/doorfast.init
 grep -q 'config_get_bool enabled main enabled 0' package/doorfast/files/doorfast.init
@@ -113,7 +127,7 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=50' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=51' package/doorfast/Makefile
 grep -Fq "option token ''" package/doorfast/files/doorfast-events.config
 grep -Fq 'store_token "$token" "$token_file"' package/doorfast/files/doorfast-event-relay.init
 grep -Fq 'http://*) ;;' package/doorfast/files/doorfast-event-relay.init
@@ -140,16 +154,27 @@ assert 'cp \"$acceptance\" artifacts/doorfast-pcm-http-acceptance' in workflow
 assert 'test \"${#sdk_dirs[@]}\" -eq 1' in workflow
 assert 'test \"${#acceptance_files[@]}\" -eq 1' in workflow
 assert 'test \"${#doorfast_apks[@]}\" -eq 1' in workflow
+assert 'test \"${#media_apks[@]}\" -eq 1' in workflow
 assert 'test \"${#luci_apks[@]}\" -eq 1' in workflow
 upload = workflow.split('uses: actions/upload-artifact@v4', 1)[1]
 assert 'artifacts/doorfast-pcm-http-acceptance' in upload
-assert 'artifacts/doorfast.apk' in upload and 'artifacts/luci-app-doorfast.apk' in upload
+assert 'artifacts/doorfast.apk' in upload
+assert 'artifacts/doorfast-media.apk' in upload
+assert 'artifacts/luci-app-doorfast.apk' in upload
 assert '**/bin/packages/' not in upload
 # Fresh idle daemons report zero generations; only talking/active statuses
 # require a nonzero, matching TX generation. Target blobmsg parsing runs in VM.
 adapter = pathlib.Path('src/pcm_http_ubus.c').read_text()
 assert 'if (strcmp(session, "talking") == 0 || parsed.audio_tx_active)' in adapter, 'idle zero-generation status must remain parseable'
 ACCEPTANCE
+grep -Fq 'doorfast-media' scripts/prepare-sdk-package.sh
+grep -Fq 'package/doorfast-media/compile' .github/workflows/build-apk.yml
+grep -Fq 'CONFIG_PACKAGE_doorfast-media=y' .github/workflows/build-apk.yml
+grep -Fq 'CONFIG_BUILD_PATENTED=y' .github/workflows/build-apk.yml
+grep -Fq 'CONFIG_PACKAGE_libx264=y' .github/workflows/build-apk.yml
+grep -Fq 'doorfast-media.apk' .github/workflows/build-apk.yml
+grep -Fq 'wc -l <"$media_list"' .github/workflows/build-apk.yml
+node tests/js/test_media_status.mjs
 grep -Fq -- '-DDF_WITH_UBUS -DDF_PCM_HTTP_PROGRAM' package/doorfast/Makefile
 grep -Fq 'src/pcm_http.c' package/doorfast/Makefile
 grep -Fq 'src/pcm_http_ubus.c' package/doorfast/Makefile
