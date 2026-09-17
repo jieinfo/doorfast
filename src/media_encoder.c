@@ -11,184 +11,511 @@
 #include <unistd.h>
 
 #include "doorfast.h"
+#include "gvs_video_reassembly.h"
 
-static const char *df_profile_name(enum df_media_profile profile)
+#define DF_MEDIA_ENCODER_ARGV_MAX 64U
+#define DF_MEDIA_ENCODER_DESTINATION_MAX 1024U
+#define DF_MEDIA_ENCODER_POLL_MS 10U
+
+struct df_media_encoder_command {
+    char destination[DF_MEDIA_ENCODER_DESTINATION_MAX];
+    char fps[4];
+    char bitrate[16];
+    char buffer[16];
+    char gop[4];
+    char filter[96];
+    char *argv[DF_MEDIA_ENCODER_ARGV_MAX];
+};
+
+static void df_media_encoder_clear(void *memory, size_t length)
 {
-    return profile == DF_MEDIA_PROFILE_MAIN ? "main" : "baseline";
+    volatile unsigned char *cursor = memory;
+
+    while (length > 0U) {
+        *cursor++ = 0U;
+        length--;
+    }
 }
 
-static bool df_encoder_text_valid(const char *value, size_t max)
+static void df_media_encoder_error(struct df_media_encoder_process *process,
+                                   const char *message)
 {
-    size_t i;
-    if (value == NULL || value[0] == '\0' || strlen(value) > max) return false;
-    for (i = 0; value[i] != '\0'; i++) {
-        unsigned char c = (unsigned char)value[i];
-        if (c <= 0x20U || c == '\'' || c == '"' || c == '\\' || c == '@' ||
-            c == '/' || c == '?' || c == '#') return false;
+    if (process == NULL) return;
+    (void)snprintf(process->last_error, sizeof(process->last_error), "%s",
+                   message == NULL ? "" : message);
+}
+
+static bool df_media_encoder_text_valid(const char *value, size_t maximum)
+{
+    size_t index;
+    size_t length;
+
+    if (value == NULL || value[0] == '\0') return false;
+    length = strlen(value);
+    if (length > maximum) return false;
+    for (index = 0; index < length; index++) {
+        unsigned char character = (unsigned char)value[index];
+
+        if (character < 0x21U || character > 0x7eU || character == '@' ||
+            character == '/' || character == '?' || character == '#') return false;
     }
     return true;
 }
 
-int df_media_encoder_build_argv(const struct df_media_encoder_options *options,
-                                char *url, size_t url_size,
-                                char *argv[], size_t argv_capacity)
+static int df_media_encoder_url_encode(const char *source, char *destination,
+                                       size_t destination_size)
 {
-    const char *program;
-    static _Thread_local char fps_text[4];
-    static _Thread_local char bitrate_text[16];
-    static _Thread_local char gop_text[4];
-    int count;
+    static const char hex[] = "0123456789ABCDEF";
+    size_t input;
+    size_t output = 0U;
 
-    if (options == NULL || url == NULL || url_size == 0U || argv == NULL ||
-        argv_capacity < 33U || options->port == 0U || options->fps == 0U ||
-        options->fps > 60U || options->bitrate_kbps == 0U ||
-        !df_encoder_text_valid(options->host, 63U) ||
-        !df_encoder_text_valid(options->stream, 64U)) return DF_ERR_INVALID;
-    if (options->username != NULL && options->username[0] != '\0' &&
-        !df_encoder_text_valid(options->username, 32U)) return DF_ERR_INVALID;
-    if (options->password != NULL && strlen(options->password) > 128U) return DF_ERR_INVALID;
-    if (options->resolution < DF_MEDIA_RESOLUTION_SOURCE ||
-        options->resolution > DF_MEDIA_RESOLUTION_240X320 ||
-        options->profile < DF_MEDIA_PROFILE_BASELINE ||
-        options->profile > DF_MEDIA_PROFILE_MAIN) return DF_ERR_INVALID;
-
-    if (options->username != NULL && options->username[0] != '\0') {
-        if (options->password == NULL || options->password[0] == '\0' ||
-            strchr(options->password, '@') != NULL || strchr(options->password, '/') != NULL)
-            return DF_ERR_INVALID;
-        if (snprintf(url, url_size, "rtsp://%s:%s@%s:%u/%s", options->username,
-                     options->password, options->host, (unsigned)options->port,
-                     options->stream) >= (int)url_size) return DF_ERR_INVALID;
-    } else if (snprintf(url, url_size, "rtsp://%s:%u/%s", options->host,
-                        (unsigned)options->port, options->stream) >= (int)url_size) {
+    if (source == NULL || destination == NULL || destination_size == 0U)
         return DF_ERR_INVALID;
+    for (input = 0U; source[input] != '\0'; input++) {
+        unsigned char character = (unsigned char)source[input];
+        bool unreserved = (character >= 'a' && character <= 'z') ||
+                          (character >= 'A' && character <= 'Z') ||
+                          (character >= '0' && character <= '9') ||
+                          character == '-' || character == '.' ||
+                          character == '_' || character == '~';
+
+        if (unreserved) {
+            if (output + 1U >= destination_size) return DF_ERR_INVALID;
+            destination[output++] = (char)character;
+        } else {
+            if (output + 3U >= destination_size) return DF_ERR_INVALID;
+            destination[output++] = '%';
+            destination[output++] = hex[character >> 4U];
+            destination[output++] = hex[character & 0x0fU];
+        }
     }
-    program = options->program != NULL && options->program[0] != '\0' ? options->program : "ffmpeg";
-    (void)snprintf(fps_text, sizeof(fps_text), "%u", (unsigned)options->fps);
-    (void)snprintf(bitrate_text, sizeof(bitrate_text), "%uk", (unsigned)options->bitrate_kbps);
-    (void)snprintf(gop_text, sizeof(gop_text), "%u", (unsigned)options->fps);
-    argv[0] = (char *)program;
-    argv[1] = (char *)"-hide_banner";
-    argv[2] = (char *)"-loglevel";
-    argv[3] = (char *)"error";
-    argv[4] = (char *)"-f";
-    argv[5] = (char *)"image2pipe";
-    argv[6] = (char *)"-framerate";
-    argv[7] = fps_text;
-    argv[8] = (char *)"-vcodec";
-    argv[9] = (char *)"mjpeg";
-    argv[10] = (char *)"-i";
-    argv[11] = (char *)"pipe:0";
-    argv[12] = (char *)"-an";
-    argv[13] = (char *)"-c:v";
-    argv[14] = (char *)"libx264";
-    argv[15] = (char *)"-profile:v";
-    argv[16] = (char *)df_profile_name(options->profile);
-    argv[17] = (char *)"-pix_fmt";
-    argv[18] = (char *)"yuv420p";
-    argv[19] = (char *)"-bf";
-    argv[20] = (char *)"0";
-    argv[21] = (char *)"-g";
-    argv[22] = gop_text;
-    argv[23] = (char *)"-keyint_min";
-    argv[24] = gop_text;
-    argv[25] = (char *)"-b:v";
-    argv[26] = bitrate_text;
-    argv[27] = (char *)"-rtsp_transport";
-    argv[28] = (char *)"tcp";
-    argv[29] = (char *)"-f";
-    argv[30] = (char *)"rtsp";
-    argv[31] = url;
-    count = 32;
-    argv[count] = NULL;
+    destination[output] = '\0';
     return DF_OK;
 }
 
-int df_media_encoder_start(struct df_media_encoder_process *encoder,
-                           const struct df_media_encoder_options *options,
+static int df_media_encoder_dimensions(const struct df_media_encoder_config *config,
+                                       uint16_t *width, uint16_t *height)
+{
+    if (config == NULL || width == NULL || height == NULL) return DF_ERR_INVALID;
+    switch (config->resolution) {
+    case DF_MEDIA_RESOLUTION_SOURCE:
+        *width = config->width == 0U ? 480U : config->width;
+        *height = config->height == 0U ? 640U : config->height;
+        break;
+    case DF_MEDIA_RESOLUTION_480X640: *width = 480U; *height = 640U; break;
+    case DF_MEDIA_RESOLUTION_360X480: *width = 360U; *height = 480U; break;
+    case DF_MEDIA_RESOLUTION_240X320: *width = 240U; *height = 320U; break;
+    default: return DF_ERR_INVALID;
+    }
+    if ((*width & 1U) != 0U || (*height & 1U) != 0U) return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static int df_media_encoder_append(struct df_media_encoder_command *command,
+                                   size_t *count, char *value)
+{
+    if (command == NULL || count == NULL || value == NULL ||
+        *count + 1U >= DF_MEDIA_ENCODER_ARGV_MAX) return DF_ERR_INVALID;
+    command->argv[(*count)++] = value;
+    return DF_OK;
+}
+
+static int df_media_encoder_command_build(
+    const struct df_media_encoder_config *config,
+    const struct df_media_credentials *credentials,
+    struct df_media_encoder_command *command,
+    enum df_media_encoder *selected)
+{
+    const char *program;
+    const char *profile;
+    const char *password = "";
+    enum df_media_encoder encoder;
+    char encoded_user[128];
+    char encoded_password[DF_MEDIA_CREDENTIAL_VALUE_MAX * 3U + 1U];
+    uint16_t width;
+    uint16_t height;
+    unsigned buffer_kbps;
+    size_t count = 0U;
+    int result;
+
+    if (config == NULL || command == NULL || selected == NULL ||
+        config->port == 0U || config->fps == 0U || config->fps > 60U ||
+        config->bitrate_kbps == 0U ||
+        !df_media_encoder_text_valid(config->host, 63U) ||
+        !df_media_encoder_text_valid(config->stream, 64U) ||
+        (config->username != NULL && config->username[0] != '\0' &&
+         !df_media_encoder_text_valid(config->username, 32U)) ||
+        config->profile < DF_MEDIA_PROFILE_BASELINE ||
+        config->profile > DF_MEDIA_PROFILE_MAIN ||
+        df_media_encoder_dimensions(config, &width, &height) != DF_OK)
+        return DF_ERR_INVALID;
+    encoder = config->encoder == DF_MEDIA_ENCODER_AUTO ?
+        DF_MEDIA_ENCODER_SOFTWARE : config->encoder;
+    if (encoder < DF_MEDIA_ENCODER_SOFTWARE || encoder > DF_MEDIA_ENCODER_QSV)
+        return DF_ERR_INVALID;
+    if (credentials != NULL) {
+        if (memchr(credentials->rtsp_password, '\0',
+                   sizeof(credentials->rtsp_password)) == NULL)
+            return DF_ERR_INVALID;
+        password = credentials->rtsp_password;
+    }
+    memset(command, 0, sizeof(*command));
+    if (password[0] != '\0') {
+        if (config->username == NULL || config->username[0] == '\0' ||
+            df_media_encoder_url_encode(config->username, encoded_user,
+                                        sizeof(encoded_user)) != DF_OK ||
+            df_media_encoder_url_encode(password, encoded_password,
+                                        sizeof(encoded_password)) != DF_OK ||
+            snprintf(command->destination, sizeof(command->destination),
+                     "rtsp://%s:%s@%s:%u/%s", encoded_user, encoded_password,
+                     config->host, (unsigned)config->port, config->stream) >=
+                (int)sizeof(command->destination)) return DF_ERR_INVALID;
+    } else if (snprintf(command->destination, sizeof(command->destination),
+                        "rtsp://%s:%u/%s", config->host,
+                        (unsigned)config->port, config->stream) >=
+               (int)sizeof(command->destination)) return DF_ERR_INVALID;
+    buffer_kbps = (unsigned)config->bitrate_kbps * 2U;
+    (void)snprintf(command->fps, sizeof(command->fps), "%u", (unsigned)config->fps);
+    (void)snprintf(command->gop, sizeof(command->gop), "%u", (unsigned)config->fps);
+    (void)snprintf(command->bitrate, sizeof(command->bitrate), "%uk",
+                   (unsigned)config->bitrate_kbps);
+    (void)snprintf(command->buffer, sizeof(command->buffer), "%uk", buffer_kbps);
+    if (encoder == DF_MEDIA_ENCODER_VAAPI) {
+        if (config->resolution == DF_MEDIA_RESOLUTION_SOURCE)
+            (void)snprintf(command->filter, sizeof(command->filter),
+                           "format=nv12,hwupload");
+        else
+            (void)snprintf(command->filter, sizeof(command->filter),
+                           "format=nv12,hwupload,scale_vaapi=w=%u:h=%u",
+                           (unsigned)width, (unsigned)height);
+    } else if (encoder == DF_MEDIA_ENCODER_QSV) {
+        if (config->resolution == DF_MEDIA_RESOLUTION_SOURCE)
+            (void)snprintf(command->filter, sizeof(command->filter), "format=nv12");
+        else
+            (void)snprintf(command->filter, sizeof(command->filter),
+                           "scale=%u:%u,format=nv12", (unsigned)width,
+                           (unsigned)height);
+    } else if (config->resolution != DF_MEDIA_RESOLUTION_SOURCE) {
+        (void)snprintf(command->filter, sizeof(command->filter), "scale=%u:%u",
+                       (unsigned)width, (unsigned)height);
+    }
+    program = config->program != NULL && config->program[0] != '\0' ?
+        config->program : "ffmpeg";
+    profile = config->profile == DF_MEDIA_PROFILE_MAIN ? "main" : "baseline";
+
+#define APPEND(value) do { result = df_media_encoder_append(command, &count, (char *)(value)); \
+    if (result != DF_OK) return result; } while (0)
+    APPEND(program); APPEND("-hide_banner"); APPEND("-loglevel"); APPEND("error");
+    if (encoder == DF_MEDIA_ENCODER_VAAPI) {
+        APPEND("-vaapi_device"); APPEND("/dev/dri/renderD128");
+    }
+    APPEND("-f"); APPEND("image2pipe"); APPEND("-vcodec"); APPEND("mjpeg");
+    APPEND("-framerate"); APPEND(command->fps); APPEND("-i"); APPEND("pipe:0");
+    APPEND("-an");
+    if (command->filter[0] != '\0') {
+        APPEND("-vf"); APPEND(command->filter);
+    }
+    APPEND("-c:v");
+    if (encoder == DF_MEDIA_ENCODER_SOFTWARE) {
+        APPEND("libx264"); APPEND("-preset"); APPEND("veryfast");
+        APPEND("-tune"); APPEND("zerolatency");
+    } else if (encoder == DF_MEDIA_ENCODER_VAAPI) {
+        APPEND("h264_vaapi");
+    } else {
+        APPEND("h264_qsv"); APPEND("-preset"); APPEND("veryfast");
+        APPEND("-look_ahead"); APPEND("0"); APPEND("-repeat_pps"); APPEND("1");
+    }
+    APPEND("-pix_fmt"); APPEND("yuv420p"); APPEND("-profile:v"); APPEND(profile);
+    APPEND("-bf"); APPEND("0"); APPEND("-g"); APPEND(command->gop);
+    APPEND("-keyint_min"); APPEND(command->gop); APPEND("-b:v");
+    APPEND(command->bitrate); APPEND("-maxrate"); APPEND(command->bitrate);
+    APPEND("-bufsize"); APPEND(command->buffer);
+    if (encoder == DF_MEDIA_ENCODER_SOFTWARE) {
+        APPEND("-x264-params"); APPEND("repeat-headers=1:scenecut=0");
+    } else if (encoder == DF_MEDIA_ENCODER_VAAPI) {
+        APPEND("-bsf:v"); APPEND("dump_extra=freq=keyframe");
+    }
+    APPEND("-f"); APPEND("rtsp"); APPEND("-rtsp_transport"); APPEND("tcp");
+    APPEND("-rtsp_flags"); APPEND("send_bye"); APPEND(command->destination);
+#undef APPEND
+    command->argv[count] = NULL;
+    *selected = encoder;
+    return DF_OK;
+}
+
+static void df_media_encoder_pending_clear(struct df_media_encoder_process *process)
+{
+    if (process == NULL) return;
+    free(process->pending_frame);
+    process->pending_frame = NULL;
+    process->pending_length = 0U;
+    process->pending_offset = 0U;
+    process->pending_generation = 0U;
+    process->pending_timestamp_ms = 0U;
+}
+
+static void df_media_encoder_invalidate(struct df_media_encoder_process *process,
+                                        bool exited)
+{
+    if (process == NULL) return;
+    if (process->input_owned && process->input_fd >= 0)
+        (void)close(process->input_fd);
+    process->input_fd = -1;
+    process->input_owned = false;
+    process->generation = 0U;
+    process->running = false;
+    process->encoder_exited = exited;
+    df_media_encoder_pending_clear(process);
+}
+
+static ssize_t df_media_encoder_write_no_sigpipe(int descriptor,
+                                                 const void *buffer, size_t length)
+{
+    sigset_t blocked;
+    sigset_t previous;
+    sigset_t pending;
+    bool already_pending = false;
+    ssize_t result;
+    int saved_errno;
+
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGPIPE);
+    if (sigpending(&pending) == 0) already_pending = sigismember(&pending, SIGPIPE) == 1;
+    if (sigprocmask(SIG_BLOCK, &blocked, &previous) != 0) return -1;
+    result = write(descriptor, buffer, length);
+    saved_errno = errno;
+    if (result < 0 && saved_errno == EPIPE && !already_pending) {
+        int caught_signal;
+        (void)sigwait(&blocked, &caught_signal);
+    }
+    (void)sigprocmask(SIG_SETMASK, &previous, NULL);
+    errno = saved_errno;
+    return result;
+}
+
+static int df_media_encoder_flush(struct df_media_encoder_process *process)
+{
+    while (process->pending_offset < process->pending_length) {
+        ssize_t written = df_media_encoder_write_no_sigpipe(
+            process->input_fd, process->pending_frame + process->pending_offset,
+            process->pending_length - process->pending_offset);
+
+        if (written > 0) {
+            process->pending_offset += (size_t)written;
+            continue;
+        }
+        if (written < 0 && errno == EINTR) continue;
+        if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return DF_MEDIA_ENCODER_RETRY;
+        if (written < 0 && errno == EPIPE) {
+            df_media_encoder_error(process, "encoder input closed");
+            df_media_encoder_invalidate(process, true);
+            return DF_ERR_IO;
+        }
+        df_media_encoder_error(process, "encoder input write failed");
+        return DF_ERR_IO;
+    }
+    df_media_encoder_pending_clear(process);
+    return DF_OK;
+}
+
+static int df_media_encoder_wait_bounded(pid_t pid, unsigned timeout_ms,
+                                         bool *reaped)
+{
+    unsigned elapsed = 0U;
+
+    if (reaped == NULL || pid <= 0) return DF_ERR_INVALID;
+    *reaped = false;
+    for (;;) {
+        int status;
+        pid_t result = waitpid(pid, &status, WNOHANG);
+
+        if (result == pid || (result < 0 && errno == ECHILD)) {
+            *reaped = true;
+            return DF_OK;
+        }
+        if (result < 0 && errno != EINTR) return DF_ERR_IO;
+        if (elapsed >= timeout_ms) return DF_OK;
+        {
+            unsigned slice = timeout_ms - elapsed;
+            struct timespec delay;
+            if (slice > DF_MEDIA_ENCODER_POLL_MS) slice = DF_MEDIA_ENCODER_POLL_MS;
+            delay.tv_sec = 0;
+            delay.tv_nsec = (long)slice * 1000000L;
+            (void)nanosleep(&delay, NULL);
+            elapsed += slice;
+        }
+    }
+}
+
+int df_media_encoder_start(struct df_media_encoder_process *process,
+                           const struct df_media_encoder_config *config,
+                           const struct df_media_credentials *credentials,
                            uint64_t generation)
 {
+    struct df_media_encoder_command command;
+    enum df_media_encoder selected;
+    uint16_t width;
+    uint16_t height;
     int pipe_fds[2];
-    char url[DF_MEDIA_ENCODER_URL_MAX];
-    char *argv[DF_MEDIA_ENCODER_ARGV_MAX];
+    int flags;
     pid_t pid;
 
-    if (encoder == NULL || generation == 0U || encoder->running ||
-        df_media_encoder_build_argv(options, url, sizeof(url), argv,
-                                    DF_MEDIA_ENCODER_ARGV_MAX) != DF_OK) return DF_ERR_INVALID;
-    if (pipe(pipe_fds) != 0) return DF_ERR_IO;
+    if (process == NULL || config == NULL || generation == 0U ||
+        process->running || process->pid > 0 || process->pending_frame != NULL ||
+        df_media_encoder_command_build(config, credentials, &command, &selected) != DF_OK ||
+        df_media_encoder_dimensions(config, &width, &height) != DF_OK)
+        return DF_ERR_INVALID;
+    process->input_fd = -1;
+    process->encoder_exited = false;
+    process->last_error[0] = '\0';
+    if (pipe(pipe_fds) != 0) {
+        df_media_encoder_error(process, "encoder pipe failed");
+        return DF_ERR_IO;
+    }
     (void)fcntl(pipe_fds[0], F_SETFD, FD_CLOEXEC);
     (void)fcntl(pipe_fds[1], F_SETFD, FD_CLOEXEC);
+    flags = fcntl(pipe_fds[1], F_GETFL);
+    if (flags < 0 || fcntl(pipe_fds[1], F_SETFL, flags | O_NONBLOCK) != 0) {
+        (void)close(pipe_fds[0]);
+        (void)close(pipe_fds[1]);
+        df_media_encoder_error(process, "encoder pipe setup failed");
+        return DF_ERR_IO;
+    }
     pid = fork();
     if (pid < 0) {
-        close(pipe_fds[0]); close(pipe_fds[1]); return DF_ERR_IO;
+        (void)close(pipe_fds[0]);
+        (void)close(pipe_fds[1]);
+        df_media_encoder_clear(&command, sizeof(command));
+        df_media_encoder_error(process, "encoder spawn failed");
+        return DF_ERR_IO;
     }
     if (pid == 0) {
         int null_fd = open("/dev/null", O_WRONLY);
+
         (void)dup2(pipe_fds[0], STDIN_FILENO);
-        close(pipe_fds[0]); close(pipe_fds[1]);
+        (void)close(pipe_fds[0]);
+        (void)close(pipe_fds[1]);
         if (null_fd >= 0) {
             (void)dup2(null_fd, STDOUT_FILENO);
             (void)dup2(null_fd, STDERR_FILENO);
-            if (null_fd > STDERR_FILENO) close(null_fd);
+            if (null_fd > STDERR_FILENO) (void)close(null_fd);
         }
-        (void)execvp(argv[0], argv);
+        (void)execvp(command.argv[0], command.argv);
         _exit(127);
     }
-    close(pipe_fds[0]);
-    encoder->pid = pid;
-    encoder->input_fd = pipe_fds[1];
-    encoder->generation = generation;
-    encoder->running = true;
+    (void)close(pipe_fds[0]);
+    df_media_encoder_clear(&command, sizeof(command));
+    process->pid = pid;
+    process->input_fd = pipe_fds[1];
+    process->input_owned = true;
+    process->generation = generation;
+    process->last_tick_ms = 0U;
+    process->width = width;
+    process->height = height;
+    process->encoder = selected;
+    process->running = true;
     return DF_OK;
 }
 
-int df_media_encoder_write(struct df_media_encoder_process *encoder, const uint8_t *data,
-                           size_t length, uint64_t generation)
+int df_media_encoder_write_frame(struct df_media_encoder_process *process,
+                                 const struct df_media_frame *frame)
 {
-    size_t offset = 0U;
-    ssize_t written;
-
-    if (encoder == NULL || data == NULL || length == 0U || !encoder->running ||
-        generation == 0U || encoder->generation != generation) return DF_ERR_INVALID;
-    while (offset < length) {
-        written = write(encoder->input_fd, data + offset, length - offset);
-        if (written > 0) offset += (size_t)written;
-        else if (written < 0 && errno == EINTR) continue;
-        else return DF_ERR_IO;
+    if (process == NULL || frame == NULL || frame->data == NULL ||
+        frame->length == 0U || frame->length > DF_GVS_VIDEO_MAX_FRAME ||
+        !process->running || process->input_fd < 0 ||
+        frame->generation == 0U || frame->generation != process->generation)
+        return DF_ERR_INVALID;
+    if (process->pending_frame != NULL) {
+        if (process->pending_generation != frame->generation ||
+            process->pending_timestamp_ms != frame->timestamp_ms ||
+            process->pending_length != frame->length) return DF_MEDIA_ENCODER_RETRY;
+        return df_media_encoder_flush(process);
     }
-    return DF_OK;
+    process->pending_frame = malloc(frame->length);
+    if (process->pending_frame == NULL) {
+        df_media_encoder_error(process, "encoder frame allocation failed");
+        return DF_ERR_IO;
+    }
+    memcpy(process->pending_frame, frame->data, frame->length);
+    process->pending_length = frame->length;
+    process->pending_generation = frame->generation;
+    process->pending_timestamp_ms = frame->timestamp_ms;
+    return df_media_encoder_flush(process);
 }
 
-int df_media_encoder_stop(struct df_media_encoder_process *encoder, unsigned timeout_ms)
+int df_media_encoder_tick(struct df_media_encoder_process *process, uint64_t now_ms)
 {
-    unsigned waited = 0U;
     int status;
     pid_t result;
 
-    if (encoder == NULL) return DF_ERR_INVALID;
-    if (!encoder->running) return DF_OK;
-    close(encoder->input_fd);
-    encoder->input_fd = -1;
-    while (waited <= timeout_ms) {
-        result = waitpid(encoder->pid, &status, WNOHANG);
-        if (result == encoder->pid) {
-            encoder->running = false; encoder->pid = 0; encoder->generation = 0;
-            return DF_OK;
-        }
-        if (result < 0 && errno != EINTR) break;
-        if (result == 0) {
-            struct timespec delay = {0, 10000000L};
-            nanosleep(&delay, NULL); waited += 10U;
-        }
+    if (process == NULL) return DF_ERR_INVALID;
+    if (now_ms < process->last_tick_ms) return DF_ERR_INVALID;
+    process->last_tick_ms = now_ms;
+    if (process->pid <= 0) return DF_OK;
+    result = waitpid(process->pid, &status, WNOHANG);
+    if (result == 0) return DF_OK;
+    if (result == process->pid || (result < 0 && errno == ECHILD)) {
+        process->pid = 0;
+        df_media_encoder_error(process, "encoder exited");
+        df_media_encoder_invalidate(process, true);
+        return DF_OK;
     }
-    (void)kill(encoder->pid, SIGTERM);
-    do { result = waitpid(encoder->pid, &status, 0); } while (result < 0 && errno == EINTR);
-    encoder->running = false; encoder->pid = 0; encoder->generation = 0;
-    return result < 0 ? DF_ERR_IO : DF_OK;
+    if (result < 0 && errno == EINTR) return DF_OK;
+    df_media_encoder_error(process, "encoder status failed");
+    return DF_ERR_IO;
 }
 
-bool df_media_encoder_is_running(const struct df_media_encoder_process *encoder)
+int df_media_encoder_stop(struct df_media_encoder_process *process,
+                          unsigned timeout_ms)
 {
-    return encoder != NULL && encoder->running;
+    pid_t pid;
+    bool reaped = false;
+    int result;
+
+    if (process == NULL) return DF_ERR_INVALID;
+    pid = process->pid;
+    df_media_encoder_invalidate(process, false);
+    if (pid <= 0) {
+        process->pid = 0;
+        return DF_OK;
+    }
+    result = df_media_encoder_wait_bounded(pid, timeout_ms, &reaped);
+    if (result != DF_OK) goto failed;
+    if (!reaped) {
+        if (kill(pid, SIGTERM) != 0 && errno != ESRCH) goto failed;
+        result = df_media_encoder_wait_bounded(pid, timeout_ms, &reaped);
+        if (result != DF_OK) goto failed;
+    }
+    if (!reaped) {
+        if (kill(pid, SIGKILL) != 0 && errno != ESRCH) goto failed;
+        result = df_media_encoder_wait_bounded(pid, timeout_ms, &reaped);
+        if (result != DF_OK) goto failed;
+    }
+    if (!reaped) {
+        process->pid = pid;
+        df_media_encoder_error(process, "encoder reap timeout");
+        return DF_ERR_IO;
+    }
+    process->pid = 0;
+    process->last_error[0] = '\0';
+    return DF_OK;
+
+failed:
+    process->pid = pid;
+    df_media_encoder_error(process, "encoder cleanup failed");
+    return DF_ERR_IO;
+}
+
+bool df_media_encoder_requires_restart(const struct df_media_encoder_process *process,
+                                       uint16_t width, uint16_t height)
+{
+    return process != NULL && process->running && process->width != 0U &&
+           process->height != 0U &&
+           (process->width != width || process->height != height);
+}
+
+bool df_media_encoder_is_running(const struct df_media_encoder_process *process)
+{
+    return process != NULL && process->running;
 }
