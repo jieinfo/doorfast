@@ -5,30 +5,49 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #define DF_RUNTIME_CONFIG_MAX_BYTES 65536
 #define DF_RUNTIME_LINE_MAX 512
 
-enum df_runtime_option {
-    DF_SEEN_ENABLED = 1U << 0,
-    DF_SEEN_BRAND = 1U << 1,
-    DF_SEEN_GVS_INTERFACE = 1U << 2,
-    DF_SEEN_GVS_ADDRESS = 1U << 3,
-    DF_SEEN_UPLINK_INTERFACE = 1U << 4,
-    DF_SEEN_PASSIVE_ONLY = 1U << 5,
-    DF_SEEN_PROMISCUOUS = 1U << 6,
-    DF_SEEN_CAPTURE_AUTO = 1U << 7,
-    DF_SEEN_UNLOCK_DELAY = 1U << 8,
-    DF_SEEN_HANGUP_DELAY = 1U << 9,
-    DF_SEEN_CALL_ELEV = 1U << 10,
-    DF_SEEN_SYNC_STATE_PATH = 1U << 11,
-    DF_SEEN_ACTIVE_HOST = 1U << 12,
-    DF_SEEN_ACCESS_MATERIAL = 1U << 13,
-    DF_SEEN_INDOOR_IPADDR = 1U << 14,
-    DF_SEEN_INDOOR_NETMASK = 1U << 15,
-    DF_SEEN_PASSIVE_INTERFACE = 1U << 16,
-    DF_SEEN_HOST_INTERFACE = 1U << 17
-};
+#define DF_SEEN_ENABLED (1ULL << 0)
+#define DF_SEEN_BRAND (1ULL << 1)
+#define DF_SEEN_GVS_INTERFACE (1ULL << 2)
+#define DF_SEEN_GVS_ADDRESS (1ULL << 3)
+#define DF_SEEN_UPLINK_INTERFACE (1ULL << 4)
+#define DF_SEEN_PASSIVE_ONLY (1ULL << 5)
+#define DF_SEEN_PROMISCUOUS (1ULL << 6)
+#define DF_SEEN_CAPTURE_AUTO (1ULL << 7)
+#define DF_SEEN_UNLOCK_DELAY (1ULL << 8)
+#define DF_SEEN_HANGUP_DELAY (1ULL << 9)
+#define DF_SEEN_CALL_ELEV (1ULL << 10)
+#define DF_SEEN_SYNC_STATE_PATH (1ULL << 11)
+#define DF_SEEN_ACTIVE_HOST (1ULL << 12)
+#define DF_SEEN_ACCESS_MATERIAL (1ULL << 13)
+#define DF_SEEN_INDOOR_IPADDR (1ULL << 14)
+#define DF_SEEN_INDOOR_NETMASK (1ULL << 15)
+#define DF_SEEN_PASSIVE_INTERFACE (1ULL << 16)
+#define DF_SEEN_HOST_INTERFACE (1ULL << 17)
+#define DF_SEEN_MEDIA_ENABLED (1ULL << 18)
+#define DF_SEEN_MEDIA_STATION_ADDRESS (1ULL << 19)
+#define DF_SEEN_MEDIA_STATION_IPV4 (1ULL << 20)
+#define DF_SEEN_MEDIA_GO2RTC_HOST (1ULL << 21)
+#define DF_SEEN_MEDIA_GO2RTC_PORT (1ULL << 22)
+#define DF_SEEN_MEDIA_STREAM_NAME (1ULL << 23)
+#define DF_SEEN_MEDIA_RTSP_USERNAME (1ULL << 24)
+#define DF_SEEN_MEDIA_ENCODER (1ULL << 25)
+#define DF_SEEN_MEDIA_RESOLUTION (1ULL << 26)
+#define DF_SEEN_MEDIA_FPS (1ULL << 27)
+#define DF_SEEN_MEDIA_BITRATE (1ULL << 28)
+#define DF_SEEN_MEDIA_PROFILE (1ULL << 29)
+#define DF_SEEN_MEDIA_MAX_ENCODERS (1ULL << 30)
+#define DF_SEEN_MEDIA_MIN_FREE_KIB (1ULL << 31)
+#define DF_SEEN_MEDIA_PREVIEW_TIMEOUT (1ULL << 32)
+#define DF_SEEN_MEDIA_FIRST_FRAME_TIMEOUT (1ULL << 33)
+#define DF_SEEN_MEDIA_PUBLISH_RETRIES (1ULL << 34)
+#define DF_SEEN_MEDIA_OVERLOAD_POLICY (1ULL << 35)
+#define DF_SEEN_MEDIA_DIAGNOSTICS (1ULL << 36)
+#define DF_SEEN_MEDIA_RELAY_URL (1ULL << 37)
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     memset(runtime, 0, sizeof(*runtime));
@@ -42,12 +61,36 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.indoor_netmask = runtime->indoor_netmask;
     runtime->config.uplink_interface = runtime->uplink_interface;
     runtime->config.sync_state_path = runtime->sync_state_path;
+    runtime->config.media.station_address = runtime->media_station_address;
+    runtime->config.media.station_ipv4 = runtime->media_station_ipv4;
+    runtime->config.media.go2rtc_host = runtime->media_go2rtc_host;
+    runtime->config.media.stream_name = runtime->media_stream_name;
+    runtime->config.media.rtsp_username = runtime->media_rtsp_username;
+    runtime->config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
+    runtime->config.media.relay_url = runtime->media_relay_url;
     (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
                    "%s", "/etc/config/doorfast-sync");
     runtime->config.passive_only = true;
     runtime->config.active_host = false;
     runtime->config.unlock_delay_seconds = -1;
     runtime->config.hangup_delay_seconds = -1;
+    runtime->config.media.go2rtc_port = 8554U;
+    runtime->config.media.encoder = DF_MEDIA_ENCODER_AUTO;
+    runtime->config.media.resolution = DF_MEDIA_RESOLUTION_SOURCE;
+    runtime->config.media.fps = 10U;
+    runtime->config.media.bitrate_kbps = 800U;
+    runtime->config.media.profile = DF_MEDIA_PROFILE_BASELINE;
+    runtime->config.media.max_encoders = 0U;
+    runtime->config.media.min_free_kib = 393216U;
+    runtime->config.media.preview_timeout_s = 120U;
+    runtime->config.media.first_frame_timeout_s = 8U;
+    runtime->config.media.publish_retries = 3U;
+    runtime->config.media.overload_policy = DF_MEDIA_OVERLOAD_REJECT_NEW;
+    runtime->config.media.diagnostics = true;
+    (void)snprintf(runtime->media_stream_name, sizeof(runtime->media_stream_name),
+                   "%s", "doorfast_preview");
+    (void)snprintf(runtime->media_rtsp_username, sizeof(runtime->media_rtsp_username),
+                   "%s", "doorfast");
 }
 
 static const char *df_skip_space(const char *cursor) {
@@ -154,7 +197,7 @@ static int df_copy_option(char *destination, size_t destination_size, const char
     return DF_OK;
 }
 
-static int df_claim_option(unsigned int *seen, unsigned int option) {
+static int df_claim_option(uint64_t *seen, uint64_t option) {
     if ((*seen & option) != 0U) {
         return DF_ERR_INVALID;
     }
@@ -162,9 +205,65 @@ static int df_claim_option(unsigned int *seen, unsigned int option) {
     return DF_OK;
 }
 
+static int df_parse_unsigned_range(const char *value, unsigned long minimum,
+                                   unsigned long maximum, unsigned long *output) {
+    char *end = NULL;
+    unsigned long parsed;
+
+    if (value == NULL || value[0] == '\0' ||
+        strspn(value, "0123456789") != strlen(value)) return DF_ERR_INVALID;
+    parsed = strtoul(value, &end, 10);
+    if (end == value || *end != '\0' || parsed < minimum || parsed > maximum)
+        return DF_ERR_INVALID;
+    *output = parsed;
+    return DF_OK;
+}
+
+static int df_parse_media_encoder(const char *value, enum df_media_encoder *output) {
+    if (strcmp(value, "auto") == 0) *output = DF_MEDIA_ENCODER_AUTO;
+    else if (strcmp(value, "software") == 0) *output = DF_MEDIA_ENCODER_SOFTWARE;
+    else if (strcmp(value, "vaapi") == 0) *output = DF_MEDIA_ENCODER_VAAPI;
+    else if (strcmp(value, "qsv") == 0) *output = DF_MEDIA_ENCODER_QSV;
+    else return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static int df_parse_media_resolution(const char *value,
+                                     enum df_media_resolution *output) {
+    if (strcmp(value, "source") == 0) *output = DF_MEDIA_RESOLUTION_SOURCE;
+    else if (strcmp(value, "480x640") == 0) *output = DF_MEDIA_RESOLUTION_480X640;
+    else if (strcmp(value, "360x480") == 0) *output = DF_MEDIA_RESOLUTION_360X480;
+    else if (strcmp(value, "240x320") == 0) *output = DF_MEDIA_RESOLUTION_240X320;
+    else return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static int df_parse_media_profile(const char *value, enum df_media_profile *output) {
+    if (strcmp(value, "baseline") == 0) *output = DF_MEDIA_PROFILE_BASELINE;
+    else if (strcmp(value, "main") == 0) *output = DF_MEDIA_PROFILE_MAIN;
+    else return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static int df_parse_media_overload_policy(const char *value,
+                                          enum df_media_overload_policy *output) {
+    if (strcmp(value, "reject_new") == 0) *output = DF_MEDIA_OVERLOAD_REJECT_NEW;
+    else if (strcmp(value, "stop_oldest_preview") == 0)
+        *output = DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW;
+    else return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static bool df_runtime_media_option_is_forbidden(const char *name) {
+    if (strcmp(name, "media_credentials_path") == 0) return true;
+    return strncmp(name, "media_", sizeof("media_") - 1U) == 0 &&
+           (strstr(name, "password") != NULL || strstr(name, "token") != NULL);
+}
+
 static int df_apply_option(struct df_runtime_config *runtime, const char *name,
-                           const char *value, unsigned int *seen) {
-    unsigned int option = 0;
+                           const char *value, uint64_t *seen) {
+    uint64_t option = 0;
+    unsigned long parsed;
     int result = DF_OK;
 
     if (strcmp(name, "access_material") == 0) {
@@ -266,6 +365,141 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_parse_boolean(value, &runtime->config.call_elev);
     }
+    if (strcmp(name, "media_enabled") == 0) {
+        option = DF_SEEN_MEDIA_ENABLED;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_boolean(value, &runtime->config.media.enabled);
+    }
+    if (strcmp(name, "media_station_address") == 0) {
+        option = DF_SEEN_MEDIA_STATION_ADDRESS;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->media_station_address,
+                              sizeof(runtime->media_station_address), value);
+    }
+    if (strcmp(name, "media_station_ipv4") == 0) {
+        option = DF_SEEN_MEDIA_STATION_IPV4;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->media_station_ipv4,
+                              sizeof(runtime->media_station_ipv4), value);
+    }
+    if (strcmp(name, "media_go2rtc_host") == 0) {
+        option = DF_SEEN_MEDIA_GO2RTC_HOST;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->media_go2rtc_host,
+                              sizeof(runtime->media_go2rtc_host), value);
+    }
+    if (strcmp(name, "media_go2rtc_port") == 0) {
+        option = DF_SEEN_MEDIA_GO2RTC_PORT;
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 1U, 65535U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.go2rtc_port = (uint16_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_stream_name") == 0) {
+        option = DF_SEEN_MEDIA_STREAM_NAME;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->media_stream_name,
+                              sizeof(runtime->media_stream_name), value);
+    }
+    if (strcmp(name, "media_rtsp_username") == 0) {
+        option = DF_SEEN_MEDIA_RTSP_USERNAME;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->media_rtsp_username,
+                              sizeof(runtime->media_rtsp_username), value);
+    }
+    if (strcmp(name, "media_encoder") == 0) {
+        option = DF_SEEN_MEDIA_ENCODER;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_media_encoder(value, &runtime->config.media.encoder);
+    }
+    if (strcmp(name, "media_resolution") == 0) {
+        option = DF_SEEN_MEDIA_RESOLUTION;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_media_resolution(value, &runtime->config.media.resolution);
+    }
+    if (strcmp(name, "media_fps") == 0) {
+        option = DF_SEEN_MEDIA_FPS;
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 5U, 15U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.fps = (uint8_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_bitrate_kbps") == 0) {
+        option = DF_SEEN_MEDIA_BITRATE;
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 256U, 2000U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.bitrate_kbps = (uint16_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_profile") == 0) {
+        option = DF_SEEN_MEDIA_PROFILE;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_media_profile(value, &runtime->config.media.profile);
+    }
+    if (strcmp(name, "media_max_encoders") == 0) {
+        option = DF_SEEN_MEDIA_MAX_ENCODERS;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        if (strcmp(value, "auto") == 0) {
+            runtime->config.media.max_encoders = 0U;
+            return DF_OK;
+        }
+        if (df_parse_unsigned_range(value, 1U, 4U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.max_encoders = (uint8_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_min_free_kib") == 0) {
+        option = DF_SEEN_MEDIA_MIN_FREE_KIB;
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 131072U, 1048576U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.min_free_kib = (uint32_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_preview_timeout") == 0) {
+        option = DF_SEEN_MEDIA_PREVIEW_TIMEOUT;
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 15U, 600U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.preview_timeout_s = (uint16_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_first_frame_timeout") == 0) {
+        option = DF_SEEN_MEDIA_FIRST_FRAME_TIMEOUT;
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 2U, 30U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.first_frame_timeout_s = (uint8_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_publish_retries") == 0) {
+        option = DF_SEEN_MEDIA_PUBLISH_RETRIES;
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 0U, 5U, &parsed) != DF_OK)
+            return DF_ERR_INVALID;
+        runtime->config.media.publish_retries = (uint8_t)parsed;
+        return DF_OK;
+    }
+    if (strcmp(name, "media_overload_policy") == 0) {
+        option = DF_SEEN_MEDIA_OVERLOAD_POLICY;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_media_overload_policy(value,
+                                              &runtime->config.media.overload_policy);
+    }
+    if (strcmp(name, "media_diagnostics") == 0) {
+        option = DF_SEEN_MEDIA_DIAGNOSTICS;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_boolean(value, &runtime->config.media.diagnostics);
+    }
+    if (strcmp(name, "media_relay_url") == 0) {
+        option = DF_SEEN_MEDIA_RELAY_URL;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->media_relay_url,
+                              sizeof(runtime->media_relay_url), value);
+    }
     return result;
 }
 
@@ -273,7 +507,7 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
     const char *cursor;
     bool in_main = false;
     bool found_main = false;
-    unsigned int seen = 0;
+    uint64_t seen = 0;
 
     if (uci_text == NULL || runtime == NULL) {
         return DF_ERR_INVALID;
@@ -283,7 +517,7 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
     while (*cursor != '\0') {
         char line[DF_RUNTIME_LINE_MAX];
         char name[64];
-        char value[128];
+        char value[DF_RUNTIME_MEDIA_RELAY_URL_MAX];
         const char *line_end = strchr(cursor, '\n');
         const char *trimmed;
         size_t line_length = line_end == NULL ? strlen(cursor) : (size_t)(line_end - cursor);
@@ -317,6 +551,7 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
                                    value, sizeof(value)) != DF_OK) {
                 return DF_ERR_INVALID;
             }
+            if (df_runtime_media_option_is_forbidden(name)) return DF_ERR_INVALID;
             if (in_main && df_apply_option(runtime, name, value, &seen) != DF_OK) {
                 return DF_ERR_INVALID;
             }
