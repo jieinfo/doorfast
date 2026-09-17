@@ -1,7 +1,10 @@
+#include <arpa/inet.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 
+#include "gvs_memory_sender.h"
+#include "gvs_serialize.h"
 #include "runtime_service.h"
 #include "test.h"
 
@@ -59,4 +62,92 @@ void test_runtime_delay_rejects_invalid_input_and_stops_on_failure(void) {
         DF_ERR_IO,
         df_runtime_pump_delay(500, 250, record_delay_slice, &trace));
     TEST_ASSERT_INT_EQ(2, (int)trace.count);
+}
+
+struct runtime_media_trace {
+    struct df_gvs_session *session;
+    unsigned preempt_calls;
+    unsigned control_calls;
+    bool preempted_while_idle;
+};
+
+static int runtime_media_fake_preempt(void *instance, uint64_t now_ms) {
+    struct runtime_media_trace *trace = instance;
+    (void)now_ms;
+    trace->preempt_calls++;
+    trace->preempted_while_idle = trace->session->state == DF_GVS_IDLE;
+    return DF_OK;
+}
+
+static int runtime_media_fake_control(void *instance,
+    const struct df_gvs_frame *frame, uint32_t source_ipv4, uint64_t now_ms) {
+    struct runtime_media_trace *trace = instance;
+    (void)frame;
+    (void)source_ipv4;
+    (void)now_ms;
+    trace->control_calls++;
+    return DF_OK;
+}
+
+void test_runtime_media_builds_module_config_without_guessing_route(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_runtime_config runtime = {0};
+    struct df_media_module_config_v1 output;
+    uint32_t loopback = 0;
+
+    runtime.config.media.enabled = true;
+    runtime.config.media.station_address = "32:02:01:00:02:00";
+    runtime.config.media.station_ipv4 = "";
+    runtime.config.media.go2rtc_host = "ha.local";
+    runtime.config.media.stream_name = "doorfast_preview";
+    runtime.config.media.rtsp_username = "doorfast";
+    runtime.config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
+    runtime.config.media.relay_url = "";
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_build_module_config(
+        &runtime, local, &output));
+    TEST_ASSERT_INT_EQ(0, (int)output.station_ipv4);
+    TEST_ASSERT_INT_EQ(0, memcmp(local, output.local, sizeof(output.local)));
+    TEST_ASSERT_INT_EQ(0, memcmp((const uint8_t[]){0x32, 2, 1, 0, 2, 0},
+                                 output.station, sizeof(output.station)));
+
+    runtime.config.media.station_ipv4 = "127.0.0.1";
+    TEST_ASSERT_INT_EQ(1, inet_pton(AF_INET, "127.0.0.1", &loopback));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_build_module_config(
+        &runtime, local, &output));
+    TEST_ASSERT_INT_EQ((int)loopback, (int)output.station_ipv4);
+}
+
+void test_runtime_media_preempts_before_incoming_call_state_changes(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t station[6] = {0x32, 2, 1, 0, 2, 0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    struct df_gvs_session session = {0};
+    struct df_gvs_deadline deadline = {0};
+    struct runtime_media_trace trace = {.session = &session};
+    const struct df_media_module_api_v1 api = {
+        .receive_control = runtime_media_fake_control,
+        .preempt = runtime_media_fake_preempt,
+    };
+    struct df_runtime_media_module media = {
+        .api = &api,
+        .instance = &trace,
+        .available = true,
+    };
+    uint8_t packet[DF_GVS_CONTROL_HEADER_SIZE];
+    size_t packet_length = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(&control, 0,
+        df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_control_serialize(packet, sizeof(packet),
+        &packet_length, local, station, 0x03, 0x01, NULL, 0,
+        df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_receive_control_with_media(
+        &media, &control, packet, packet_length, local, &session, &deadline,
+        htonl(0x7f000001U), 100, &result));
+    TEST_ASSERT_INT_EQ(1, (int)trace.preempt_calls);
+    TEST_ASSERT_INT_EQ(1, trace.preempted_while_idle);
+    TEST_ASSERT_INT_EQ(0, (int)trace.control_calls);
+    TEST_ASSERT_INT_EQ(DF_GVS_RINGING, session.state);
+    TEST_ASSERT_INT_EQ(1, result.runtime.receive.accepted_call);
 }

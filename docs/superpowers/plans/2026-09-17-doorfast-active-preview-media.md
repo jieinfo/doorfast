@@ -399,7 +399,7 @@ git commit -m "feat: supervise H264 RTSP preview encoder"
 - Modify: `tests/Makefile`
 
 **Interfaces:**
-- Base exports `int df_gvs_udp_sender_emit_control(struct df_gvs_udp_sender *, const uint8_t destination[6], const uint8_t source[6], uint8_t family, uint8_t opcode, const uint8_t *payload, size_t payload_length);`.
+- Base exports `int df_gvs_udp_sender_emit_control(struct df_gvs_udp_sender *, const uint8_t destination[6], uint32_t destination_ipv4, const uint8_t source[6], uint8_t family, uint8_t opcode, const uint8_t *payload, size_t payload_length);`; the module passes the route admitted at monitor generation start, so retries never re-resolve a route.
 - Module ABI symbol is `const struct df_media_module_api_v1 df_media_module_api_v1;`.
 - Loader exposes `df_runtime_media_module_start`, `df_runtime_media_module_command`, `df_runtime_media_module_receive_control`, `df_runtime_media_module_push_jpeg`, `df_runtime_media_module_preempt`, and `df_runtime_media_module_status`.
 

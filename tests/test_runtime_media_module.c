@@ -1,0 +1,115 @@
+#include "media_module.h"
+#include "runtime_media_module.h"
+#include "test.h"
+
+static int runtime_fake_instance;
+
+static void *runtime_fake_create(const struct df_media_module_config_v1 *config,
+    const struct df_media_module_callbacks_v1 *callbacks) {
+    (void)config;
+    (void)callbacks;
+    return &runtime_fake_instance;
+}
+
+static void runtime_fake_destroy(void *instance) { (void)instance; }
+static int runtime_fake_start(void *instance, uint64_t now_ms) {
+    (void)instance; (void)now_ms; return DF_OK;
+}
+static int runtime_fake_command(void *instance,
+    enum df_media_module_command command, uint64_t generation, bool active,
+    uint64_t now_ms) {
+    (void)instance; (void)command; (void)generation; (void)active;
+    (void)now_ms; return DF_OK;
+}
+static int runtime_fake_control(void *instance, const struct df_gvs_frame *frame,
+    uint32_t source_ipv4, uint64_t now_ms) {
+    (void)instance; (void)frame; (void)source_ipv4; (void)now_ms; return DF_OK;
+}
+static int runtime_fake_jpeg(void *instance, const uint8_t source[6],
+    const uint8_t destination[6], uint32_t source_ipv4, uint64_t generation,
+    const uint8_t *jpeg, size_t length, uint16_t width, uint16_t height,
+    uint64_t timestamp_ms) {
+    (void)instance; (void)source; (void)destination; (void)source_ipv4;
+    (void)generation; (void)jpeg; (void)length; (void)width; (void)height;
+    (void)timestamp_ms; return DF_OK;
+}
+static int runtime_fake_preempt(void *instance, uint64_t now_ms) {
+    (void)instance; (void)now_ms; return DF_OK;
+}
+static int runtime_fake_tick(void *instance, uint64_t now_ms) {
+    (void)instance; (void)now_ms; return DF_OK;
+}
+static int runtime_fake_status(const void *instance,
+    struct df_media_module_status *status) {
+    (void)instance; (void)status; return DF_OK;
+}
+
+static struct df_media_module_api_v1 runtime_valid_api(void) {
+    const struct df_media_module_api_v1 api = {
+        .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
+        .struct_size = sizeof(struct df_media_module_api_v1),
+        .create = runtime_fake_create,
+        .destroy = runtime_fake_destroy,
+        .start = runtime_fake_start,
+        .command = runtime_fake_command,
+        .receive_control = runtime_fake_control,
+        .push_jpeg = runtime_fake_jpeg,
+        .preempt = runtime_fake_preempt,
+        .tick = runtime_fake_tick,
+        .status = runtime_fake_status,
+    };
+    return api;
+}
+
+void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void) {
+    struct df_runtime_media_module module = {0};
+    const struct df_media_module_config_v1 config = {0};
+    const struct df_media_module_callbacks_v1 callbacks = {0};
+
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_runtime_media_module_start(&module,
+        &config, &callbacks));
+    TEST_ASSERT_INT_EQ(0, module.available);
+}
+
+void test_runtime_module_rejects_commands_when_unavailable(void) {
+    struct df_runtime_media_module module = {0};
+
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_command(
+        &module, DF_MEDIA_MODULE_COMMAND_STOP, 1, false, 10));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_tick(
+        &module, 10));
+}
+
+void test_runtime_module_rejects_incompatible_or_incomplete_api(void) {
+    struct df_runtime_media_module module = {0};
+    const struct df_media_module_config_v1 config = {0};
+    const struct df_media_module_callbacks_v1 callbacks = {0};
+    struct df_media_module_api_v1 api = runtime_valid_api();
+
+    api.abi_version++;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_start_with_api(
+        &module, &api, &config, &callbacks));
+    api = runtime_valid_api();
+    api.struct_size--;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_start_with_api(
+        &module, &api, &config, &callbacks));
+    api = runtime_valid_api();
+    api.tick = NULL;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_start_with_api(
+        &module, &api, &config, &callbacks));
+}
+
+void test_runtime_module_preserves_dynamic_library_handle(void) {
+    struct df_runtime_media_module module = {0};
+    const struct df_media_module_config_v1 config = {0};
+    const struct df_media_module_callbacks_v1 callbacks = {0};
+    const struct df_media_module_api_v1 api = runtime_valid_api();
+    int handle_sentinel = 0;
+
+    module.handle = &handle_sentinel;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_start_with_api(
+        &module, &api, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(1, module.handle == &handle_sentinel);
+    module.handle = NULL;
+    df_runtime_media_module_stop(&module);
+}
