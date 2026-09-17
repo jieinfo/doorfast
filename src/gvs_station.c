@@ -25,12 +25,16 @@ static bool df_gvs_station_bcd(uint8_t value) {
     return (value >> 4U) <= 9U && (value & 0x0fU) <= 9U;
 }
 
-static bool df_gvs_station_valid(const uint8_t address[6]) {
+static bool df_gvs_station_is_valid(const uint8_t address[6]) {
     return address != NULL && address[0] == 0x32U &&
         df_gvs_station_bcd(address[1]) && address[1] != 0U &&
         df_gvs_station_bcd(address[2]) && address[2] != 0U &&
         address[3] == 0U && df_gvs_station_bcd(address[4]) &&
         address[4] != 0U && address[5] == 0U;
+}
+
+int df_gvs_station_validate(const uint8_t address[6]) {
+    return df_gvs_station_is_valid(address) ? DF_OK : DF_ERR_INVALID;
 }
 
 int df_gvs_station_parse(const char *text, uint8_t output[6]) {
@@ -51,7 +55,7 @@ int df_gvs_station_parse(const char *text, uint8_t output[6]) {
         }
         output[index] = (uint8_t)((high << 4U) | low);
     }
-    return df_gvs_station_valid(output) ? DF_OK : DF_ERR_INVALID;
+    return df_gvs_station_validate(output);
 }
 
 static struct df_gvs_station_route *df_gvs_station_route_find_mutable(
@@ -72,7 +76,8 @@ int df_gvs_station_routes_observe(struct df_gvs_station_routes *routes,
     bool discovery_reply) {
     struct df_gvs_station_route *entry;
 
-    if (routes == NULL || !discovery_reply || !df_gvs_station_valid(peer) ||
+    if (routes == NULL || !discovery_reply ||
+        df_gvs_station_validate(peer) != DF_OK ||
         ipv4 == 0U) {
         return DF_ERR_INVALID;
     }
@@ -96,7 +101,8 @@ int df_gvs_station_routes_lookup(const struct df_gvs_station_routes *routes,
     uint32_t *ipv4) {
     size_t index;
 
-    if (routes == NULL || !df_gvs_station_valid(peer) || max_age_ms == 0U ||
+    if (routes == NULL || df_gvs_station_validate(peer) != DF_OK ||
+        max_age_ms == 0U ||
         ipv4 == NULL) {
         return DF_ERR_INVALID;
     }

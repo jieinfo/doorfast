@@ -22,6 +22,7 @@ struct df_gvs_station_routes {
 };
 
 int df_gvs_station_parse(const char *text, uint8_t output[6]);
+int df_gvs_station_validate(const uint8_t address[6]);
 int df_gvs_station_routes_observe(struct df_gvs_station_routes *,
     const uint8_t peer[6], uint32_t ipv4, uint64_t now_ms,
     bool discovery_reply);
