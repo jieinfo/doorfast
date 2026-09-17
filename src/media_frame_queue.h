@@ -6,7 +6,7 @@
 
 #include "gvs_video_reassembly.h"
 
-#define DF_MEDIA_FRAME_QUEUE_MAX_ENTRIES 4U
+#define DF_MEDIA_FRAME_QUEUE_CAPACITY 4U
 
 struct df_media_frame {
     const uint8_t *data;
@@ -23,7 +23,7 @@ struct df_media_frame_queue_entry {
 };
 
 struct df_media_frame_queue {
-    struct df_media_frame_queue_entry entries[DF_MEDIA_FRAME_QUEUE_MAX_ENTRIES];
+    struct df_media_frame_queue_entry entries[DF_MEDIA_FRAME_QUEUE_CAPACITY];
     size_t read;
     size_t write;
     size_t count;
@@ -33,7 +33,7 @@ struct df_media_frame_queue {
     unsigned dropped_oldest;
 };
 
-int df_media_frame_queue_init(struct df_media_frame_queue *, size_t capacity,
+int df_media_frame_queue_init(struct df_media_frame_queue *, uint64_t generation,
                               size_t maximum_frame_length);
 void df_media_frame_queue_destroy(struct df_media_frame_queue *);
 int df_media_frame_queue_push(struct df_media_frame_queue *, const uint8_t *jpeg,

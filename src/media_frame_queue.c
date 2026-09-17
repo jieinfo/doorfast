@@ -5,24 +5,24 @@
 
 #include "doorfast.h"
 
-int df_media_frame_queue_init(struct df_media_frame_queue *queue, size_t capacity,
+int df_media_frame_queue_init(struct df_media_frame_queue *queue, uint64_t generation,
                               size_t maximum_frame_length)
 {
     size_t index;
 
-    if (queue == NULL || capacity == 0U ||
-        capacity > DF_MEDIA_FRAME_QUEUE_MAX_ENTRIES || maximum_frame_length == 0U ||
+    if (queue == NULL || generation == 0U || maximum_frame_length == 0U ||
         maximum_frame_length > DF_GVS_VIDEO_MAX_FRAME) return DF_ERR_INVALID;
     memset(queue, 0, sizeof(*queue));
-    for (index = 0; index < capacity; index++) {
+    for (index = 0; index < DF_MEDIA_FRAME_QUEUE_CAPACITY; index++) {
         queue->entries[index].data = malloc(maximum_frame_length);
         if (queue->entries[index].data == NULL) {
             df_media_frame_queue_destroy(queue);
             return DF_ERR_IO;
         }
     }
-    queue->capacity = capacity;
+    queue->capacity = DF_MEDIA_FRAME_QUEUE_CAPACITY;
     queue->maximum_frame_length = maximum_frame_length;
+    queue->generation = generation;
     return DF_OK;
 }
 
@@ -31,7 +31,7 @@ void df_media_frame_queue_destroy(struct df_media_frame_queue *queue)
     size_t index;
 
     if (queue == NULL) return;
-    for (index = 0; index < DF_MEDIA_FRAME_QUEUE_MAX_ENTRIES; index++) {
+    for (index = 0; index < DF_MEDIA_FRAME_QUEUE_CAPACITY; index++) {
         free(queue->entries[index].data);
     }
     memset(queue, 0, sizeof(*queue));
@@ -46,7 +46,6 @@ int df_media_frame_queue_push(struct df_media_frame_queue *queue,
     if (queue == NULL || jpeg == NULL || length == 0U || generation == 0U ||
         queue->capacity == 0U || queue->maximum_frame_length == 0U ||
         length > queue->maximum_frame_length) return DF_ERR_INVALID;
-    if (queue->generation == 0U) queue->generation = generation;
     if (queue->generation != generation) return DF_ERR_INVALID;
     if (queue->count == queue->capacity) {
         queue->read = (queue->read + 1U) % queue->capacity;
