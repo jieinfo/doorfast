@@ -4,6 +4,8 @@
 
 `563015d534dba45f0a201392835dfbd7f030edc5` — `fix: complete preview encoder supervision`
 
+`9ef32f8` — `fix: harden preview encoder supervision`
+
 This commit completes the supervisor introduced by `3a68a0b9a20ccb86b49ffc5ba1f736be7c8e404a`.
 
 ## RED evidence
@@ -36,6 +38,14 @@ The failures matched the missing Task 5 interface and behavior rather than a tes
 - Stops by closing stdin first, then uses bounded `SIGTERM` and `SIGKILL` phases with `waitpid(..., WNOHANG)` throughout.
 - Keeps `last_error` generic and never copies the destination URL, password, argv, SDP, or payload into status text.
 
+## Review fixes
+
+- Avoids a blocking `sigwait` when the daemon inherited `SIGPIPE=SIG_IGN`; the regression suite now runs under that inherited disposition.
+- Tracks source and encoded dimensions separately so a fixed output size neither restarts every frame nor hides source-size changes.
+- Uses the documented 800 Kbps target with a 1.2 Mbps peak for the default configuration and derives the same 3:2 peak ratio for user-selected targets.
+- Requires the capacity probe layer to resolve `auto` before starting the supervisor, and verifies QSV and VAAPI argv separately.
+- Fails the child before `execvp` if stdin or `/dev/null` redirection cannot be established, preventing FFmpeg from inheriting daemon output streams.
+
 ## GREEN evidence
 
 All commands exited zero:
@@ -46,9 +56,12 @@ make -B doorfast
 make -B recorder
 sh tests/test_package_manifest.sh
 git diff --check
+trap '' PIPE; ./build/doorfast-tests
 ```
 
 The native suite covers direct argv execution, nonblocking pipe setup, complete RTSP arguments, credential percent encoding and redaction, stale generation rejection, dimension restart detection, `EAGAIN` retention, safe `EPIPE`, child-exit polling, idempotent cleanup, and `SIGTERM` to `SIGKILL` escalation.
+
+The supervisor retains an `int` return and explicit timeout on `df_media_encoder_stop`. Child reaping can fail or time out, so downstream runtime integration needs an observable result; this is a deliberate refinement of the plan brief's `void` shorthand.
 
 ASan and UBSan also passed:
 
