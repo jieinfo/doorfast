@@ -65,7 +65,7 @@ jobs:
           (
             cd "$sdk_dir"
             ./scripts/feeds update -a
-            ./scripts/feeds install libpcap libuci libjson-c libopenssl luci-base
+            ./scripts/feeds install libpcap libuci libjson-c libopenssl libcurl luci-base
           )
           ./scripts/prepare-sdk-package.sh "$sdk_dir"
           make -C "$sdk_dir" defconfig
