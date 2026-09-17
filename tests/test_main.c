@@ -105,6 +105,10 @@ void test_evidence_log_preserves_fixed_fields_and_rotates(void);
 void test_evidence_recorder_guards_and_classifies(void);
 void test_deployment_config_rejects_unsafe_profile(void);
 void test_deployment_config_rejects_ambiguous_input(void);
+void test_media_queue_discards_oldest_and_never_aliases_reassembly_memory(void);
+void test_media_queue_rejects_stale_generation_and_releases_allocations(void);
+void test_media_capacity_cannot_exceed_verified_single_station_limit(void);
+void test_media_encoder_selection_falls_back_in_verified_order(void);
 
 int df_test_failure_count = 0;
 
@@ -234,6 +238,10 @@ int main(void) {
     test_pcm_http_stale_open_waiting_on_lock_cannot_revert_state();
     void test_gvs_replay_handshake_gap_and_eof(void);
     test_event_relay();
+    test_media_queue_discards_oldest_and_never_aliases_reassembly_memory();
+    test_media_queue_rejects_stale_generation_and_releases_allocations();
+    test_media_capacity_cannot_exceed_verified_single_station_limit();
+    test_media_encoder_selection_falls_back_in_verified_order();
     test_gvs_replay_handshake_gap_and_eof();
     test_gvs_call_control_handshake_memory_lifecycle();
     test_gvs_call_control_handshake_receive_and_retry();
