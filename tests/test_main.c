@@ -127,6 +127,8 @@ void test_gvs_frame_exposes_payload_from_synthetic_control_frame(void);
 void test_gvs_event_names(void);
 void test_gvs_identity_parses_and_filters_the_first_five_address_bytes(void);
 void test_gvs_identity_derives_network_addresses_and_indoor_peers(void);
+void test_gvs_station_parses_only_door_station_shape(void);
+void test_gvs_station_route_requires_fresh_discovery_reply(void);
 void test_gvs_presence_runs_probes_and_sync_phases_without_network_io(void);
 void test_gvs_presence_tracks_online_timeout_and_maintainer_role(void);
 void test_gvs_presence_restarts_cleanly_after_network_recovery(void);
@@ -385,6 +387,8 @@ int main(void) {
     test_gvs_event_names();
     test_gvs_identity_parses_and_filters_the_first_five_address_bytes();
     test_gvs_identity_derives_network_addresses_and_indoor_peers();
+    test_gvs_station_parses_only_door_station_shape();
+    test_gvs_station_route_requires_fresh_discovery_reply();
     test_gvs_presence_runs_probes_and_sync_phases_without_network_io();
     test_gvs_presence_tracks_online_timeout_and_maintainer_role();
     test_gvs_presence_restarts_cleanly_after_network_recovery();
