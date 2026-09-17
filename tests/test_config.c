@@ -70,6 +70,74 @@ void test_config_redaction(void) {
     TEST_ASSERT_INT_EQ(0, strcmp("abcd...", output));
 }
 
+void test_media_config_requires_an_active_host_and_valid_public_values(void) {
+    struct df_config config = {
+        .enabled = true,
+        .brand = "gvs",
+        .gvs_interface = "br-door",
+        .gvs_local_address = "IS:2-1-101-1",
+        .indoor_ipaddr = "10.5.65.0",
+        .indoor_netmask = "255.0.0.0",
+        .sync_state_path = "/etc/config/doorfast-sync",
+        .active_host = true,
+        .media = {
+            .enabled = true,
+            .station_address = "32:02:01:00:02:00",
+            .go2rtc_host = "ha.local",
+            .go2rtc_port = 8554,
+            .stream_name = "doorfast_preview",
+            .rtsp_username = "doorfast",
+            .credentials_path = "/etc/doorfast/media-credentials",
+            .encoder = DF_MEDIA_ENCODER_AUTO,
+            .resolution = DF_MEDIA_RESOLUTION_SOURCE,
+            .fps = 10,
+            .bitrate_kbps = 800,
+            .profile = DF_MEDIA_PROFILE_BASELINE,
+            .max_encoders = 0,
+            .min_free_kib = 393216,
+            .preview_timeout_s = 120,
+            .first_frame_timeout_s = 8,
+            .publish_retries = 3,
+            .overload_policy = DF_MEDIA_OVERLOAD_REJECT_NEW,
+            .diagnostics = true,
+        },
+    };
+    struct df_config invalid = config;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_config_validate(&config));
+    invalid.media.station_address = "IS:2-1-101-1";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.media.go2rtc_host = "https://ha.local";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.active_host = false;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.media.stream_name = "doorfast preview";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.media.stream_name = "doorfast.preview";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.media.station_ipv4 = "255.255.255.255";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.media.station_ipv4 = "239.1.2.3";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.media.station_ipv4 = "0.0.0.0";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.indoor_ipaddr = "10.5.65.4";
+    invalid.indoor_netmask = "255.255.255.0";
+    invalid.media.station_ipv4 = "10.5.65.255";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
+    invalid = config;
+    invalid.media.station_ipv4 = "10.2.3.4";
+    TEST_ASSERT_INT_EQ(DF_OK, df_config_validate(&invalid));
+}
+
 void test_legacy_config_import_keeps_only_safe_fields(void) {
     const char legacy[] =
         "config doorlink 'settings'\n"

@@ -191,3 +191,44 @@ void test_runtime_config_derives_active_host_ip_and_requires_netmask(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_config_parse(malformed_mask, &runtime));
 }
+
+void test_runtime_config_requires_valid_media_prerequisites(void) {
+    const char bad[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption active_host '1'\n"
+        "\toption host_interface 'eth2'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption indoor_netmask '255.0.0.0'\n"
+        "\toption media_enabled '1'\n";
+    const char valid[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption active_host '1'\n"
+        "\toption host_interface 'eth2'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption indoor_netmask '255.0.0.0'\n"
+        "\toption media_enabled '1'\n"
+        "\toption media_station_address '32:02:01:00:02:00'\n"
+        "\toption media_go2rtc_host 'ha.local'\n";
+    const char secret_in_uci[] =
+        "config gvs 'main'\n"
+        "\toption enabled '0'\n"
+        "\toption media_ingest_password 'must-not-be-accepted'\n";
+    const char secret_outside_main[] =
+        "config gvs 'main'\n"
+        "\toption enabled '0'\n"
+        "config auxiliary 'main'\n"
+        "\toption media_bearer_token 'must-not-be-accepted'\n";
+    struct df_runtime_config runtime;
+
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(bad, &runtime));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(valid, &runtime));
+    TEST_ASSERT_INT_EQ(1, runtime.config.media.enabled);
+    TEST_ASSERT_INT_EQ(8554, runtime.config.media.go2rtc_port);
+    TEST_ASSERT_INT_EQ(0, strcmp("doorfast_preview", runtime.config.media.stream_name));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_config_parse(secret_in_uci, &runtime));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_config_parse(secret_outside_main, &runtime));
+}

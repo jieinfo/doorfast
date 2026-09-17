@@ -210,7 +210,7 @@ git commit -m "feat: add GVS active preview state machine"
 - Produces `int df_media_credentials_write(const char *path, const struct df_media_credentials *replacement, const struct df_media_credentials_update *update);`.
 - Produces `int df_media_credentials_load(const char *path, struct df_media_credentials *out);`.
 
-- [ ] **Step 1: Write failing validation and secret-durability tests**
+- [x] **Step 1: Write failing validation and secret-durability tests**
 
 ```c
 void test_runtime_config_requires_valid_media_prerequisites(void) {
@@ -226,13 +226,13 @@ void test_media_credentials_preserve_blank_fields_and_never_echo_values(void) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `make -B build/doorfast-tests`
 
 Expected: missing `df_media_config` and credentials symbols.
 
-- [ ] **Step 3: Implement all public media fields and no secret UCI fields**
+- [x] **Step 3: Implement all public media fields and no secret UCI fields**
 
 ```c
 struct df_media_config {
@@ -246,13 +246,13 @@ struct df_media_config {
 
 Accept only the documented enum values, host/IP without path/userinfo, port `1..65535`, stream `^[A-Za-z0-9_-]{1,64}$`, FPS in `{5,8,10,12,15}`, bitrate `256..2000`, and timeout/range limits from the spec. When enabled require active host, a valid `32:...` station address, go2rtc host, and credentials file path exactly `/etc/doorfast/media-credentials`. UCI contains `media_rtsp_username`, never a password/token. Credential files are atomically renamed from a `0600` sibling temporary file and accept bounded printable ASCII excluding newline, carriage return, and NUL.
 
-- [ ] **Step 4: Run configuration and secret tests**
+- [x] **Step 4: Run configuration and secret tests**
 
 Run: `make -B test`
 
 Expected: invalid startup config fails closed; credentials preserve an omitted value, clear only on explicit flag, and status has only `rtsp_password_set`/`relay_token_set`.
 
-- [ ] **Step 5: Commit the unit**
+- [x] **Step 5: Commit the unit**
 
 ```bash
 git add src/config.[ch] src/runtime_config.[ch] src/media_credentials.[ch] tests/test_config.c tests/test_runtime_config.c tests/test_media_credentials.c package/doorfast/files/doorfast.config

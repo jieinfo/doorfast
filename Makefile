@@ -8,7 +8,7 @@ PCAP_CFLAGS ?= $(shell $(PCAP_CONFIG) --cflags 2>/dev/null)
 PCAP_LIBS ?= $(shell $(PCAP_CONFIG) --libs 2>/dev/null)
 CPPFLAGS := -D_DEFAULT_SOURCE -DDF_ALLOW_TEST_ROOT
 CFLAGS := -std=c17 -Wall -Wextra -Werror -pedantic -Isrc -Itests -Itests/support $(PCAP_CFLAGS)
-TEST_SOURCES := tests/test_main.c tests/test_event_relay.c src/event_relay.c tests/test_config.c tests/test_runtime_config.c tests/test_sip.c tests/test_gvs_deadline.c tests/test_gvs_frame.c tests/test_gvs_identity.c tests/test_gvs_presence.c tests/test_gvs_reply_queue.c tests/test_gvs_send_transaction.c tests/test_gvs_memory_sender.c tests/test_gvs_call_command.c tests/test_gvs_serialize.c tests/test_gvs_sync.c tests/test_gvs_sync_state.c tests/test_gvs_sync_adapters.c tests/test_gvs_runtime_sync.c tests/test_runtime_ubus.c tests/test_runtime_service.c tests/test_event_stream.c tests/test_gvs_observer.c tests/test_gvs_receive.c tests/test_gvs_replay.c tests/test_gvs_session.c tests/test_policy.c tests/test_capture.c tests/test_capture_retry.c tests/test_audit.c tests/test_discovery.c tests/test_diagnostics.c src/config.c src/runtime_config.c src/runtime_service.c src/event_stream.c src/event.c src/sip.c src/gvs_deadline.c src/gvs_frame.c src/gvs_identity.c src/gvs_presence.c src/gvs_reply_queue.c src/gvs_send_transaction.c src/gvs_memory_sender.c src/gvs_call_command.c src/gvs_serialize.c src/gvs_sync.c src/gvs_sync_state.c src/gvs_sync_adapters.c src/gvs_runtime_sync.c src/runtime_ubus.c src/gvs_observer.c src/gvs_packet.c src/gvs_receive.c src/gvs_replay.c src/gvs_session.c src/session.c src/policy.c src/capture.c src/capture_retry.c src/audit.c src/discovery.c src/diagnostics.c
+TEST_SOURCES := tests/test_main.c tests/test_event_relay.c src/event_relay.c tests/test_config.c tests/test_runtime_config.c tests/test_media_credentials.c tests/test_sip.c tests/test_gvs_deadline.c tests/test_gvs_frame.c tests/test_gvs_identity.c tests/test_gvs_presence.c tests/test_gvs_reply_queue.c tests/test_gvs_send_transaction.c tests/test_gvs_memory_sender.c tests/test_gvs_call_command.c tests/test_gvs_serialize.c tests/test_gvs_sync.c tests/test_gvs_sync_state.c tests/test_gvs_sync_adapters.c tests/test_gvs_runtime_sync.c tests/test_runtime_ubus.c tests/test_runtime_service.c tests/test_event_stream.c tests/test_gvs_observer.c tests/test_gvs_receive.c tests/test_gvs_replay.c tests/test_gvs_session.c tests/test_policy.c tests/test_capture.c tests/test_capture_retry.c tests/test_audit.c tests/test_discovery.c tests/test_diagnostics.c src/config.c src/runtime_config.c src/media_credentials.c src/runtime_service.c src/event_stream.c src/event.c src/sip.c src/gvs_deadline.c src/gvs_frame.c src/gvs_identity.c src/gvs_presence.c src/gvs_reply_queue.c src/gvs_send_transaction.c src/gvs_memory_sender.c src/gvs_call_command.c src/gvs_serialize.c src/gvs_sync.c src/gvs_sync_state.c src/gvs_sync_adapters.c src/gvs_runtime_sync.c src/runtime_ubus.c src/gvs_observer.c src/gvs_packet.c src/gvs_receive.c src/gvs_replay.c src/gvs_session.c src/session.c src/policy.c src/capture.c src/capture_retry.c src/audit.c src/discovery.c src/diagnostics.c
 DAEMON_SOURCES := src/main.c src/config.c src/runtime_config.c src/runtime_service.c src/event_stream.c src/event.c src/sip.c src/gvs_deadline.c src/gvs_frame.c src/gvs_identity.c src/gvs_presence.c src/gvs_reply_queue.c src/gvs_send_transaction.c src/gvs_memory_sender.c src/gvs_call_command.c src/gvs_serialize.c src/gvs_sync.c src/gvs_sync_state.c src/gvs_sync_adapters.c src/gvs_runtime_sync.c src/runtime_ubus.c src/gvs_observer.c src/gvs_packet.c src/gvs_receive.c src/gvs_replay.c src/gvs_session.c src/session.c src/policy.c src/capture.c src/capture_retry.c src/audit.c src/discovery.c src/diagnostics.c
 SIM_SOURCES := tools/gvs-peer-sim.c tests/support/gvs_peer_sim.c \
 	src/event.c src/gvs_deadline.c src/gvs_frame.c src/gvs_identity.c \
@@ -24,7 +24,7 @@ TEST_SOURCES += tests/test_gvs_priority.c src/gvs_priority.c
 TEST_SOURCES += tests/test_gvs_station.c src/gvs_station.c
 TEST_SOURCES += tests/test_gvs_monitor.c src/gvs_monitor.c
 TEST_SOURCES += tests/test_gvs_peer_sim.c tests/support/gvs_peer_sim.c
-DAEMON_SOURCES += src/gvs_priority.c
+DAEMON_SOURCES += src/gvs_priority.c src/gvs_station.c
 TEST_SOURCES += tests/test_gvs_call_dispatch.c src/gvs_call_dispatch.c
 TEST_SOURCES += tests/test_gvs_transport_policy.c src/gvs_transport_policy.c
 TEST_SOURCES += tests/test_gvs_call_ack.c src/gvs_call_ack.c
@@ -114,7 +114,7 @@ build/doorfast-tests build/doorfast: src/gvs_call_dispatch.h
 
 .PHONY: test doorfast peer-sim peer-udp-inject pcm-submit pcm-http-test clean
 
-RECORDER_SOURCES := src/recorder_main.c src/evidence_recorder.c src/pcap_ring.c src/evidence_classifier.c src/capture.c src/gvs_packet.c src/gvs_frame.c src/event.c src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/runtime_config.c src/config.c src/gvs_identity.c
+RECORDER_SOURCES := src/recorder_main.c src/evidence_recorder.c src/pcap_ring.c src/evidence_classifier.c src/capture.c src/gvs_packet.c src/gvs_frame.c src/event.c src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/runtime_config.c src/config.c src/gvs_identity.c src/gvs_station.c
 recorder: build/doorfast-recorder
 RECORDER_SOURCES += src/recorder_selftest.c
 RECORDER_SOURCES += src/evidence_metadata.c src/evidence_log.c
