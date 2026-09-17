@@ -80,6 +80,8 @@ TEST_SOURCES += src/evidence_metadata.c
 TEST_SOURCES += src/deployment_health.c
 DAEMON_SOURCES += src/deployment_health.c
 TEST_SOURCES += tests/test_evidence_recorder.c src/evidence_recorder.c
+TEST_SOURCES += tests/test_media_frame_queue.c src/media_frame_queue.c
+TEST_SOURCES += tests/test_media_capacity.c src/media_capacity.c
 build/doorfast-tests: src/evidence_recorder.h
 build/doorfast-tests: src/evidence_classifier.h
 build/doorfast-tests: src/evidence_log.h
