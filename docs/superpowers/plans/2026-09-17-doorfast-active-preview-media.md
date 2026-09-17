@@ -64,7 +64,7 @@
 - Produces `int df_gvs_station_routes_observe(struct df_gvs_station_routes *, const uint8_t peer[6], uint32_t ipv4, uint64_t now_ms, bool discovery_reply);`.
 - Produces `int df_gvs_station_routes_lookup(const struct df_gvs_station_routes *, const uint8_t peer[6], uint64_t now_ms, uint64_t max_age_ms, uint32_t *ipv4);`.
 
-- [ ] **Step 1: Write the failing parsing and freshness tests**
+- [x] **Step 1: Write the failing parsing and freshness tests**
 
 ```c
 void test_gvs_station_parses_only_captured_door_station_shape(void) {
@@ -87,13 +87,13 @@ void test_gvs_station_route_requires_matching_fresh_discovery_reply(void) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `make -B build/doorfast-tests`
 
 Expected: compile failure because `gvs_station.h` does not exist.
 
-- [ ] **Step 3: Implement exact address and route boundaries**
+- [x] **Step 3: Implement exact address and route boundaries**
 
 ```c
 #define DF_GVS_STATION_ROUTE_CAPACITY 4U
@@ -112,13 +112,13 @@ int df_gvs_station_parse(const char *text, uint8_t out[6]) {
 
 Require `discovery_reply=true`, the exact station bytes, nonzero IPv4, monotonic time, and `now_ms - discovery_ms < max_age_ms`; do not silently refresh a discovery lease from unrelated traffic.
 
-- [ ] **Step 4: Run focused and full native tests**
+- [x] **Step 4: Run focused and full native tests**
 
 Run: `make -B test`
 
 Expected: `test_gvs_station_*` passes and existing tests remain green.
 
-- [ ] **Step 5: Commit the unit**
+- [x] **Step 5: Commit the unit**
 
 ```bash
 git add src/gvs_station.[ch] tests/test_gvs_station.c tests/Makefile
@@ -140,7 +140,7 @@ git commit -m "feat: validate door station routes for preview"
 - Produces `int df_gvs_monitor_receive(struct df_gvs_monitor *, const struct df_gvs_frame *, uint32_t source_ipv4, uint64_t now_ms, struct df_gvs_monitor_result *);`.
 - Produces `int df_gvs_monitor_admit_jpeg(const struct df_gvs_monitor *, const uint8_t source[6], const uint8_t destination[6], uint32_t source_ipv4, uint64_t generation);`.
 
-- [ ] **Step 1: Write failing wire-state tests from the captured sequence**
+- [x] **Step 1: Write failing wire-state tests from the captured sequence**
 
 ```c
 void test_monitor_retries_0304_then_accepts_only_matching_0384(void) {
@@ -160,13 +160,13 @@ void test_monitor_rejects_stale_generation_wrong_route_and_unconfirmed_reply(voi
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `make -B build/doorfast-tests`
 
 Expected: compile failure because the monitor interface is absent.
 
-- [ ] **Step 3: Implement bounded state transitions**
+- [x] **Step 3: Implement bounded state transitions**
 
 ```c
 enum df_gvs_monitor_state { DF_GVS_MONITOR_IDLE, DF_GVS_MONITOR_REQUESTING,
@@ -178,13 +178,13 @@ struct df_gvs_monitor_action { bool send; uint8_t family, opcode, destination[6]
 
 Increment the generation at a successful start, send at most three `03/04` requests one second apart, require exact source/destination, source IPv4, `03/84`, and the captured body `1e 00 01`. Timeout to `FAILED` without creating an encoder. Stop sends one `03/02` body `00`, waits at most one second for matching `03/82`, then enters `IDLE` locally even if remote confirmation is absent. `03/50` sets `monitor_unconfirmed`, never success.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make -B test`
 
 Expected: monitor retries, timeout, confirmation, stop timeout, and generation isolation all pass.
 
-- [ ] **Step 5: Commit the unit**
+- [x] **Step 5: Commit the unit**
 
 ```bash
 git add src/gvs_monitor.[ch] tests/test_gvs_monitor.c tests/Makefile
