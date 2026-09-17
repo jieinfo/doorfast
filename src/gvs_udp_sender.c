@@ -2,6 +2,8 @@
 #include "gvs_identity.h"
 #include "gvs_media.h"
 #include "gvs_packet.h"
+#include "gvs_serialize.h"
+#include "gvs_station.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -20,6 +22,29 @@ static const struct df_gvs_observed_route *df_gvs_udp_find_route(
             return &sender->observed_routes[index];
     }
     return NULL;
+}
+
+static bool df_gvs_udp_ipv4_is_unicast(uint32_t ipv4) {
+    uint32_t host = ntohl(ipv4);
+    unsigned first_octet = (unsigned)(host >> 24U);
+
+    return host != 0U && host != UINT32_MAX && first_octet > 0U &&
+        first_octet < 224U;
+}
+
+static struct df_gvs_preview_route *df_gvs_udp_preview_route_mutable(
+    struct df_gvs_udp_sender *sender, const uint8_t peer[6]) {
+    size_t index;
+
+    for (index = 0U; index < DF_GVS_PREVIEW_ROUTE_CAPACITY; index++) {
+        if (sender->preview_routes[index].valid &&
+            memcmp(sender->preview_routes[index].peer, peer, 6U) == 0)
+            return &sender->preview_routes[index];
+    }
+    index = sender->next_preview_route;
+    sender->next_preview_route = (sender->next_preview_route + 1U) %
+        DF_GVS_PREVIEW_ROUTE_CAPACITY;
+    return &sender->preview_routes[index];
 }
 
 static int df_gvs_udp_resolve_destination(
@@ -161,6 +186,97 @@ int df_gvs_udp_sender_observe_peer(struct df_gvs_udp_sender *sender,
     memcpy(route->peer, frame.source, 6);
     route->ipv4 = prefix.source_ipv4;
     route->valid = true;
+    return DF_OK;
+}
+
+int df_gvs_udp_sender_observe_preview_route(struct df_gvs_udp_sender *sender,
+    const uint8_t *packet, size_t packet_length, const uint8_t identity[6],
+    uint64_t now_ms) {
+    struct df_udp_prefix prefix;
+    struct df_gvs_frame frame;
+    struct df_event event;
+    struct df_gvs_preview_route *route;
+
+    if (sender == NULL || packet == NULL || identity == NULL ||
+        df_gvs_inspect_udp_prefix(packet, packet_length, &prefix) != 1 ||
+        !prefix.payload_complete || prefix.destination_port != 8300U ||
+        !df_gvs_udp_ipv4_is_unicast(prefix.source_ipv4) ||
+        df_gvs_frame_parse(packet + prefix.payload_offset,
+            prefix.declared_payload_length, &frame, &event) != DF_OK ||
+        frame.family != 0x07U || frame.opcode != 0x86U ||
+        !df_gvs_frame_is_for_identity(&frame, identity) ||
+        df_gvs_station_validate(frame.source) != DF_OK) return DF_ERR_INVALID;
+    route = df_gvs_udp_preview_route_mutable(sender, frame.source);
+    memcpy(route->peer, frame.source, sizeof(route->peer));
+    route->ipv4 = prefix.source_ipv4;
+    route->observed_ms = now_ms;
+    route->configured = false;
+    route->valid = true;
+    return DF_OK;
+}
+
+int df_gvs_udp_sender_set_configured_route(struct df_gvs_udp_sender *sender,
+    const uint8_t peer[6], uint32_t ipv4) {
+    struct df_gvs_preview_route *route;
+
+    if (sender == NULL || df_gvs_station_validate(peer) != DF_OK ||
+        !df_gvs_udp_ipv4_is_unicast(ipv4)) return DF_ERR_INVALID;
+    route = df_gvs_udp_preview_route_mutable(sender, peer);
+    memcpy(route->peer, peer, sizeof(route->peer));
+    route->ipv4 = ipv4;
+    route->observed_ms = 0U;
+    route->configured = true;
+    route->valid = true;
+    return DF_OK;
+}
+
+int df_gvs_udp_sender_resolve_preview_route(const struct df_gvs_udp_sender *sender,
+    const uint8_t peer[6], uint64_t now_ms, uint64_t max_age_ms,
+    uint32_t *ipv4) {
+    size_t index;
+
+    if (sender == NULL || df_gvs_station_validate(peer) != DF_OK ||
+        ipv4 == NULL || max_age_ms == 0U) return DF_ERR_INVALID;
+    for (index = 0U; index < DF_GVS_PREVIEW_ROUTE_CAPACITY; index++) {
+        const struct df_gvs_preview_route *route = &sender->preview_routes[index];
+        if (!route->valid || memcmp(route->peer, peer, 6U) != 0) continue;
+        if (!route->configured && (now_ms < route->observed_ms ||
+            now_ms - route->observed_ms >= max_age_ms)) return DF_ERR_INVALID;
+        *ipv4 = route->ipv4;
+        return DF_OK;
+    }
+    return DF_ERR_INVALID;
+}
+
+int df_gvs_udp_sender_emit_control(struct df_gvs_udp_sender *sender,
+    const uint8_t destination[6], uint32_t destination_ipv4,
+    const uint8_t source[6], uint8_t family, uint8_t opcode,
+    const uint8_t *payload, size_t payload_length) {
+    uint8_t frame[DF_GVS_CONTROL_HEADER_SIZE + UINT16_MAX];
+    struct sockaddr_in target;
+    size_t frame_length = 0U;
+    ssize_t written;
+
+    if (sender == NULL || sender->fd < 0 || destination == NULL ||
+        !df_gvs_udp_ipv4_is_unicast(destination_ipv4) || source == NULL ||
+        payload_length > UINT16_MAX ||
+        (payload_length > 0U && payload == NULL) ||
+        df_gvs_control_serialize(frame, sizeof(frame), &frame_length,
+            destination, source, family, opcode, payload,
+            (uint16_t)payload_length, sender->provide_fields,
+            sender->fields_context) != DF_OK) {
+        if (sender != NULL && sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_INVALID;
+    }
+    target = sender->peer;
+    target.sin_addr.s_addr = destination_ipv4;
+    written = sendto(sender->fd, frame, frame_length, 0,
+        (const struct sockaddr *)&target, sizeof(target));
+    if (written != (ssize_t)frame_length) {
+        if (sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_IO;
+    }
+    if (sender->sent < UINT_MAX) sender->sent++;
     return DF_OK;
 }
 

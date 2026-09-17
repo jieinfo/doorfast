@@ -12,6 +12,42 @@ int df_gvs_jpeg_validate(const uint8_t *data, size_t length)
         data[length - 2U] == 0xff && data[length - 1U] == 0xd9 ? 0 : -1;
 }
 
+int df_gvs_jpeg_dimensions(const uint8_t *data, size_t length,
+    uint16_t *width, uint16_t *height)
+{
+    size_t offset = 2U;
+
+    if (data == NULL || width == NULL || height == NULL || length < 4U ||
+        data[0] != 0xffU || data[1] != 0xd8U) return -1;
+    while (offset + 1U < length) {
+        uint8_t marker;
+        size_t segment_length;
+
+        if (data[offset++] != 0xffU) return -1;
+        while (offset < length && data[offset] == 0xffU) offset++;
+        if (offset >= length) return -1;
+        marker = data[offset++];
+        if (marker == 0xd9U || marker == 0xdaU) return -1;
+        if (marker == 0x01U || (marker >= 0xd0U && marker <= 0xd7U)) continue;
+        if (offset + 2U > length) return -1;
+        segment_length = ((size_t)data[offset] << 8U) | data[offset + 1U];
+        if (segment_length < 2U || segment_length > length - offset) return -1;
+        if ((marker >= 0xc0U && marker <= 0xc3U) ||
+            (marker >= 0xc5U && marker <= 0xc7U) ||
+            (marker >= 0xc9U && marker <= 0xcbU) ||
+            (marker >= 0xcdU && marker <= 0xcfU)) {
+            if (segment_length < 8U) return -1;
+            *height = (uint16_t)(((uint16_t)data[offset + 3U] << 8U) |
+                data[offset + 4U]);
+            *width = (uint16_t)(((uint16_t)data[offset + 5U] << 8U) |
+                data[offset + 6U]);
+            return *width != 0U && *height != 0U ? 0 : -1;
+        }
+        offset += segment_length;
+    }
+    return -1;
+}
+
 void df_gvs_video_reassembly_init(struct df_gvs_video_reassembly *reassembly)
 {
     if (reassembly != NULL) {

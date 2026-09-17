@@ -36,5 +36,7 @@ void df_gvs_video_reassembly_reset(struct df_gvs_video_reassembly *);
 int df_gvs_video_reassembly_push(struct df_gvs_video_reassembly *,
     const struct df_gvs_video_packet *, const uint8_t **, size_t *);
 int df_gvs_jpeg_validate(const uint8_t *, size_t);
+int df_gvs_jpeg_dimensions(const uint8_t *, size_t, uint16_t *width,
+    uint16_t *height);
 
 #endif

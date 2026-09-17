@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+      - run: sudo apt-get update && sudo apt-get install -y libpcap-dev libcurl4-openssl-dev
       - run: make test
       - run: python3 -m unittest tests/test_gvs_peer_udp.py
       - run: python3 -B -m unittest tests/test_vm_preflight_state.py
@@ -65,7 +65,7 @@ jobs:
           (
             cd "$sdk_dir"
             ./scripts/feeds update -a
-            ./scripts/feeds install libpcap libuci libjson-c libopenssl luci-base
+            ./scripts/feeds install libpcap libuci libjson-c libopenssl libcurl luci-base
           )
           ./scripts/prepare-sdk-package.sh "$sdk_dir"
           make -C "$sdk_dir" defconfig
