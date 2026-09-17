@@ -109,6 +109,8 @@ void test_media_queue_discards_oldest_and_never_aliases_reassembly_memory(void);
 void test_media_queue_rejects_stale_generation_and_releases_allocations(void);
 void test_media_capacity_cannot_exceed_verified_single_station_limit(void);
 void test_media_encoder_selection_falls_back_in_verified_order(void);
+void test_media_encoder_builds_bounded_rtsp_argv(void);
+void test_media_encoder_generation_and_cleanup(void);
 
 int df_test_failure_count = 0;
 
@@ -242,6 +244,8 @@ int main(void) {
     test_media_queue_rejects_stale_generation_and_releases_allocations();
     test_media_capacity_cannot_exceed_verified_single_station_limit();
     test_media_encoder_selection_falls_back_in_verified_order();
+    test_media_encoder_builds_bounded_rtsp_argv();
+    test_media_encoder_generation_and_cleanup();
     test_gvs_replay_handshake_gap_and_eof();
     test_gvs_call_control_handshake_memory_lifecycle();
     test_gvs_call_control_handshake_receive_and_retry();
