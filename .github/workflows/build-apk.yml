@@ -21,6 +21,8 @@ jobs:
       - run: python3 -B -m unittest tests/test_compare_doorfast_site.py
       - run: node tests/test_luci_status.js
       - run: node tests/test_luci_settings.js
+      - run: node tests/test_luci_media_view.js
+      - run: node tests/js/test_media_status.mjs
       - run: sh tests/test_main_cli.sh
       - run: sh tests/test_recorder_cli.sh
       - run: sh tests/test_pcm_submit_cli.sh
@@ -65,12 +67,20 @@ jobs:
           (
             cd "$sdk_dir"
             ./scripts/feeds update -a
-            ./scripts/feeds install libpcap libuci libjson-c libopenssl libcurl luci-base
+            ./scripts/feeds install libpcap libuci libjson-c libopenssl libcurl luci-base ffmpeg libffmpeg-full libx264
           )
           ./scripts/prepare-sdk-package.sh "$sdk_dir"
-          make -C "$sdk_dir" defconfig
+          (
+            cd "$sdk_dir"
+            echo 'CONFIG_BUILD_PATENTED=y' >> .config
+            echo 'CONFIG_PACKAGE_doorfast-media=y' >> .config
+            make defconfig
+            grep -Fx 'CONFIG_BUILD_PATENTED=y' .config
+            grep -Fx 'CONFIG_PACKAGE_libx264=y' .config
+          )
           # Keep package staging file lists for the verification step below.
           make -C "$sdk_dir" package/doorfast/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
+          make -C "$sdk_dir" package/doorfast-media/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
           make -C "$sdk_dir" package/luci-app-doorfast/compile CONFIG_AUTOREMOVE= V=s -j"$(nproc)"
       - name: Verify generated APK file lists
         run: |
@@ -78,8 +88,10 @@ jobs:
           test "${#sdk_dirs[@]}" -eq 1
           sdk_dir=${sdk_dirs[0]}
           doorfast_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/doorfast/lib/apk/packages/doorfast.list' | head -n 1)
+          media_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/doorfast-media/lib/apk/packages/doorfast-media.list' | head -n 1)
           luci_list=$(find "$sdk_dir/build_dir" -type f -path '*/ipkg-x86_64/luci-app-doorfast/lib/apk/packages/luci-app-doorfast.list' | head -n 1)
           test -n "$doorfast_list"
+          test -n "$media_list"
           test -n "$luci_list"
           grep -Fxq '/usr/sbin/doorfast' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-recorder' "$doorfast_list"
@@ -88,6 +100,9 @@ jobs:
           grep -Fxq '/usr/sbin/doorfast-pcm-submit' "$doorfast_list"
           grep -Fxq '/etc/init.d/doorfast-recorder' "$doorfast_list"
           grep -Fxq '/usr/sbin/doorfast-site-inventory' "$doorfast_list"
+          grep -Fxq '/usr/lib/doorfast/media-v1.so' "$media_list"
+          test "$(wc -l <"$media_list")" -eq 1
+          ! grep -E -q '/etc/init.d/|/usr/sbin/' "$media_list"
           grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"
           ! grep -Fq 'gvs-peer-' "$doorfast_list" "$luci_list"
       - name: Stage non-installed PCM acceptance executable
@@ -101,17 +116,21 @@ jobs:
           test -x "$acceptance"
           mkdir -p artifacts
           cp "$acceptance" artifacts/doorfast-pcm-http-acceptance
-          mapfile -t doorfast_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'doorfast-*.apk' -print)
+          mapfile -t doorfast_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'doorfast-[0-9]*.apk' -print)
+          mapfile -t media_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'doorfast-media-*.apk' -print)
           mapfile -t luci_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'luci-app-doorfast-*.apk' -print)
           test "${#doorfast_apks[@]}" -eq 1
+          test "${#media_apks[@]}" -eq 1
           test "${#luci_apks[@]}" -eq 1
           cp "${doorfast_apks[0]}" artifacts/doorfast.apk
+          cp "${media_apks[0]}" artifacts/doorfast-media.apk
           cp "${luci_apks[0]}" artifacts/luci-app-doorfast.apk
       - uses: actions/upload-artifact@v4
         with:
           name: doorfast-apk
           path: |
             artifacts/doorfast.apk
+            artifacts/doorfast-media.apk
             artifacts/luci-app-doorfast.apk
             artifacts/doorfast-pcm-http-acceptance
           if-no-files-found: error

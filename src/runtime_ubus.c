@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define DF_RUNTIME_UBUS_RECONNECT_MS 5000U
 
@@ -143,10 +144,12 @@ static void df_ubus_deployment_health(struct blob_buf *b) {
 
 static void df_ubus_add_media_status(struct blob_buf *buffer,
     const struct df_runtime_media_status *status) {
+    blobmsg_add_u8(buffer, "installed", status->installed);
     blobmsg_add_u8(buffer, "available", status->available);
     blobmsg_add_string(buffer, "state", status->state);
     blobmsg_add_u64(buffer, "generation", status->generation);
     blobmsg_add_u64(buffer, "status_revision", status->status_revision);
+    blobmsg_add_u32(buffer, "effective_capacity", status->effective_capacity);
     blobmsg_add_u8(buffer, "encoder_running", status->encoder_running);
     blobmsg_add_u32(buffer, "queue_drops", status->queue_drops);
     blobmsg_add_u32(buffer, "relay_failures", status->relay_failures);
@@ -1193,7 +1196,9 @@ int df_runtime_ubus_read_media_status(struct df_runtime_ubus *service,
     if (service == NULL || !service->started || service->media == NULL ||
         service->media_credentials_path[0] == '\0' || status == NULL)
         return DF_ERR_INVALID;
+    next.installed = access(DF_RUNTIME_MEDIA_MODULE_PATH, R_OK) == 0;
     if (service->media->available) {
+        memset(&module_status, 0, sizeof(module_status));
         if (df_runtime_media_module_status(
                 service->media, &module_status) != DF_OK)
             return DF_ERR_IO;
@@ -1202,6 +1207,8 @@ int df_runtime_ubus_read_media_status(struct df_runtime_ubus *service,
         next.monitor_state = module_status.monitor_state;
         next.generation = module_status.generation;
         next.status_revision = module_status.status_revision;
+        /* This ABI revision has one protocol-verified preview slot. */
+        next.effective_capacity = module_status.available ? 1U : 0U;
         next.queue_drops = module_status.queue_drops;
         next.relay_failures = module_status.relay_failures;
         (void)snprintf(next.state, sizeof(next.state), "%s",

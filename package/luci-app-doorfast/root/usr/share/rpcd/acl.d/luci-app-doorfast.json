@@ -1,6 +1,6 @@
 {
   "luci-app-doorfast": {
-    "description": "Read Doorfast status and manage deployment configuration",
+    "description": "Read Doorfast status and manage Doorfast configuration",
     "read": {
       "uci": ["doorfast", "doorfast-automation", "doorfast-events"],
       "ubus": {
@@ -8,7 +8,10 @@
       }
     },
     "write": {
-      "uci": ["doorfast", "doorfast-automation", "doorfast-events"]
+      "uci": ["doorfast", "doorfast-automation", "doorfast-events"],
+      "ubus": {
+        "doorfast": ["media_credentials"]
+      }
     }
   }
 }

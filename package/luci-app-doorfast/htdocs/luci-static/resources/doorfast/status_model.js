@@ -94,6 +94,65 @@ function unsignedText(value, name) {
     return String(value);
 }
 
+function formatMediaStatus(payload) {
+    var media = requireObject(payload, 'media');
+    var state = enumLabel(media.state, {
+        unavailable: 'Unavailable',
+        idle: 'Idle',
+        requesting: 'Requesting',
+        awaiting_video: 'Awaiting video',
+        publishing: 'Publishing',
+        viewing: 'Viewing',
+        stopping: 'Stopping',
+        failed: 'Failed'
+    }, 'media state');
+    var failure = media.failure;
+
+    if (typeof media.available !== 'boolean' ||
+        typeof media.encoder_running !== 'boolean' ||
+        typeof media.rtsp_password_set !== 'boolean' ||
+        typeof media.relay_token_set !== 'boolean')
+        throw new TypeError('media status flag must be boolean');
+    if (failure === undefined)
+        failure = '';
+    if (typeof failure !== 'string' || !/^[a-z_]*$/.test(failure))
+        throw new TypeError('invalid media failure');
+
+    return [
+        ['State', state],
+        ['Generation', unsignedText(media.generation, 'media generation')],
+        ['Effective capacity', unsignedText(media.effective_capacity,
+                                              'effective capacity')],
+        ['Queue drops', unsignedText(media.queue_drops, 'queue drops')],
+        ['RTSP password', media.rtsp_password_set ? 'Set' : 'Not set'],
+        ['Relay token', media.relay_token_set ? 'Set' : 'Not set'],
+        ['Encoder', media.encoder_running ? 'Running' : 'Stopped'],
+        ['Relay failures', unsignedText(media.relay_failures,
+                                        'relay failures')],
+        ['Failure', failure === '' ? 'None' : failure]
+    ];
+}
+
+function localizedMediaStatus(payload) {
+    var labels = {
+        State: '状态', Generation: '代次', 'Effective capacity': '有效容量',
+        'Queue drops': '队列丢帧', 'RTSP password': 'RTSP 密码',
+        'Relay token': 'relay 令牌', Encoder: '编码器',
+        'Relay failures': 'relay 失败次数', Failure: '失败原因'
+    };
+    var states = {
+        Unavailable: '模块不可用', Idle: '空闲', Requesting: '请求中',
+        'Awaiting video': '等待视频', Publishing: '发布中', Viewing: '观看中',
+        Stopping: '停止中', Failed: '失败', Set: '已设置', 'Not set': '未设置',
+        Running: '运行中', Stopped: '已停止', None: '无'
+    };
+
+    return formatMediaStatus(payload).map(function(row) {
+        return [labels[row[0]], Object.prototype.hasOwnProperty.call(
+            states, row[1]) ? states[row[1]] : row[1]];
+    });
+}
+
 function formatStatus(payload) {
     var root = requireObject(payload, 'payload');
     var sync = requireObject(root.sync, 'sync');
@@ -186,6 +245,10 @@ function formatStatus(payload) {
             ['累计丢弃动作', unsignedText(call.handshake_dropped, 'handshake_dropped')]
         ]});
     }
+    if (root.media && root.media.installed === true) {
+        sections.push({title: '媒体预览', rows: localizedMediaStatus(
+            requireObject(root.media, 'media'))});
+    }
     if (root.deployment && root.deployment.schema_version === 1) {
         var deployment = root.deployment;
         var rows = [['部署配置', deployment.configured === true ? '已启用' : '未启用或不可读取']];
@@ -212,6 +275,7 @@ function formatStatus(payload) {
 
 var statusModel = {
     formatStatus: formatStatus,
+    formatMediaStatus: formatMediaStatus,
     roleLabel: roleLabel,
     callSessionLabel: callSessionLabel,
     callDispatchLabel: callDispatchLabel,

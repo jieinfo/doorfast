@@ -58,6 +58,7 @@ struct df_runtime_elevator_status {
 };
 
 struct df_runtime_media_status {
+    bool installed;
     bool available;
     bool encoder_running;
     enum df_gvs_monitor_state monitor_state;
@@ -65,6 +66,7 @@ struct df_runtime_media_status {
     char failure[DF_MEDIA_MODULE_FAILURE_MAX];
     uint64_t generation;
     uint64_t status_revision;
+    unsigned effective_capacity;
     unsigned queue_drops;
     unsigned relay_failures;
     bool rtsp_password_set;
