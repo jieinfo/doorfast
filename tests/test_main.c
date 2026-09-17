@@ -116,9 +116,13 @@ void test_media_encoder_selection_falls_back_in_verified_order(void);
 void test_media_encoder_uses_exec_argv_and_redacts_credentials(void);
 void test_media_encoder_rejects_stale_frame_and_restarts_on_dimension_change(void);
 void test_media_encoder_retries_backpressure_and_invalidates_broken_pipe(void);
+void test_media_encoder_broken_pipe_completes_when_sigpipe_is_inherited_ignored(void);
 void test_media_encoder_stop_kills_and_reaps_unresponsive_child(void);
 void test_media_encoder_exec_uses_complete_rtsp_arguments(void);
 void test_media_encoder_tick_detects_child_exit_and_invalidates_generation(void);
+void test_media_encoder_preserves_documented_target_bitrate_range(void);
+void test_media_encoder_requires_resolved_encoder_and_builds_hardware_argv(void);
+void test_media_encoder_tracks_source_and_fixed_output_dimensions_separately(void);
 
 int df_test_failure_count = 0;
 
@@ -277,9 +281,13 @@ int main(int argc, char **argv) {
     test_media_encoder_uses_exec_argv_and_redacts_credentials();
     test_media_encoder_rejects_stale_frame_and_restarts_on_dimension_change();
     test_media_encoder_retries_backpressure_and_invalidates_broken_pipe();
+    test_media_encoder_broken_pipe_completes_when_sigpipe_is_inherited_ignored();
     test_media_encoder_stop_kills_and_reaps_unresponsive_child();
     test_media_encoder_exec_uses_complete_rtsp_arguments();
     test_media_encoder_tick_detects_child_exit_and_invalidates_generation();
+    test_media_encoder_preserves_documented_target_bitrate_range();
+    test_media_encoder_requires_resolved_encoder_and_builds_hardware_argv();
+    test_media_encoder_tracks_source_and_fixed_output_dimensions_separately();
     test_gvs_replay_handshake_gap_and_eof();
     test_gvs_call_control_handshake_memory_lifecycle();
     test_gvs_call_control_handshake_receive_and_retry();

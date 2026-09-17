@@ -33,8 +33,10 @@ struct df_media_encoder_process {
     int input_fd;
     uint64_t generation;
     uint64_t last_tick_ms;
-    uint16_t width;
-    uint16_t height;
+    uint16_t source_width;
+    uint16_t source_height;
+    uint16_t output_width;
+    uint16_t output_height;
     enum df_media_encoder encoder;
     bool running;
     bool input_owned;
