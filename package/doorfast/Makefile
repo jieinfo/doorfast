@@ -15,8 +15,6 @@ DF_MEDIA_MODULE_SOURCES:= \
 	$(PKG_BUILD_DIR)/src/media_frame_queue.c \
 	$(PKG_BUILD_DIR)/src/media_module.c \
 	$(PKG_BUILD_DIR)/src/media_relay.c
-DF_BASE_SOURCES=$(filter-out $(DF_MEDIA_MODULE_SOURCES),$(wildcard $(PKG_BUILD_DIR)/src/*.c))
-
 define Package/doorfast
   SECTION:=net
   CATEGORY:=Network
@@ -31,13 +29,14 @@ define Build/Prepare
 	$(CP) ./src/. $(PKG_BUILD_DIR)/src/
 	$(CP) ./src/event_relay_main.c $(PKG_BUILD_DIR)/event_relay_main.c
 	$(RM) $(PKG_BUILD_DIR)/src/event_relay_main.c
+	$(RM) $(DF_MEDIA_MODULE_SOURCES)
 endef
 
 define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -std=c17 -Wall -Wextra -Werror -pedantic \
-		-I$(PKG_BUILD_DIR)/src $(DF_BASE_SOURCES) -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE -DDF_WITH_UBUS -DDF_RECORDER_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
-		-I$(PKG_BUILD_DIR)/src $(DF_BASE_SOURCES) -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-recorder
+		-I$(PKG_BUILD_DIR)/src $(PKG_BUILD_DIR)/src/*.c -lpcap -lubus -lubox -lblobmsg_json -o $(PKG_BUILD_DIR)/doorfast-recorder
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE \
 		-DDF_WITH_UBUS -DDF_PCM_HTTP_PROGRAM -std=c17 -Wall -Wextra -Werror -pedantic \
 		-I$(PKG_BUILD_DIR)/src \

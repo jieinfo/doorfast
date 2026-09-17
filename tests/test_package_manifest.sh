@@ -12,8 +12,9 @@ grep -Fq -- '-Wl,-z,defs' package/doorfast-media/Makefile
 grep -Fq 'gvs_video_reassembly.c' package/doorfast-media/Makefile
 grep -Fq 'media_module.c' package/doorfast-media/Makefile
 grep -Fq 'media_relay.c' package/doorfast-media/Makefile
-grep -Fq 'DF_BASE_SOURCES=$(filter-out' package/doorfast/Makefile
-test "$(grep -Fc '$(DF_BASE_SOURCES)' package/doorfast/Makefile)" -eq 2
+! grep -Fq '$(wildcard $(PKG_BUILD_DIR)/src/*.c)' package/doorfast/Makefile
+grep -Fq '$(RM) $(DF_MEDIA_MODULE_SOURCES)' package/doorfast/Makefile
+test "$(grep -Fc '$(PKG_BUILD_DIR)/src/*.c' package/doorfast/Makefile)" -eq 2
 test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast-group
 test -f package/doorfast/files/doorfast-recorder.init
