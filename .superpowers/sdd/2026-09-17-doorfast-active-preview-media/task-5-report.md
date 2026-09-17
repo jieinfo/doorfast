@@ -45,6 +45,7 @@ The failures matched the missing Task 5 interface and behavior rather than a tes
 - Uses the documented 800 Kbps target with a 1.2 Mbps peak for the default configuration and derives the same 3:2 peak ratio for user-selected targets.
 - Requires the capacity probe layer to resolve `auto` before starting the supervisor, and verifies QSV and VAAPI argv separately.
 - Fails the child before `execvp` if stdin or `/dev/null` redirection cannot be established, preventing FFmpeg from inheriting daemon output streams.
+- Aligns the tracked Task 5 plan with the bounded, observable `int df_media_encoder_stop(..., unsigned timeout_ms)` interface.
 
 ## GREEN evidence
 
@@ -66,7 +67,7 @@ The supervisor retains an `int` return and explicit timeout on `df_media_encoder
 ASan and UBSan also passed:
 
 ```text
-make CPPFLAGS='-D_DEFAULT_SOURCE -DDF_ALLOW_TEST_ROOT -fsanitize=address,undefined -fno-omit-frame-pointer' \
+make -B CPPFLAGS='-D_DEFAULT_SOURCE -DDF_ALLOW_TEST_ROOT -fsanitize=address,undefined -fno-omit-frame-pointer' \
   CFLAGS='-std=c17 -Wall -Wextra -Werror -pedantic -g -Isrc -Itests -Itests/support -I/opt/homebrew/Cellar/libpcap/1.10.6/include' \
   PCAP_LIBS='-L/opt/homebrew/Cellar/libpcap/1.10.6/lib -lpcap -fsanitize=address,undefined' test
 ```
