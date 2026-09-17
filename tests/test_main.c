@@ -1,4 +1,8 @@
 #include "test.h"
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 void test_event_relay(void);
 void test_gvs_call_runtime_idle_deadlines(void);
 void test_gvs_call_runtime_tick_is_atomic(void);
@@ -109,6 +113,16 @@ void test_media_queue_discards_oldest_and_never_aliases_reassembly_memory(void);
 void test_media_queue_rejects_stale_generation_and_releases_allocations(void);
 void test_media_capacity_cannot_exceed_verified_single_station_limit(void);
 void test_media_encoder_selection_falls_back_in_verified_order(void);
+void test_media_encoder_uses_exec_argv_and_redacts_credentials(void);
+void test_media_encoder_rejects_stale_frame_and_restarts_on_dimension_change(void);
+void test_media_encoder_retries_backpressure_and_invalidates_broken_pipe(void);
+void test_media_encoder_broken_pipe_completes_when_sigpipe_is_inherited_ignored(void);
+void test_media_encoder_stop_kills_and_reaps_unresponsive_child(void);
+void test_media_encoder_exec_uses_complete_rtsp_arguments(void);
+void test_media_encoder_tick_detects_child_exit_and_invalidates_generation(void);
+void test_media_encoder_preserves_documented_target_bitrate_range(void);
+void test_media_encoder_requires_resolved_encoder_and_builds_hardware_argv(void);
+void test_media_encoder_tracks_source_and_fixed_output_dimensions_separately(void);
 
 int df_test_failure_count = 0;
 
@@ -227,7 +241,29 @@ void test_pcm_http_rejects_unsafe_and_malformed_state(void);
 void test_pcm_http_provider_failures_do_not_change_state(void);
 void test_pcm_http_stale_open_waiting_on_lock_cannot_revert_state(void);
 
-int main(void) {
+static int capture_media_encoder_arguments(int argc, char **argv)
+{
+    const char *path = getenv("DF_TEST_MEDIA_ENCODER_ARGV");
+    int descriptor;
+    int index;
+
+    if (path == NULL || path[0] == '\0') return -1;
+    descriptor = open(path, O_WRONLY | O_TRUNC);
+    if (descriptor < 0) return 127;
+    for (index = 0; index < argc; index++) {
+        size_t length = strlen(argv[index]);
+        if (write(descriptor, argv[index], length) != (ssize_t)length ||
+            write(descriptor, "\n", 1U) != 1) {
+            (void)close(descriptor);
+            return 127;
+        }
+    }
+    return close(descriptor) == 0 ? 0 : 127;
+}
+
+int main(int argc, char **argv) {
+    int capture_result = capture_media_encoder_arguments(argc, argv);
+    if (capture_result >= 0) return capture_result;
     test_pcm_http_validates_session_requests();
     test_pcm_http_requires_authoritative_talking_transmitter();
     test_pcm_http_opens_and_releases_producer_lease();
@@ -242,6 +278,16 @@ int main(void) {
     test_media_queue_rejects_stale_generation_and_releases_allocations();
     test_media_capacity_cannot_exceed_verified_single_station_limit();
     test_media_encoder_selection_falls_back_in_verified_order();
+    test_media_encoder_uses_exec_argv_and_redacts_credentials();
+    test_media_encoder_rejects_stale_frame_and_restarts_on_dimension_change();
+    test_media_encoder_retries_backpressure_and_invalidates_broken_pipe();
+    test_media_encoder_broken_pipe_completes_when_sigpipe_is_inherited_ignored();
+    test_media_encoder_stop_kills_and_reaps_unresponsive_child();
+    test_media_encoder_exec_uses_complete_rtsp_arguments();
+    test_media_encoder_tick_detects_child_exit_and_invalidates_generation();
+    test_media_encoder_preserves_documented_target_bitrate_range();
+    test_media_encoder_requires_resolved_encoder_and_builds_hardware_argv();
+    test_media_encoder_tracks_source_and_fixed_output_dimensions_separately();
     test_gvs_replay_handshake_gap_and_eof();
     test_gvs_call_control_handshake_memory_lifecycle();
     test_gvs_call_control_handshake_receive_and_retry();

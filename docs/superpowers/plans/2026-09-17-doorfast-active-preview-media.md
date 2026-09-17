@@ -329,7 +329,8 @@ git commit -m "feat: bound preview frame buffering and capacity"
 - Consumes one `df_media_frame_queue` and loaded credentials.
 - Produces `int df_media_encoder_start(struct df_media_encoder_process *, const struct df_media_encoder_config *, const struct df_media_credentials *, uint64_t generation);`.
 - Produces `int df_media_encoder_write_frame(struct df_media_encoder_process *, const struct df_media_frame *);`.
-- Produces `int df_media_encoder_tick(struct df_media_encoder_process *, uint64_t now_ms);` and `void df_media_encoder_stop(...)`.
+- Produces `int df_media_encoder_tick(struct df_media_encoder_process *, uint64_t now_ms);`.
+- Produces `int df_media_encoder_stop(struct df_media_encoder_process *, unsigned timeout_ms);` so runtime integration can observe reaping failures and bounded timeout expiry.
 
 - [ ] **Step 1: Write failing argv and cleanup tests**
 
