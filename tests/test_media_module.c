@@ -11,6 +11,7 @@
 
 struct module_trace {
     char entries[8][32];
+    char last_json[512];
     unsigned count;
 };
 
@@ -85,11 +86,46 @@ static int module_send_relay(const char *url, const char *token,
     struct module_trace *trace = context;
     (void)url;
     (void)token;
+    (void)snprintf(trace->last_json, sizeof(trace->last_json), "%s", json);
     if (strstr(json, "monitor_preempted") != NULL) {
         (void)snprintf(trace->entries[trace->count++],
             sizeof(trace->entries[0]), "monitor_preempted");
+    } else if (strstr(json, "monitor_stopped") != NULL) {
+        (void)snprintf(trace->entries[trace->count++],
+            sizeof(trace->entries[0]), "%s",
+            strstr(json, "stop_timeout") == NULL ?
+                "monitor_stopped" : "stop_timeout");
+    } else if (strstr(json, "monitor_failed") != NULL) {
+        (void)snprintf(trace->entries[trace->count++],
+            sizeof(trace->entries[0]), "monitor_failed");
     }
     return DF_OK;
+}
+
+static int module_fail_encoder_stop(struct df_media_encoder_process *encoder,
+    unsigned timeout_ms) {
+    (void)encoder;
+    (void)timeout_ms;
+    return DF_ERR_IO;
+}
+
+static void module_set_running_media(struct df_media_module *module,
+    uint64_t generation, uint64_t now_ms) {
+    module->monitor.state = DF_GVS_MONITOR_PUBLISHING;
+    module->monitor.generation = generation;
+    module->monitor.last_now_ms = now_ms;
+    module->monitor.station_ipv4 = 0x01020304U;
+    module->monitor.media_ready = true;
+    memcpy(module->monitor.local,
+        (const uint8_t[]){0x61, 2, 1, 1, 1, 1}, 6U);
+    memcpy(module->monitor.station,
+        (const uint8_t[]){0x32, 2, 1, 0, 2, 0}, 6U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_init(
+        &module->queue, generation, DF_GVS_VIDEO_MAX_FRAME));
+    module->queue_initialized = true;
+    module->encoder.running = true;
+    module->encoder.generation = generation;
+    module->encoder.input_fd = -1;
 }
 
 void test_media_module_preempts_with_control_before_event(void) {
@@ -349,4 +385,138 @@ void test_media_module_restarts_after_failure_with_new_generation(void) {
     TEST_ASSERT_INT_EQ(2, (int)module.monitor.generation);
     TEST_ASSERT_INT_EQ(0, module.failure[0] != '\0');
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
+}
+
+void test_media_module_stop_ack_cleans_local_media(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t station[6] = {0x32, 2, 1, 0, 2, 0};
+    struct df_media_module module = {0};
+    struct module_trace trace = {0};
+    struct df_gvs_frame frame = {
+        .destination = {0x61, 2, 1, 1, 1, 1},
+        .source = {0x32, 2, 1, 0, 2, 0},
+        .family = 0x03U,
+        .opcode = 0x82U,
+    };
+    char path[] = "/tmp/doorfast-media-stop-ack-XXXXXX";
+    const struct df_media_module_config_v1 config = {
+        .enabled = true,
+        .local = {0x61, 2, 1, 1, 1, 1},
+        .station = {0x32, 2, 1, 0, 2, 0},
+        .station_ipv4 = 0x01020304U,
+        .credentials_path = path,
+        .relay_url = "http://ha.local",
+    };
+    const struct df_media_module_callbacks_v1 callbacks = {
+        .emit_control = module_noop_control,
+        .relay_send = module_send_relay,
+        .context = &trace,
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK, module_write_credentials(path));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(
+        &module, &config, &callbacks, 100U));
+    module_set_running_media(&module, 1U, 100U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_command(&module,
+        DF_MEDIA_MODULE_COMMAND_STOP, 1U, false, 101U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_receive_control(
+        &module, &frame, 0x01020304U, 102U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_IDLE, module.monitor.state);
+    TEST_ASSERT_INT_EQ(0, module.encoder.running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 102U));
+    TEST_ASSERT_INT_EQ(1, (int)trace.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("monitor_stopped", trace.entries[0]));
+    TEST_ASSERT_INT_EQ(0, memcmp(module.monitor.local, local, sizeof(local)));
+    TEST_ASSERT_INT_EQ(0, memcmp(module.monitor.station, station, sizeof(station)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
+    TEST_ASSERT_INT_EQ(0, unlink(path));
+}
+
+void test_media_module_stop_timeout_cleans_local_media(void) {
+    struct df_media_module module = {0};
+    struct module_trace trace = {0};
+    char path[] = "/tmp/doorfast-media-stop-timeout-XXXXXX";
+    const struct df_media_module_config_v1 config = {
+        .enabled = true,
+        .local = {0x61, 2, 1, 1, 1, 1},
+        .station = {0x32, 2, 1, 0, 2, 0},
+        .station_ipv4 = 0x01020304U,
+        .credentials_path = path,
+        .relay_url = "http://ha.local",
+    };
+    const struct df_media_module_callbacks_v1 callbacks = {
+        .emit_control = module_noop_control,
+        .relay_send = module_send_relay,
+        .context = &trace,
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK, module_write_credentials(path));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(
+        &module, &config, &callbacks, 100U));
+    module_set_running_media(&module, 1U, 100U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_command(&module,
+        DF_MEDIA_MODULE_COMMAND_STOP, 1U, false, 101U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(
+        &module, 101U + DF_GVS_MONITOR_STOP_TIMEOUT_MS));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_IDLE, module.monitor.state);
+    TEST_ASSERT_INT_EQ(0, module.encoder.running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, strcmp("stop_timeout", module.failure));
+    TEST_ASSERT_INT_EQ(1, (int)trace.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("stop_timeout", trace.entries[0]));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(
+        &module, 102U + DF_GVS_MONITOR_STOP_TIMEOUT_MS));
+    TEST_ASSERT_INT_EQ(2, (int)module.monitor.generation);
+    TEST_ASSERT_INT_EQ(0, module.failure[0]);
+    TEST_ASSERT_INT_EQ(1,
+        strstr(trace.last_json, "\"failure\":\"\"") != NULL ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
+    TEST_ASSERT_INT_EQ(0, unlink(path));
+}
+
+void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void) {
+    struct df_media_module module = {0};
+    struct module_trace trace = {0};
+    struct df_gvs_frame frame = {
+        .destination = {0x61, 2, 1, 1, 1, 1},
+        .source = {0x32, 2, 1, 0, 2, 0},
+        .family = 0x03U,
+        .opcode = 0x82U,
+    };
+    char path[] = "/tmp/doorfast-media-stop-failure-XXXXXX";
+    const struct df_media_module_config_v1 config = {
+        .enabled = true,
+        .local = {0x61, 2, 1, 1, 1, 1},
+        .station = {0x32, 2, 1, 0, 2, 0},
+        .station_ipv4 = 0x01020304U,
+        .credentials_path = path,
+        .relay_url = "http://ha.local",
+    };
+    const struct df_media_module_callbacks_v1 callbacks = {
+        .emit_control = module_noop_control,
+        .relay_send = module_send_relay,
+        .context = &trace,
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK, module_write_credentials(path));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(
+        &module, &config, &callbacks, 100U));
+    module_set_running_media(&module, 1U, 100U);
+    module.stop_encoder = module_fail_encoder_stop;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_command(&module,
+        DF_MEDIA_MODULE_COMMAND_STOP, 1U, false, 101U));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_media_module_receive_control(
+        &module, &frame, 0x01020304U, 102U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_FAILED, module.monitor.state);
+    TEST_ASSERT_INT_EQ(0, strcmp("encoder_exited", module.failure));
+    TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_relay_tick(&module.relay, 102U));
+    TEST_ASSERT_INT_EQ(1, (int)trace.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("monitor_failed", trace.entries[0]));
+    TEST_ASSERT_INT_EQ(0,
+        strstr(trace.last_json, "monitor_stopped") != NULL ? 1 : 0);
+    module.stop_encoder = df_media_encoder_stop;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
+    TEST_ASSERT_INT_EQ(0, unlink(path));
 }

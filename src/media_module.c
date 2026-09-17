@@ -76,12 +76,30 @@ static void df_media_module_queue_destroy(struct df_media_module *module) {
     }
 }
 
-static void df_media_module_encoder_stop(struct df_media_module *module) {
-    if (module == NULL) return;
+static int df_media_module_encoder_stop(struct df_media_module *module) {
+    if (module == NULL || module->stop_encoder == NULL) return DF_ERR_INVALID;
     if (df_media_encoder_is_running(&module->encoder))
-        (void)df_media_encoder_stop(&module->encoder, 100U);
-    else
-        (void)df_media_encoder_stop(&module->encoder, 0U);
+        return module->stop_encoder(&module->encoder, 100U);
+    return module->stop_encoder(&module->encoder, 0U);
+}
+
+static int df_media_module_cleanup_media(struct df_media_module *module) {
+    int result = df_media_module_encoder_stop(module);
+
+    df_media_module_queue_destroy(module);
+    return result;
+}
+
+static int df_media_module_report_cleanup_failure(struct df_media_module *module,
+    uint64_t generation, uint64_t now_ms) {
+    if (module == NULL || generation == 0U) return DF_ERR_INVALID;
+    module->monitor.state = DF_GVS_MONITOR_FAILED;
+    module->monitor.failure = DF_GVS_MONITOR_FAILURE_NONE;
+    module->monitor.media_ready = false;
+    df_media_module_set_failure(module, "encoder_exited");
+    if (df_media_module_emit_event(module, "monitor_failed", generation,
+            now_ms) != DF_OK) return DF_ERR_IO;
+    return DF_ERR_IO;
 }
 
 static int df_media_module_start_encoder(struct df_media_module *module,
@@ -183,6 +201,7 @@ int df_media_module_init(struct df_media_module *module,
         return DF_ERR_INVALID;
     }
     df_gvs_monitor_init(&module->monitor);
+    module->stop_encoder = df_media_encoder_stop;
     if (df_media_relay_init(&module->relay, module->relay_url,
             module->credentials.relay_token, callbacks->relay_send,
             callbacks->context) != DF_OK) {
@@ -200,11 +219,8 @@ int df_media_module_start(struct df_media_module *module, uint64_t now_ms) {
     if (module == NULL || !module->initialized ||
         (module->monitor.state != DF_GVS_MONITOR_IDLE &&
          module->monitor.state != DF_GVS_MONITOR_FAILED)) return DF_ERR_INVALID;
-    if (module->monitor.state == DF_GVS_MONITOR_FAILED) {
-        df_media_module_encoder_stop(module);
-        df_media_module_queue_destroy(module);
-        df_media_module_set_failure(module, "");
-    }
+    if (module->monitor.state == DF_GVS_MONITOR_FAILED &&
+        df_media_module_cleanup_media(module) != DF_OK) return DF_ERR_IO;
     station_ipv4 = module->config.station_ipv4;
     if (station_ipv4 == 0U && module->callbacks.resolve_route != NULL &&
         module->callbacks.resolve_route(module->config.station, now_ms,
@@ -212,6 +228,7 @@ int df_media_module_start(struct df_media_module *module, uint64_t now_ms) {
     if (station_ipv4 == 0U || df_gvs_monitor_start(&module->monitor,
             module->config.local, module->config.station, station_ipv4,
             now_ms) != DF_OK) return DF_ERR_INVALID;
+    df_media_module_set_failure(module, "");
     if (df_media_module_emit_event(module, "monitor_requested",
             module->monitor.generation, now_ms) != DF_OK) return DF_ERR_IO;
     return df_media_module_tick(module, now_ms);
@@ -250,8 +267,9 @@ int df_media_module_receive_control(struct df_media_module *module,
             module->monitor.generation, now_ms);
     }
     if (result.stopped) {
-        df_media_module_encoder_stop(module);
-        df_media_module_queue_destroy(module);
+        if (df_media_module_cleanup_media(module) != DF_OK)
+            return df_media_module_report_cleanup_failure(module,
+                module->monitor.generation, now_ms);
         return df_media_module_emit_event(module, "monitor_stopped",
             module->monitor.generation, now_ms);
     }
@@ -275,8 +293,9 @@ int df_media_module_push_jpeg(struct df_media_module *module,
             "monitor_media_ready", generation, timestamp_ms) != DF_OK)
         return DF_ERR_IO;
     if (df_media_encoder_requires_restart(&module->encoder, width, height)) {
-        df_media_module_encoder_stop(module);
-        df_media_module_queue_destroy(module);
+        if (df_media_module_cleanup_media(module) != DF_OK)
+            return df_media_module_report_cleanup_failure(module,
+                generation, timestamp_ms);
     }
     if (!module->queue_initialized) {
         if (df_media_frame_queue_init(&module->queue, generation,
@@ -315,8 +334,8 @@ int df_media_module_preempt(struct df_media_module *module, uint64_t now_ms) {
     if (df_gvs_monitor_stop(&module->monitor, generation, now_ms) != DF_OK)
         return DF_ERR_INVALID;
     if (df_media_module_tick(module, now_ms) != DF_OK) return DF_ERR_IO;
-    df_media_module_encoder_stop(module);
-    df_media_module_queue_destroy(module);
+    if (df_media_module_cleanup_media(module) != DF_OK)
+        return df_media_module_report_cleanup_failure(module, generation, now_ms);
     return df_media_module_emit_event(module, "monitor_preempted",
         generation, now_ms);
 }
@@ -324,9 +343,13 @@ int df_media_module_preempt(struct df_media_module *module, uint64_t now_ms) {
 int df_media_module_tick(struct df_media_module *module, uint64_t now_ms) {
     struct df_gvs_monitor_action action;
     struct df_media_frame frame;
+    enum df_gvs_monitor_state previous_state;
+    uint64_t generation;
     int relay_status;
 
     if (module == NULL || !module->initialized) return DF_ERR_INVALID;
+    previous_state = module->monitor.state;
+    generation = module->monitor.generation;
     if (df_gvs_monitor_step(&module->monitor, now_ms, &action) != DF_OK)
         return DF_ERR_INVALID;
     if (action.send && df_media_module_emit_action(module, &action) != DF_OK) {
@@ -338,6 +361,15 @@ int df_media_module_tick(struct df_media_module *module, uint64_t now_ms) {
         df_media_module_set_failure(module, "monitor_failed");
         (void)df_media_module_emit_event(module, "monitor_failed",
             module->monitor.generation, now_ms);
+    }
+    if (previous_state == DF_GVS_MONITOR_STOPPING &&
+        module->monitor.state == DF_GVS_MONITOR_IDLE &&
+        module->monitor.failure == DF_GVS_MONITOR_STOP_TIMEOUT) {
+        if (df_media_module_cleanup_media(module) != DF_OK)
+            return df_media_module_report_cleanup_failure(module, generation, now_ms);
+        df_media_module_set_failure(module, "stop_timeout");
+        if (df_media_module_emit_event(module, "monitor_stopped",
+                generation, now_ms) != DF_OK) return DF_ERR_IO;
     }
     if (df_media_encoder_is_running(&module->encoder)) {
         (void)df_media_encoder_tick(&module->encoder, now_ms);
@@ -371,13 +403,14 @@ int df_media_module_status(const struct df_media_module *module,
 }
 
 int df_media_module_destroy(struct df_media_module *module) {
+    int result;
+
     if (module == NULL) return DF_ERR_INVALID;
-    df_media_module_encoder_stop(module);
-    df_media_module_queue_destroy(module);
+    result = df_media_module_cleanup_media(module);
     df_media_relay_destroy(&module->relay);
     module->initialized = false;
     memset(module, 0, sizeof(*module));
-    return DF_OK;
+    return result;
 }
 
 static void *df_media_module_api_create(

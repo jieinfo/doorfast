@@ -14,9 +14,12 @@
 #include "gvs_audio_buffer.h"
 #include "gvs_audio_tx.h"
 #include "gvs_video_frame_cache.h"
+#include "media_credentials.h"
+#include "runtime_media_module.h"
 
 #define DF_RUNTIME_UBUS_LOG_CAPACITY 128U
 #define DF_RUNTIME_UBUS_LOG_MESSAGE_MAX 160U
+#define DF_RUNTIME_UBUS_MEDIA_PATH_MAX 256U
 
 struct df_runtime_log_entry {
     uint64_t sequence;
@@ -54,6 +57,21 @@ struct df_runtime_elevator_status {
     struct df_gvs_elevator_entry entries[DF_GVS_ELEVATOR_MAX_ENTRIES];
 };
 
+struct df_runtime_media_status {
+    bool available;
+    bool encoder_running;
+    enum df_gvs_monitor_state monitor_state;
+    char state[DF_MEDIA_MODULE_STATE_MAX];
+    char failure[DF_MEDIA_MODULE_FAILURE_MAX];
+    uint64_t generation;
+    uint64_t status_revision;
+    unsigned queue_drops;
+    unsigned relay_failures;
+    bool rtsp_password_set;
+    bool relay_token_set;
+    bool has_credential_text;
+};
+
 struct df_runtime_ubus {
     df_runtime_status_provider_fn provide_status;
     void *status_context;
@@ -67,6 +85,8 @@ struct df_runtime_ubus {
     struct df_gvs_audio_buffer *audio;
     struct df_gvs_audio_tx *audio_tx;
     struct df_gvs_video_frame_cache *video;
+    struct df_runtime_media_module *media;
+    char media_credentials_path[DF_RUNTIME_UBUS_MEDIA_PATH_MAX];
     const uint8_t *elevator_identity;
     uint64_t next_elevator_transaction_id;
     struct df_gvs_elevator_status observed_elevator_status;
@@ -121,6 +141,16 @@ int df_runtime_ubus_bind_video(struct df_runtime_ubus *,
     struct df_gvs_video_frame_cache *);
 int df_runtime_ubus_read_video_status(struct df_runtime_ubus *,
     struct df_gvs_video_status *);
+int df_runtime_ubus_bind_media(struct df_runtime_ubus *,
+    struct df_runtime_media_module *, const char *credentials_path);
+int df_runtime_ubus_monitor_start(struct df_runtime_ubus *);
+int df_runtime_ubus_monitor_stop(struct df_runtime_ubus *, uint64_t generation);
+int df_runtime_ubus_monitor_viewer(struct df_runtime_ubus *,
+    uint64_t generation, bool active);
+int df_runtime_ubus_read_media_status(struct df_runtime_ubus *,
+    struct df_runtime_media_status *);
+int df_runtime_ubus_update_media_credentials(struct df_runtime_ubus *,
+    const struct df_media_credentials_update *);
 int df_runtime_ubus_log_event(struct df_runtime_ubus *, uint64_t,
     const char *);
 size_t df_runtime_ubus_log_count(const struct df_runtime_ubus *);

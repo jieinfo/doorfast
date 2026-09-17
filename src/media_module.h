@@ -49,6 +49,8 @@ typedef int (*df_media_module_emit_control_fn)(
     const uint8_t *payload, size_t payload_length, void *context);
 typedef int (*df_media_module_resolve_route_fn)(const uint8_t peer[6],
     uint64_t now_ms, uint32_t *ipv4, void *context);
+typedef int (*df_media_module_encoder_stop_fn)(
+    struct df_media_encoder_process *, unsigned timeout_ms);
 
 struct df_media_module_callbacks_v1 {
     df_media_module_emit_control_fn emit_control;
@@ -82,6 +84,7 @@ struct df_media_module {
     char rtsp_username[DF_MEDIA_MODULE_USERNAME_MAX];
     char credentials_path[256];
     char relay_url[DF_MEDIA_RELAY_URL_MAX];
+    df_media_module_encoder_stop_fn stop_encoder;
     bool queue_initialized;
     bool initialized;
     uint64_t status_revision;

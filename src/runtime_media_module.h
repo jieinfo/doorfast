@@ -24,6 +24,8 @@ int df_runtime_media_module_start_with_api(struct df_runtime_media_module *,
     const struct df_media_module_api_v1 *,
     const struct df_media_module_config_v1 *,
     const struct df_media_module_callbacks_v1 *);
+int df_runtime_media_module_request_start(struct df_runtime_media_module *,
+    uint64_t now_ms);
 int df_runtime_media_module_command(struct df_runtime_media_module *,
     enum df_media_module_command, uint64_t generation, bool active,
     uint64_t now_ms);

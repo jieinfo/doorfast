@@ -33,6 +33,9 @@ void test_gvs_call_control_rejects_receive_before_submission_time(void);
 void test_gvs_call_control_exposes_public_status(void);
 void test_runtime_ubus_validates_and_routes_call_requests(void);
 void test_runtime_ubus_reports_handshake_transport(void);
+void test_runtime_ubus_media_controls_require_current_generation(void);
+void test_runtime_ubus_monitor_start_rejects_active_call(void);
+void test_runtime_ubus_media_credentials_preserve_blank_and_redact(void);
 void test_runtime_id_encodes_random_bytes_and_validates_exact_lowercase_hex(void);
 void test_runtime_id_clears_output_when_random_fill_fails_or_is_short(void);
 void test_gvs_incoming_reply_matches_observed_0381(void);
@@ -136,10 +139,14 @@ void test_media_module_clears_credentials_when_relay_initialization_fails(void);
 void test_media_module_rejects_stale_commands_and_status_has_no_secrets(void);
 void test_media_module_owns_config_loads_credentials_and_redacts_status(void);
 void test_media_module_restarts_after_failure_with_new_generation(void);
+void test_media_module_stop_ack_cleans_local_media(void);
+void test_media_module_stop_timeout_cleans_local_media(void);
+void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void);
 void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void);
 void test_runtime_module_rejects_commands_when_unavailable(void);
 void test_runtime_module_rejects_incompatible_or_incomplete_api(void);
 void test_runtime_module_preserves_dynamic_library_handle(void);
+void test_runtime_module_request_start_calls_loaded_module(void);
 
 int df_test_failure_count = 0;
 
@@ -313,10 +320,14 @@ int main(int argc, char **argv) {
     test_media_module_rejects_stale_commands_and_status_has_no_secrets();
     test_media_module_owns_config_loads_credentials_and_redacts_status();
     test_media_module_restarts_after_failure_with_new_generation();
+    test_media_module_stop_ack_cleans_local_media();
+    test_media_module_stop_timeout_cleans_local_media();
+    test_media_module_stop_cleanup_failure_is_not_reported_as_stopped();
     test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing();
     test_runtime_module_rejects_commands_when_unavailable();
     test_runtime_module_rejects_incompatible_or_incomplete_api();
     test_runtime_module_preserves_dynamic_library_handle();
+    test_runtime_module_request_start_calls_loaded_module();
     test_runtime_media_builds_module_config_without_guessing_route();
     test_runtime_media_preempts_before_incoming_call_state_changes();
     test_gvs_replay_handshake_gap_and_eof();
@@ -530,5 +541,8 @@ int main(int argc, char **argv) {
     test_gvs_call_control_exposes_public_status();
     test_runtime_ubus_validates_and_routes_call_requests();
     test_runtime_ubus_reports_handshake_transport();
+    test_runtime_ubus_media_controls_require_current_generation();
+    test_runtime_ubus_monitor_start_rejects_active_call();
+    test_runtime_ubus_media_credentials_preserve_blank_and_redact();
     return test_failures();
 }
