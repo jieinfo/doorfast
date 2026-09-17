@@ -461,7 +461,7 @@ git commit -m "feat: integrate active preview media module"
 - Produces ubus `monitor_start {}`, `monitor_stop { generation }`, `monitor_viewer { generation, active }`, `monitor_status {}`, and `media_credentials { rtsp_password?, relay_token?, clear_rtsp_password?, clear_relay_token? }`.
 - Produces CGI `POST /api/v1/monitor/start`, `POST /api/v1/monitor/stop`, `POST /api/v1/monitor/viewer`, and `GET /api/v1/monitor/status`.
 
-- [ ] **Step 1: Write failing generation and redaction tests**
+- [x] **Step 1: Write failing generation and redaction tests**
 
 ```c
 void test_monitor_ubus_rejects_stale_stop_and_reports_no_secrets(void) {
@@ -481,23 +481,23 @@ grep -Fxq 'call doorfast monitor_stop {"generation":7}' "$trace"
 ! grep -F 'secret-' "$trace"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `make -B test`
 
 Expected: monitor methods are not registered and CGI returns unknown endpoint.
 
-- [ ] **Step 3: Implement fixed command validation**
+- [x] **Step 3: Implement fixed command validation**
 
 `monitor_start` takes no peer, port, route, URL, or encoder argument. `monitor_stop` and `monitor_viewer` require the exact nonzero current generation; `monitor_viewer` accepts only a blob boolean. The credential action accepts the documented string fields, treats an absent or empty value as preserve, and clears only when the paired `clear_*` boolean is true. Return `queued`/`stopping`/`unavailable` states rather than claims about a physical device or a WebRTC viewer.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `make -B test`
 
 Expected: stale and malformed requests fail; CGI does not route arbitrary ubus methods; secret text is absent from every response and trace.
 
-- [ ] **Step 5: Commit the unit**
+- [x] **Step 5: Commit the unit**
 
 ```bash
 git add src/runtime_ubus.[ch] package/doorfast/files/doorfast-http.sh tests/test_runtime_ubus.c tests/test_doorfast_http.sh

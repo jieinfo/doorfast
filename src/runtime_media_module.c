@@ -68,6 +68,12 @@ static int df_runtime_media_module_available(
         module->instance != NULL ? DF_OK : DF_ERR_INVALID;
 }
 
+int df_runtime_media_module_request_start(struct df_runtime_media_module *module,
+    uint64_t now_ms) {
+    if (df_runtime_media_module_available(module) != DF_OK) return DF_ERR_INVALID;
+    return module->api->start(module->instance, now_ms);
+}
+
 int df_runtime_media_module_command(struct df_runtime_media_module *module,
     enum df_media_module_command command, uint64_t generation, bool active,
     uint64_t now_ms) {

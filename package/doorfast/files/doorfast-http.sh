@@ -13,6 +13,80 @@ json_field() {
   jsonfilter -s "$1" -e "$2" 2>/dev/null
 }
 
+http_error() {
+  local status="$1" message="$2" allow="${3:-}"
+  printf 'Status: %s\r\n' "$status"
+  [ -z "$allow" ] || printf 'Allow: %s\r\n' "$allow"
+  printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+  printf '{"error":"%s"}\n' "$message"
+}
+
+uint64_nonzero() {
+  local value="$1" maximum=18446744073709551615 left right left_digit right_digit
+  case "$value" in ''|0|0*|*[!0-9]*) return 1 ;; esac
+  [ "${#value}" -le 20 ] || return 1
+  [ "${#value}" -lt 20 ] && return 0
+  left="$value"
+  right="$maximum"
+  while [ -n "$left" ]; do
+    left_digit="${left%"${left#?}"}"
+    right_digit="${right%"${right#?}"}"
+    [ "$left_digit" -lt "$right_digit" ] && return 0
+    [ "$left_digit" -gt "$right_digit" ] && return 1
+    left="${left#?}"
+    right="${right#?}"
+  done
+  return 0
+}
+
+monitor_body() {
+  local length="${CONTENT_LENGTH:-0}"
+  case "$length" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$length" -le 4096 ] || return 1
+  MONITOR_BODY=''
+  if [ "$length" -gt 0 ]; then
+    MONITOR_BODY="$(dd bs=1 count="$length" 2>/dev/null)" || return 1
+    [ "${#MONITOR_BODY}" -eq "$length" ] || return 1
+  fi
+  MONITOR_COMPACT="$(printf '%s' "$MONITOR_BODY" | tr -d ' \t\r\n')"
+  return 0
+}
+
+monitor_json_content_type() {
+  case "${CONTENT_TYPE:-}" in
+    application/json|application/json';'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+monitor_call() {
+  local method="$1" arguments="$2" output status
+  if [ -n "$arguments" ]; then
+    if output="$(ubus call doorfast "$method" "$arguments" 2>/dev/null)"; then
+      status=0
+    else
+      status=$?
+    fi
+  else
+    if output="$(ubus call doorfast "$method" 2>/dev/null)"; then
+      status=0
+    else
+      status=$?
+    fi
+  fi
+  if [ "$status" -ne 0 ]; then
+    case "$status" in
+      2) http_error '400 Bad Request' 'invalid monitor request' ;;
+      4) http_error '409 Conflict' 'monitor generation mismatch' ;;
+      8) http_error '409 Conflict' 'monitor state does not allow operation' ;;
+      *) http_error '503 Service Unavailable' 'monitor service unavailable' ;;
+    esac
+    return
+  fi
+  printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+  printf '%s\n' "$output"
+}
+
 query_generation() {
   local item key value old_ifs
   REQUESTED_GENERATION=''
@@ -227,16 +301,122 @@ if [ "$path" = /api/v1/audio/latest.wav ]; then
   cat "$temporary"
   exit 0
 fi
-printf 'Content-Type: application/json\r\n\r\n'
+
+case "$path" in
+  /api/v1/monitor/start)
+    [ "${REQUEST_METHOD:-}" = POST ] || {
+      http_error '405 Method Not Allowed' 'method not allowed' POST
+      exit 0
+    }
+    monitor_json_content_type || {
+      http_error '415 Unsupported Media Type' 'application/json required'
+      exit 0
+    }
+    monitor_body || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    [ -z "$MONITOR_COMPACT" ] || [ "$MONITOR_COMPACT" = '{}' ] || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    monitor_call monitor_start '{}'
+    exit 0
+    ;;
+  /api/v1/monitor/stop)
+    [ "${REQUEST_METHOD:-}" = POST ] || {
+      http_error '405 Method Not Allowed' 'method not allowed' POST
+      exit 0
+    }
+    monitor_json_content_type || {
+      http_error '415 Unsupported Media Type' 'application/json required'
+      exit 0
+    }
+    monitor_body || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    generation="$(json_field "$MONITOR_BODY" '@.generation')" || generation=''
+    uint64_nonzero "$generation" || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    [ "$MONITOR_COMPACT" = "{\"generation\":$generation}" ] || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    monitor_call monitor_stop "{\"generation\":$generation}"
+    exit 0
+    ;;
+  /api/v1/monitor/viewer)
+    [ "${REQUEST_METHOD:-}" = POST ] || {
+      http_error '405 Method Not Allowed' 'method not allowed' POST
+      exit 0
+    }
+    monitor_json_content_type || {
+      http_error '415 Unsupported Media Type' 'application/json required'
+      exit 0
+    }
+    monitor_body || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    generation="$(json_field "$MONITOR_BODY" '@.generation')" || generation=''
+    active="$(json_field "$MONITOR_BODY" '@.active')" || active=''
+    uint64_nonzero "$generation" || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    case "$active" in true|false) ;; *)
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+      ;;
+    esac
+    [ "$MONITOR_COMPACT" = \
+        "{\"generation\":$generation,\"active\":$active}" ] ||
+      [ "$MONITOR_COMPACT" = \
+        "{\"active\":$active,\"generation\":$generation}" ] || {
+        http_error '400 Bad Request' 'invalid monitor request'
+        exit 0
+      }
+    monitor_call monitor_viewer \
+      "{\"generation\":$generation,\"active\":$active}"
+    exit 0
+    ;;
+  /api/v1/monitor/status)
+    [ "${REQUEST_METHOD:-}" = GET ] || {
+      http_error '405 Method Not Allowed' 'method not allowed' GET
+      exit 0
+    }
+    monitor_body || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    [ -z "$MONITOR_COMPACT" ] && [ -z "${QUERY_STRING:-}" ] || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
+    monitor_call monitor_status '{}'
+    exit 0
+    ;;
+esac
+
 body=''
 if [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then
   body="$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
 fi
+case "$path" in
+  /api/v1/status|/api/v1/unlock|/api/v1/answer|/api/v1/hangup|/api/v1/call_elevator) ;;
+  *)
+    http_error '404 Not Found' 'unknown endpoint'
+    exit 0
+    ;;
+esac
+printf 'Content-Type: application/json\r\n\r\n'
 case "$path" in
   /api/v1/status) ubus call doorfast status ;;
   /api/v1/unlock) [ -n "$body" ] || body='{}'; ubus call doorfast unlock "$body" ;;
   /api/v1/answer) [ -n "$body" ] || body='{}'; ubus call doorfast answer "$body" ;;
   /api/v1/hangup) [ -n "$body" ] || body='{}'; ubus call doorfast hangup "$body" ;;
   /api/v1/call_elevator) [ -n "$body" ] || body='{}'; ubus call doorfast call_elevator "$body" ;;
-  *) printf '{"error":"unknown endpoint"}\n' ;;
 esac

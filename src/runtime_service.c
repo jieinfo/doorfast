@@ -584,7 +584,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK &&
         df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK &&
         df_runtime_ubus_bind_audio_tx(&ubus, &audio_tx) == DF_OK &&
-        df_runtime_ubus_bind_video(&ubus, &video_cache) == DF_OK) {
+        df_runtime_ubus_bind_video(&ubus, &video_cache) == DF_OK &&
+        df_runtime_ubus_bind_media(&ubus, &media_module,
+            DF_MEDIA_CREDENTIALS_PATH) == DF_OK) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);

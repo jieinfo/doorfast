@@ -1,4 +1,7 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "runtime_id.h"
 #include "runtime_ubus.h"
@@ -43,6 +46,49 @@ static int submit_call(const struct df_runtime_call_request *request,
     test->submit_calls++;
     return DF_OK;
 }
+
+struct media_binding_test {
+    struct df_media_module_status status;
+    enum df_media_module_command command;
+    uint64_t command_generation;
+    uint64_t command_now_ms;
+    bool command_active;
+    unsigned start_calls;
+    unsigned command_calls;
+};
+
+static int media_start(void *instance, uint64_t now_ms) {
+    struct media_binding_test *test = instance;
+    test->start_calls++;
+    test->command_now_ms = now_ms;
+    return DF_OK;
+}
+
+static int media_command(void *instance, enum df_media_module_command command,
+    uint64_t generation, bool active, uint64_t now_ms) {
+    struct media_binding_test *test = instance;
+    test->command = command;
+    test->command_generation = generation;
+    test->command_active = active;
+    test->command_now_ms = now_ms;
+    test->command_calls++;
+    return DF_OK;
+}
+
+static int media_status(const void *instance,
+    struct df_media_module_status *status) {
+    const struct media_binding_test *test = instance;
+    *status = test->status;
+    return DF_OK;
+}
+
+static const struct df_media_module_api_v1 media_api = {
+    .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
+    .struct_size = sizeof(struct df_media_module_api_v1),
+    .start = media_start,
+    .command = media_command,
+    .status = media_status,
+};
 
 void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     struct df_runtime_ubus service = {0};
@@ -94,6 +140,10 @@ void test_runtime_ubus_keeps_bounded_redacted_event_log(void) {
     TEST_ASSERT_INT_EQ(0, strcmp("event=call generation=1", entry.message));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
         &service, 3, "event=unlock access_material=secret"));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
+        &service, 3, "event=media rtsp_password=secret"));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
+        &service, 3, "event=media relay_token=secret"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_ubus_log_get(&service,
                            DF_RUNTIME_UBUS_LOG_CAPACITY, &entry));
@@ -157,6 +207,174 @@ void test_runtime_ubus_reports_handshake_transport(void) {
         df_runtime_ubus_handshake_mode(&service)));
     df_runtime_ubus_stop(&service);
     TEST_ASSERT_INT_EQ(1, df_runtime_ubus_handshake_mode(&service) == NULL);
+}
+
+void test_runtime_ubus_media_controls_require_current_generation(void) {
+    struct df_runtime_ubus service = {0};
+    struct call_binding_test call = {0};
+    struct media_binding_test test = {
+        .status = {
+            .available = true,
+            .encoder_running = true,
+            .monitor_state = DF_GVS_MONITOR_PUBLISHING,
+            .state = "publishing",
+            .generation = 7,
+            .status_revision = 9,
+            .queue_drops = 2,
+            .relay_failures = 1,
+        },
+    };
+    struct df_runtime_media_module module = {
+        .api = &media_api,
+        .instance = &test,
+        .available = true,
+    };
+    struct df_runtime_media_status status;
+    const struct df_media_credentials_update credentials_update = {
+        .set_rtsp_password = true,
+        .rtsp_password = "must-not-write",
+    };
+    unsigned sync_calls = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_runtime_ubus_monitor_stop(&service, 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_runtime_ubus_monitor_viewer(&service, 7, true));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(
+        &service, &module, "/tmp/doorfast-unused-media-credentials"));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_bind_media(
+        &service, &module, "/tmp/doorfast-unused-media-credentials"));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_runtime_ubus_monitor_stop(&service, 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_runtime_ubus_monitor_viewer(&service, 7, true));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_call(
+        &service, provide_call_status, submit_call, &call));
+    df_runtime_ubus_set_active_host(&service, true);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(1, test.start_calls);
+    TEST_ASSERT_INT_EQ(10, (int)test.command_now_ms);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_monitor_stop(&service, 6));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_monitor_stop(&service, 0));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_monitor_stop(&service, 8));
+    TEST_ASSERT_INT_EQ(0, test.command_calls);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_monitor_viewer(&service, 0, true));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_monitor_viewer(&service, 8, true));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_update_media_credentials(
+            &service, &credentials_update));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_monitor_viewer(&service, 7, true));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_VIEWER, test.command);
+    TEST_ASSERT_INT_EQ(7, (int)test.command_generation);
+    TEST_ASSERT_INT_EQ(1, test.command_active);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_monitor_stop(&service, 7));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_STOP, test.command);
+    TEST_ASSERT_INT_EQ(2, test.command_calls);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_read_media_status(&service, &status));
+    TEST_ASSERT_INT_EQ(1, status.available);
+    TEST_ASSERT_INT_EQ(1, status.encoder_running);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, status.monitor_state);
+    TEST_ASSERT_INT_EQ(7, (int)status.generation);
+    TEST_ASSERT_INT_EQ(2, (int)status.queue_drops);
+    TEST_ASSERT_INT_EQ(0, status.has_credential_text);
+    df_runtime_ubus_stop(&service);
+}
+
+void test_runtime_ubus_monitor_start_rejects_active_call(void) {
+    struct df_runtime_ubus service = {0};
+    struct call_binding_test call = {0};
+    struct media_binding_test media = {0};
+    struct df_runtime_media_module module = {
+        .api = &media_api,
+        .instance = &media,
+        .available = true,
+    };
+    unsigned sync_calls = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(
+        &service, &module, "/tmp/doorfast-unused-media-credentials"));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_call(
+        &service, provide_call_status, submit_call, &call));
+    df_runtime_ubus_set_active_host(&service, true);
+
+    call.status.session_state = DF_GVS_RINGING;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_monitor_start(&service));
+    call.status.session_state = DF_GVS_TALKING;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(0, (int)media.start_calls);
+
+    call.status.session_state = DF_GVS_IDLE;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(1, (int)media.start_calls);
+    TEST_ASSERT_INT_EQ(3, (int)call.status_calls);
+    df_runtime_ubus_stop(&service);
+}
+
+void test_runtime_ubus_media_credentials_preserve_blank_and_redact(void) {
+    char directory[] = "/tmp/doorfast-ubus-media.XXXXXX";
+    char path[256];
+    struct df_runtime_ubus service = {0};
+    struct df_runtime_media_module module = {0};
+    struct df_runtime_media_status status;
+    struct df_media_credentials credentials;
+    struct df_media_credentials_update update = {
+        .set_rtsp_password = true,
+        .rtsp_password = "secret-rtsp",
+        .set_relay_token = true,
+        .relay_token = "secret-relay",
+    };
+    unsigned sync_calls = 0;
+
+    TEST_ASSERT_INT_EQ(1, mkdtemp(directory) != NULL);
+    TEST_ASSERT_INT_EQ(1,
+        snprintf(path, sizeof(path), "%s/credentials", directory) > 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_bind_media(&service, &module, path));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_update_media_credentials(&service, &update));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_read_media_status(&service, &status));
+    TEST_ASSERT_INT_EQ(0, status.available);
+    TEST_ASSERT_INT_EQ(1, status.rtsp_password_set);
+    TEST_ASSERT_INT_EQ(1, status.relay_token_set);
+    TEST_ASSERT_INT_EQ(0, status.has_credential_text);
+
+    memset(&update, 0, sizeof(update));
+    update.set_rtsp_password = true;
+    update.rtsp_password = "";
+    update.clear_relay_token = true;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_update_media_credentials(&service, &update));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_credentials_load(path, &credentials));
+    TEST_ASSERT_INT_EQ(0, strcmp("secret-rtsp", credentials.rtsp_password));
+    TEST_ASSERT_INT_EQ(0, credentials.relay_token[0]);
+
+    update.clear_rtsp_password = true;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_update_media_credentials(&service, &update));
+    df_runtime_ubus_stop(&service);
+    TEST_ASSERT_INT_EQ(0, unlink(path));
+    TEST_ASSERT_INT_EQ(0, rmdir(directory));
 }
 
 static int submit_access(const struct df_gvs_access_request *request, void *context) {

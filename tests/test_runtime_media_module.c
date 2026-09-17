@@ -3,6 +3,8 @@
 #include "test.h"
 
 static int runtime_fake_instance;
+static unsigned runtime_fake_start_calls;
+static uint64_t runtime_fake_start_now_ms;
 
 static void *runtime_fake_create(const struct df_media_module_config_v1 *config,
     const struct df_media_module_callbacks_v1 *callbacks) {
@@ -13,7 +15,10 @@ static void *runtime_fake_create(const struct df_media_module_config_v1 *config,
 
 static void runtime_fake_destroy(void *instance) { (void)instance; }
 static int runtime_fake_start(void *instance, uint64_t now_ms) {
-    (void)instance; (void)now_ms; return DF_OK;
+    (void)instance;
+    runtime_fake_start_calls++;
+    runtime_fake_start_now_ms = now_ms;
+    return DF_OK;
 }
 static int runtime_fake_command(void *instance,
     enum df_media_module_command command, uint64_t generation, bool active,
@@ -112,4 +117,24 @@ void test_runtime_module_preserves_dynamic_library_handle(void) {
     TEST_ASSERT_INT_EQ(1, module.handle == &handle_sentinel);
     module.handle = NULL;
     df_runtime_media_module_stop(&module);
+}
+
+void test_runtime_module_request_start_calls_loaded_module(void) {
+    const struct df_media_module_api_v1 api = runtime_valid_api();
+    struct df_runtime_media_module module = {
+        .api = &api,
+        .instance = &runtime_fake_instance,
+        .available = true,
+    };
+
+    runtime_fake_start_calls = 0U;
+    runtime_fake_start_now_ms = 0U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_media_module_request_start(&module, 42U));
+    TEST_ASSERT_INT_EQ(1, (int)runtime_fake_start_calls);
+    TEST_ASSERT_INT_EQ(42, (int)runtime_fake_start_now_ms);
+    module.available = false;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_request_start(&module, 43U));
+    TEST_ASSERT_INT_EQ(1, (int)runtime_fake_start_calls);
 }

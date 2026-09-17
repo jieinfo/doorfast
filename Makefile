@@ -118,6 +118,7 @@ DAEMON_SOURCES += src/gvs_call_ack.c
 build/doorfast-tests build/doorfast: src/gvs_call_ack.h
 DAEMON_SOURCES += src/gvs_call_dispatch.c
 DAEMON_SOURCES += src/runtime_media_module.c
+DAEMON_SOURCES += src/media_credentials.c
 build/doorfast-tests build/doorfast: src/gvs_call_dispatch.h
 
 .PHONY: test doorfast peer-sim peer-udp-inject pcm-submit pcm-http-test clean
