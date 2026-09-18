@@ -166,3 +166,10 @@ assert.deepEqual(model.formatStatus({...payload, deployment}).at(-1), {
 });
 deployment.recorder.state = 'stale';
 assert.equal(model.formatStatus({...payload, deployment}).at(-1).rows.at(-1)[1], '陈旧');
+
+const statusViewPath = path.join(__dirname, '..', 'package',
+    'luci-app-doorfast', 'htdocs', 'luci-static', 'resources', 'view',
+    'doorfast', 'status.js');
+const statusViewSource = fs.readFileSync(statusViewPath, 'utf8');
+assert.doesNotMatch(statusViewSource, /form\.Map/);
+assert.doesNotMatch(statusViewSource, /media_enabled|media_credentials/);

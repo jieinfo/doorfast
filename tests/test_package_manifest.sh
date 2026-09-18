@@ -37,16 +37,20 @@ test -f package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.j
 test -f package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/stations.js
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/media.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/deployment.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
-grep -q 'PKG_RELEASE:=15' package/luci-app-doorfast/Makefile
+grep -q 'PKG_RELEASE:=16' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
 grep -q 'preview media configuration' package/luci-app-doorfast/Makefile
 grep -Fq 'deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js' package/luci-app-doorfast/Makefile
+grep -Fq 'stations.js $(1)/www/luci-static/resources/view/doorfast/stations.js' package/luci-app-doorfast/Makefile
+grep -Fq 'media.js $(1)/www/luci-static/resources/view/doorfast/media.js' package/luci-app-doorfast/Makefile
 grep -Fq 'relay.js $(1)/www/luci-static/resources/view/doorfast/relay.js' package/luci-app-doorfast/Makefile
 grep -Fq 'logs.js $(1)/www/luci-static/resources/view/doorfast/logs.js' package/luci-app-doorfast/Makefile
 grep -q '+libubus +libubox +libblobmsg-json' package/doorfast/Makefile
@@ -65,8 +69,12 @@ import json
 acl = json.load(open('package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json'))['luci-app-doorfast']
 assert acl['read']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
 assert acl['write']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
-assert set(acl['read']['ubus']['doorfast']) == {'status', 'logs'}
-assert set(acl['write']['ubus']['doorfast']) == {'media_credentials'}
+assert set(acl['read']['ubus']['doorfast']) == {
+    'status', 'stations', 'station_candidates', 'logs'
+}
+assert set(acl['write']['ubus']['doorfast']) == {
+    'station_scan', 'media_credentials'
+}
 assert set(acl['read']) == {'uci', 'ubus'}
 assert set(acl['write']) == {'uci', 'ubus'}
 
@@ -75,17 +83,35 @@ assert menu['admin/services/doorfast']['action']['type'] == 'firstchild'
 assert menu['admin/services/doorfast/status']['action']['path'] == 'doorfast/status'
 assert menu['admin/services/doorfast/settings']['action']['path'] == 'doorfast/settings'
 assert menu['admin/services/doorfast/deployment']['action']['path'] == 'doorfast/deployment'
+assert menu['admin/services/doorfast/stations']['action']['path'] == 'doorfast/stations'
+assert menu['admin/services/doorfast/media']['action']['path'] == 'doorfast/media'
 assert menu['admin/services/doorfast/relay']['action']['path'] == 'doorfast/relay'
 assert menu['admin/services/doorfast/logs']['action']['path'] == 'doorfast/logs'
+orders = {
+    key: value['order'] for key, value in menu.items()
+    if key.startswith('admin/services/doorfast/')
+}
+assert orders == {
+    'admin/services/doorfast/status': 10,
+    'admin/services/doorfast/deployment': 20,
+    'admin/services/doorfast/stations': 30,
+    'admin/services/doorfast/media': 40,
+    'admin/services/doorfast/settings': 50,
+    'admin/services/doorfast/relay': 60,
+    'admin/services/doorfast/logs': 70,
+}
 PY
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/stations.js
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/media.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/deployment.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 node tests/test_luci_settings.js
-node tests/test_luci_media_view.js
+node tests/test_luci_media.js
+node tests/test_luci_stations.js
 node tests/test_luci_deployment.js
 node tests/test_luci_relay.js
 node tests/test_luci_logs.js

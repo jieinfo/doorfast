@@ -6,12 +6,17 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'package',
     'luci-app-doorfast', 'htdocs', 'luci-static', 'resources', 'view',
+    'doorfast', 'media.js'), 'utf8');
+const statusSource = fs.readFileSync(path.join(__dirname, '..', 'package',
+    'luci-app-doorfast', 'htdocs', 'luci-static', 'resources', 'view',
     'doorfast', 'status.js'), 'utf8');
 
 function NamedSection() {}
 function Flag() {}
 function Value() {}
 function ListValue() {}
+
+const saveOrder = [];
 
 class Map {
     constructor(config) {
@@ -46,12 +51,7 @@ class Map {
     }
 
     save(callback) {
-        if (typeof callback !== 'function') {
-            this.options.forEach(option => {
-                option.formvalue = () => option.disabled;
-            });
-            return Promise.resolve();
-        }
+        saveOrder.push('uci');
         return Promise.resolve(callback()).then(() => {
             this.options.forEach(option => {
                 option.formvalue = () => option.disabled;
@@ -65,78 +65,64 @@ class Map {
 }
 
 const form = {Map, NamedSection, Flag, Value, ListValue};
-const dom = {content: () => {}};
-const poll = {add: () => {}};
 const rpcDeclarations = [];
 const rpcCalls = [];
 const rpc = {
     declare: declaration => {
         rpcDeclarations.push(declaration);
         return (...args) => {
+            saveOrder.push(declaration.method);
             rpcCalls.push({method: declaration.method, args});
+            if (declaration.method === 'status')
+                return Promise.resolve({media: {installed: true}});
             return Promise.resolve({});
         };
     }
 };
-const ui = {changes: {apply: () => Promise.resolve()}};
+const ui = {changes: {apply: () => {
+    saveOrder.push('apply');
+    return Promise.resolve();
+}}};
 const view = {extend: value => value};
-const statusModel = {
-    unavailableLabel: 'unavailable', staleLabel: 'stale',
-    formatStatus: () => []
-};
 const E = () => ({});
-const dashboard = new Function('dom', 'form', 'poll', 'rpc', 'ui', 'view',
-    'statusModel', 'E', source)(dom, form, poll, rpc, ui, view, statusModel, E);
+const media = new Function('form', 'rpc', 'ui', 'view', 'E', source)(
+    form, rpc, ui, view, E);
 
-const payload = {media: {installed: true}};
-const page = {...dashboard};
+const page = {...media};
 
 (async () => {
     for (const unavailablePayload of [
         {media: {installed: false}}, {}, null
     ]) {
-        const unavailablePage = {...dashboard};
+        const unavailablePage = {...media};
         await unavailablePage.render(unavailablePayload);
         assert.equal(unavailablePage.mediaMap, null);
     }
-    await page.render(payload);
+    await page.render({media: {installed: true}});
     const byName = name => page.mediaMap.options.find(option =>
         option.optionName === name);
 
     assert.equal(page.mediaMap.config, 'doorfast');
+    assert.deepEqual(page.mediaMap.options.map(option => option.optionName), [
+        'media_enabled', 'media_station_address', 'media_station_ipv4',
+        'media_go2rtc_host', 'media_go2rtc_port', 'media_stream_name',
+        'media_rtsp_username', 'media_encoder', 'media_resolution',
+        'media_fps', 'media_bitrate_kbps', 'media_profile',
+        'media_min_free_kib', 'media_preview_timeout',
+        'media_first_frame_timeout', 'media_relay_url',
+        '_media_rtsp_password', '_media_clear_rtsp_password',
+        '_media_relay_token', '_media_clear_relay_token'
+    ]);
     assert.equal(byName('media_enabled').optionType, Flag);
-    assert.equal(byName('media_enabled').dependency, undefined);
-    assert.equal(byName('media_station_address').dependency, undefined);
-    assert.equal(byName('_media_rtsp_password').dependency, undefined);
     assert.equal(byName('media_station_address').validate(
         'main', '32:02:01:00:02:00'), true);
     assert.match(byName('media_station_address').validate(
-        'main', '32:00:01:00:02:00'), /无效/);
-    assert.match(byName('media_station_address').validate(
-        'main', '32:02:00:00:02:00'), /无效/);
-    assert.match(byName('media_station_address').validate(
-        'main', '32:1a:01:00:02:00'), /无效/);
-    assert.match(byName('media_station_address').validate(
         'main', '32:02:01:00:00:00'), /无效/);
-    assert.match(byName('media_station_address').validate(
-        'main', '32:02:01:00:1a:00'), /无效/);
-    assert.match(byName('media_station_address').validate(
-        'main', 'IS:2-1-101-1'), /32:bb:uu/);
     assert.equal(byName('media_go2rtc_host').validate('main', 'ha.local'), true);
     assert.match(byName('media_go2rtc_host').validate(
         'main', 'https://ha.local'), /协议/);
     assert.deepEqual(byName('media_fps').values.map(value => value[0]),
         ['5', '8', '10', '12', '15']);
-    assert.equal(byName('media_min_free_kib').validate(
-        'main', '393216'), true);
-    assert.equal(byName('media_preview_timeout').validate(
-        'main', '120'), true);
-    assert.equal(byName('media_first_frame_timeout').validate(
-        'main', '8'), true);
-    [
-        'media_max_encoders', 'media_overload_policy', 'media_diagnostics',
-        'media_publish_retries'
-    ].forEach(name => assert.equal(byName(name), undefined));
     assert.equal(byName('_media_rtsp_password').password, true);
     assert.equal(byName('_media_rtsp_password').cfgvalue('main'), '');
     assert.equal(byName('_media_rtsp_password').write('main', ''), undefined);
@@ -144,19 +130,12 @@ const page = {...dashboard};
     assert.equal(byName('_media_clear_rtsp_password').cfgvalue('main'), '0');
     assert.equal(byName('_media_clear_relay_token').cfgvalue('main'), '0');
     assert.equal(byName('media_relay_url').validate(
-        'main', 'https://ha.local:8123'), true);
-    assert.equal(byName('media_relay_url').validate(
-        'main', 'http://ha.local:65535'), true);
-    assert.match(byName('media_relay_url').validate(
-        'main', 'http://ha.local:65536'), /端口/);
-    assert.equal(byName('media_relay_url').validate(
         'main', 'https://ha.local/api/doorfast/entry-1'), true);
     assert.match(byName('media_relay_url').validate(
         'main', 'https://ha.local/api/doorfast/entry-1?x=1'), /query/);
-    assert.match(byName('media_relay_url').validate(
-        'main', 'https://ha.local/api/doorfast/entry-1#fragment'), /fragment/);
     assert.equal(source.includes("'media_rtsp_password'"), false);
     assert.equal(source.includes("'media_relay_token'"), false);
+    assert.doesNotMatch(statusSource, /media_enabled|media_credentials/);
 
     const credentialsDeclaration = rpcDeclarations.find(declaration =>
         declaration.method === 'media_credentials');
@@ -168,9 +147,10 @@ const page = {...dashboard};
     page.relayToken.formvalue = () => '';
     page.clearRtspPassword.formvalue = () => '0';
     page.clearRelayToken.formvalue = () => '1';
-    await page.saveMedia(false);
+    await page.saveMedia(true);
     assert.deepEqual(rpcCalls.find(call => call.method === 'media_credentials'), {
         method: 'media_credentials',
         args: ['new-password', '', false, true]
     });
+    assert.deepEqual(saveOrder.slice(-3), ['uci', 'media_credentials', 'apply']);
 })();

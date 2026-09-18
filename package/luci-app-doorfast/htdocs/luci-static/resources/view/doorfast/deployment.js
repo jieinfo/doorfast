@@ -91,6 +91,20 @@ return view.extend({
         option.depends('active_host', '1');
         option.description = '仅在主机模式使用。厂商材料未证明通用自动掩码，首次请按现场室内机填写。';
 
+        option = section.option(form.ListValue, 'multicast_mode', '组播地址模式');
+        option.value('auto', '自动推导');
+        option.value('custom', '自定义');
+        option.default = 'auto';
+        option.rmempty = false;
+        option.depends('active_host', '1');
+        option.description = '自动模式按 GVS 逻辑身份推导组播地址。';
+
+        option = section.option(form.Value, 'multicast_address', '自定义组播地址');
+        option.datatype = 'ip4addr';
+        option.rmempty = false;
+        option.depends({active_host: '1', multicast_mode: 'custom'});
+        option.description = '自定义模式必须填写有效的 IPv4 组播地址。';
+
         option = section.option(form.Value, 'access_material', '门禁材料（可选）');
         option.datatype = 'hexstring';
         option.password = true;
