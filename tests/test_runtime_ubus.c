@@ -84,7 +84,7 @@ static int media_status(const void *instance,
 }
 
 static const struct df_media_module_api_v2 media_api = {
-    .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
+    .abi_version = DF_MEDIA_MODULE_ABI_VERSION_V2,
     .struct_size = sizeof(struct df_media_module_api_v2),
     .start = media_start,
     .command = media_command,
