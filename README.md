@@ -548,8 +548,9 @@ python3 tests/run_doorfast_vm_media.py /absolute/path/to/vm/ssh.sh
 
 ### 媒体资源策略
 
-- 当前仅 1 条主动预览流，`effective_capacity` 固定为模块可用时的 1。
-- 资源阈值、最大编码器数、预览时限、发布重试、过载策略和诊断开关尚未接入 ABI。
+- 当前 ABI 只有一个 station、monitor 和 encoder，因此只支持 1 条来源流，`effective_capacity` 固定为模块可用时的 1。多个 HA 观看者由 go2rtc 共享这条编码流，不需要为每名观看者各启动一个编码器。
+- 资源阈值、最大编码器数、预览时限、发布重试、过载策略和诊断开关已由 UCI/LuCI 读取，但尚未接入 ABI，因此这些选项目前不会改变媒体模块行为。
+- `media_max_encoders > 1` 只有在未来支持多个门口机或多个并行媒体会话时才有实际含义；这需要把单 station/monitor/encoder 模型改成多会话 ABI，不能仅靠传入一个数值实现。
 - 编码器和 go2rtc 端到端失败处理已测试，但未在真实门口机视频流上调优。
 
 ### 接口边界
@@ -564,12 +565,20 @@ python3 tests/run_doorfast_vm_media.py /absolute/path/to/vm/ssh.sh
 
 ## 下一步开发顺序
 
-该顺序列出按依赖关系排列的当前优先代码工作，不把已经通过的现场来电回执重新列为开发任务。每一项都能在当前代码中直接定位：
+该顺序按性质和依赖关系排列，不把已经通过的现场来电回执重新列为开发任务。代码事实与后续设计选择分别说明：
+
+### P0：在线协议缺口
 
 1. 把 `07/81` peer reply 接到真实 UDP sender，并替换 placeholder header。依据：`src/runtime_service.c` 的 reply queue 当前调用 `df_gvs_memory_send_attempt()`。
 2. 把 `91/03` 周期同步接入生产 runtime，修正 no-op 动作的 `sent` 日志语义。依据：`src/gvs_udp_sender.c` 对 `DF_GVS_PRESENCE_PERIODIC_SYNC` 直接返回成功而不发包，`src/runtime_service.c` 随后仍可记录 `sent=1`。
-3. 让普通控制请求携带并强制匹配 `runtime_id`，同时为普通 peer 路由加入新鲜度和失效策略。依据：`src/runtime_ubus.c` 的 answer、hangup、unlock 和 elevator policy 没有 `runtime_id`；`src/gvs_udp_sender.h` 的 `df_gvs_observed_route` 没有时间戳。
-4. 将现有媒体资源配置真正传入模块 ABI，并基于 CPU/内存实测实现可配置并发。依据：配置层已读取 `media_max_encoders` 等选项，但 `src/runtime_ubus.c` 仍把 `effective_capacity` 固定为模块可用时的 `1`。
+
+### P1：控制可靠性加固
+
+3. 让普通控制请求携带并强制匹配 `runtime_id`，同时为普通 peer 路由加入新鲜度和失效策略。代码事实：`src/runtime_ubus.c` 的 answer、hangup、unlock 和 elevator policy 没有 `runtime_id`；`src/gvs_udp_sender.h` 的 `df_gvs_observed_route` 没有时间戳。该项用于防止进程重启后的同号 generation 竞态和地址变化后的陈旧路由，不是当前来电回执或在线协议的阻断原因。
+
+### P2：媒体配置一致性
+
+4. 对尚未接入 ABI 的媒体资源选项逐项落地或从 LuCI 移除，避免展示无效配置。当前单门口机模型继续保持一条来源编码流，多名观看者由 go2rtc 共享；如果以后确认需要多个门口机或多个并行来源，再设计多会话 ABI，并让 `media_max_encoders` 成为真实的并发上限。当前代码不能被描述为已经具备可配置多路并发。
 
 ## 后续现场回归和验收
 
