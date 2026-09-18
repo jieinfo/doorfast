@@ -6,6 +6,62 @@ static int runtime_fake_instance;
 static unsigned runtime_fake_start_calls;
 static uint64_t runtime_fake_start_now_ms;
 
+static void runtime_fake_destroy(void *instance);
+static int runtime_fake_control(void *instance,
+    const struct df_gvs_frame *frame, uint32_t source_ipv4, uint64_t now_ms);
+static int runtime_fake_tick(void *instance, uint64_t now_ms);
+
+static void *runtime_fake_create_v3(
+    const struct df_media_module_config_v3 *config,
+    const struct df_media_module_callbacks_v3 *callbacks) {
+    (void)config;
+    (void)callbacks;
+    return &runtime_fake_instance;
+}
+
+static int runtime_fake_start_v3(void *instance, const char *station_id,
+    enum df_media_session_purpose purpose, uint64_t request_generation,
+    uint64_t now_ms) {
+    (void)instance; (void)station_id; (void)purpose;
+    (void)request_generation; (void)now_ms; return DF_OK;
+}
+
+static int runtime_fake_command_v3(void *instance,
+    enum df_media_module_command command,
+    const struct df_media_session_key *key, bool active, uint64_t now_ms) {
+    (void)instance; (void)command; (void)key; (void)active;
+    (void)now_ms; return DF_OK;
+}
+
+static int runtime_fake_jpeg_v3(void *instance, const uint8_t source[6],
+    const uint8_t destination[6], uint32_t source_ipv4, const uint8_t *jpeg,
+    size_t length, uint16_t width, uint16_t height, uint64_t timestamp_ms) {
+    (void)instance; (void)source; (void)destination; (void)source_ipv4;
+    (void)jpeg; (void)length; (void)width; (void)height;
+    (void)timestamp_ms; return DF_OK;
+}
+
+static int runtime_fake_status_v3(const void *instance,
+    struct df_media_module_status_v3 *status) {
+    (void)instance; (void)status; return DF_OK;
+}
+
+static struct df_media_module_api_v3 runtime_valid_api_v3(void) {
+    const struct df_media_module_api_v3 api = {
+        .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
+        .struct_size = sizeof(struct df_media_module_api_v3),
+        .create = runtime_fake_create_v3,
+        .destroy = runtime_fake_destroy,
+        .start = runtime_fake_start_v3,
+        .command = runtime_fake_command_v3,
+        .receive_control = runtime_fake_control,
+        .push_jpeg = runtime_fake_jpeg_v3,
+        .tick = runtime_fake_tick,
+        .status = runtime_fake_status_v3,
+    };
+    return api;
+}
+
 static void *runtime_fake_create(const struct df_media_module_config_v2 *config,
     const struct df_media_module_callbacks_v2 *callbacks) {
     (void)config;
@@ -51,7 +107,7 @@ static int runtime_fake_status(const void *instance,
 
 static struct df_media_module_api_v2 runtime_valid_api(void) {
     const struct df_media_module_api_v2 api = {
-        .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
+        .abi_version = DF_MEDIA_MODULE_ABI_VERSION_V2,
         .struct_size = sizeof(struct df_media_module_api_v2),
         .create = runtime_fake_create,
         .destroy = runtime_fake_destroy,
@@ -102,6 +158,23 @@ void test_runtime_module_rejects_incompatible_or_incomplete_api(void) {
     api.tick = NULL;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_start_with_api(
         &module, &api, &config, &callbacks));
+
+    {
+        struct df_media_module_api_v3 api_v3 = runtime_valid_api_v3();
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_media_module_validate_api_v3(&api_v3));
+        api_v3.abi_version = DF_MEDIA_MODULE_ABI_VERSION_V2;
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+            df_runtime_media_module_validate_api_v3(&api_v3));
+        api_v3 = runtime_valid_api_v3();
+        api_v3.struct_size--;
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+            df_runtime_media_module_validate_api_v3(&api_v3));
+        api_v3 = runtime_valid_api_v3();
+        api_v3.command = NULL;
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+            df_runtime_media_module_validate_api_v3(&api_v3));
+    }
 }
 
 void test_runtime_module_preserves_dynamic_library_handle(void) {

@@ -17,6 +17,9 @@ struct df_runtime_media_module {
     bool available;
 };
 
+int df_runtime_media_module_validate_api_v3(
+    const struct df_media_module_api_v3 *);
+
 int df_runtime_media_module_start(struct df_runtime_media_module *,
     const struct df_media_module_config_v2 *,
     const struct df_media_module_callbacks_v2 *);

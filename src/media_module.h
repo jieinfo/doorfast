@@ -19,6 +19,7 @@
 #define DF_MEDIA_MODULE_HOST_MAX 64U
 #define DF_MEDIA_MODULE_STREAM_MAX 65U
 #define DF_MEDIA_MODULE_USERNAME_MAX 33U
+#define DF_MEDIA_MODULE_STATION_ID_MAX 33U
 
 enum df_media_module_command {
     DF_MEDIA_MODULE_COMMAND_STOP = 1,
@@ -38,13 +39,30 @@ enum df_media_call_policy {
 struct df_media_station_config_v3 {
     const char *id;
     const char *stream_name;
+    bool enabled;
+    uint8_t logical_address[6];
+    uint32_t ipv4;
 };
 
 struct df_media_module_config_v3 {
+    bool enabled;
+    uint8_t local[6];
     const struct df_media_station_config_v3 *stations;
     size_t station_count;
     size_t max_encoders;
     enum df_media_call_policy incoming_call_policy;
+    const char *go2rtc_host;
+    uint16_t go2rtc_port;
+    const char *rtsp_username;
+    const char *credentials_path;
+    enum df_media_encoder encoder;
+    enum df_media_resolution resolution;
+    uint8_t fps;
+    uint16_t bitrate_kbps;
+    enum df_media_profile profile;
+    uint32_t min_free_kib;
+    uint16_t preview_timeout_s;
+    uint8_t first_frame_timeout_s;
 };
 
 struct df_media_session_key {
@@ -53,13 +71,19 @@ struct df_media_session_key {
 };
 
 struct df_media_session_status_v3 {
-    struct df_media_session_key key;
+    char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t generation;
     enum df_media_session_purpose purpose;
     bool active;
 };
 
 struct df_media_module_status_v3 {
-    /* Caller-owned output array; query required_session_count first. */
+    /*
+     * On input, session_count is the capacity of the caller-owned sessions
+     * array. On output, required_session_count is the total snapshot size and
+     * session_count is the number copied. Passing sessions == NULL queries the
+     * required count. No pointer in a returned session is module-owned.
+     */
     size_t required_session_count;
     size_t session_count;
     struct df_media_session_status_v3 *sessions;
@@ -107,6 +131,12 @@ struct df_media_module_callbacks_v3 {
     void *context;
 };
 
+/*
+ * create() copies station IDs, stream names, and scalar configuration. The
+ * callback table and context must remain valid until destroy() returns.
+ * start() and command() borrow their string/key arguments for the call only.
+ */
+
 struct df_media_module_api_v3 {
     uint32_t abi_version;
     size_t struct_size;
@@ -124,6 +154,12 @@ struct df_media_module_api_v3 {
     int (*tick)(void *, uint64_t);
     int (*status)(const void *, struct df_media_module_status_v3 *);
 };
+
+extern const struct df_media_module_api_v3 df_media_module_api_v3;
+
+int df_media_module_config_v3_validate(
+    const struct df_media_module_config_v3 *,
+    const struct df_media_module_callbacks_v3 *);
 
 struct df_media_module_callbacks_v2 {
     df_media_module_emit_control_fn emit_control;

@@ -150,6 +150,7 @@ void test_media_module_stop_ack_cleans_local_media(void);
 void test_media_module_stop_timeout_cleans_local_media(void);
 void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void);
 void test_media_module_status_revision_tracks_public_snapshot_changes(void);
+void test_media_module_validates_v3_contract(void);
 void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void);
 void test_runtime_module_rejects_commands_when_unavailable(void);
 void test_runtime_module_rejects_incompatible_or_incomplete_api(void);
@@ -343,6 +344,7 @@ int main(int argc, char **argv) {
     test_media_module_stop_timeout_cleans_local_media();
     test_media_module_stop_cleanup_failure_is_not_reported_as_stopped();
     test_media_module_status_revision_tracks_public_snapshot_changes();
+    test_media_module_validates_v3_contract();
     test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing();
     test_runtime_module_rejects_commands_when_unavailable();
     test_runtime_module_rejects_incompatible_or_incomplete_api();

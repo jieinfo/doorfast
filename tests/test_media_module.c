@@ -14,8 +14,10 @@
 typedef int (*expected_deprecated_relay_send_fn)(const char *, const char *,
     const char *, void *);
 
-_Static_assert(DF_MEDIA_MODULE_ABI_VERSION == 2U,
-    "Task 6 must not renumber the media module ABI");
+_Static_assert(DF_MEDIA_MODULE_ABI_VERSION == 3U,
+    "media ABI v3 public version changed");
+_Static_assert(DF_MEDIA_MODULE_ABI_VERSION_V2 == 2U,
+    "legacy media ABI v2 version changed");
 #if UINTPTR_MAX == UINT64_MAX
 _Static_assert(sizeof(struct df_media_module_config_v2) == 96U,
     "media ABI v2 config size changed");
@@ -49,12 +51,64 @@ struct module_trace {
     uint64_t available_memory_kib;
 };
 
+static int module_noop_control(const uint8_t destination[6],
+    uint32_t destination_ipv4, const uint8_t source[6], uint8_t family,
+    uint8_t opcode, const uint8_t *payload, size_t payload_length,
+    void *context);
+
 static int module_available_memory(uint64_t *available_kib, void *context) {
     struct module_trace *trace = context;
 
     if (available_kib == NULL || trace == NULL) return DF_ERR_INVALID;
     *available_kib = trace->available_memory_kib;
     return DF_OK;
+}
+
+static int module_resolve_route(const uint8_t peer[6], uint64_t now_ms,
+    uint32_t *ipv4, void *context) {
+    (void)peer;
+    (void)now_ms;
+    (void)context;
+    if (ipv4 == NULL) return DF_ERR_INVALID;
+    *ipv4 = htonl(INADDR_LOOPBACK);
+    return DF_OK;
+}
+
+void test_media_module_validates_v3_contract(void) {
+    struct df_media_station_config_v3 stations[2] = {
+        {.id = "gate_main", .stream_name = "doorfast_gate_main",
+         .enabled = true},
+        {.id = "gate_side", .stream_name = "doorfast_gate_side",
+         .enabled = true},
+    };
+    struct df_media_module_config_v3 config = {
+        .enabled = true,
+        .stations = stations,
+        .station_count = 2U,
+        .max_encoders = 2U,
+        .incoming_call_policy = DF_MEDIA_CALL_PREEMPT_OLDEST_PREVIEW,
+    };
+    struct df_media_module_callbacks_v3 callbacks = {
+        .emit_control = module_noop_control,
+        .resolve_route = module_resolve_route,
+        .available_memory = module_available_memory,
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_module_config_v3_validate(&config, &callbacks));
+    config.max_encoders = 3U;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_media_module_config_v3_validate(&config, &callbacks));
+    config.max_encoders = 0U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_module_config_v3_validate(&config, &callbacks));
+    stations[1].id = "gate_main";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_media_module_config_v3_validate(&config, &callbacks));
+    stations[1].id = "gate_side";
+    callbacks.resolve_route = NULL;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_media_module_config_v3_validate(&config, &callbacks));
 }
 
 static int module_write_credentials(char path[]) {

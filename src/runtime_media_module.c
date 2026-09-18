@@ -3,9 +3,20 @@
 #include <dlfcn.h>
 #include <string.h>
 
+int df_runtime_media_module_validate_api_v3(
+    const struct df_media_module_api_v3 *api) {
+    if (api == NULL || api->abi_version != DF_MEDIA_MODULE_ABI_VERSION ||
+        api->struct_size != sizeof(*api) || api->create == NULL ||
+        api->destroy == NULL || api->start == NULL || api->command == NULL ||
+        api->receive_control == NULL || api->push_jpeg == NULL ||
+        api->tick == NULL || api->status == NULL)
+        return DF_ERR_INVALID;
+    return DF_OK;
+}
+
 static int df_runtime_media_module_api_valid(
     const struct df_media_module_api_v2 *api) {
-    if (api == NULL || api->abi_version != DF_MEDIA_MODULE_ABI_VERSION ||
+    if (api == NULL || api->abi_version != DF_MEDIA_MODULE_ABI_VERSION_V2 ||
         api->struct_size != sizeof(*api) || api->create == NULL ||
         api->destroy == NULL || api->start == NULL || api->command == NULL ||
         api->receive_control == NULL || api->push_jpeg == NULL ||
