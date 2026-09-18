@@ -1,3 +1,4 @@
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,7 +92,24 @@ static const struct df_media_module_api_v2 media_api = {
 };
 
 void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
+    static const char station_config[] =
+        "config station 'gate_main'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Main Gate'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_main'\n";
+    const uint8_t identity[6] = {0x61, 0x02, 0x01, 1, 1, 1};
+    const uint8_t station_address[6] = {0x32, 0x02, 0x01, 0, 0x02, 0};
     struct df_runtime_ubus service = {0};
+    struct df_station_registry registry = {0};
+    struct df_gvs_station_discovery discovery = {0};
+    struct df_gvs_station_routes routes = {0};
+    struct df_gvs_station_scan scan = {0};
+    struct df_station_snapshot stations = {0};
+    struct df_station_candidate_snapshot candidates = {0};
+    struct in_addr observed_ipv4;
     unsigned calls = 0;
 
     TEST_ASSERT_INT_EQ(
@@ -102,6 +120,91 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     TEST_ASSERT_INT_EQ(
         DF_OK,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_station_registry_parse(&registry, station_config));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_stations(&service,
+        &registry, &discovery, &routes, &scan, identity, true));
+    memcpy(service.runtime_id, "0123456789abcdef", sizeof(service.runtime_id));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("0123456789abcdef", stations.runtime_id));
+    TEST_ASSERT_INT_EQ(1, (int)stations.revision);
+    TEST_ASSERT_INT_EQ(1, (int)stations.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main", stations.stations[0].id));
+    TEST_ASSERT_INT_EQ(0, strcmp("Main Gate", stations.stations[0].name));
+    TEST_ASSERT_INT_EQ(0, strcmp("32:02:01:00:02:00",
+        stations.stations[0].logical_address));
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].enabled);
+    TEST_ASSERT_INT_EQ(0, strcmp("doorfast_gate_main",
+        stations.stations[0].stream_name));
+    TEST_ASSERT_INT_EQ(0, strcmp("none",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].monitorable);
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].has_last_seen);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_candidates(&service, &candidates));
+    TEST_ASSERT_INT_EQ(0, strcmp("0123456789abcdef", candidates.runtime_id));
+    TEST_ASSERT_INT_EQ(0, (int)candidates.count);
+
+    TEST_ASSERT_INT_EQ(1, inet_pton(AF_INET, "10.2.1.20", &observed_ipv4));
+    memcpy(discovery.candidates[0].logical_address, station_address,
+        sizeof(station_address));
+    discovery.candidates[0].ipv4 = observed_ipv4.s_addr;
+    discovery.candidates[0].first_seen_ms = 90U;
+    discovery.candidates[0].last_seen_ms = 100U;
+    discovery.candidates[0].reply_count = 2U;
+    discovery.candidates[0].valid = true;
+    discovery.count = 1U;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_station_routes_observe(&routes,
+        station_address, observed_ipv4.s_addr, 100U, true));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 60099U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("discovered",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].monitorable);
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].has_last_seen);
+    TEST_ASSERT_INT_EQ(100, (int)stations.stations[0].last_seen_ms);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_candidates(&service, &candidates));
+    TEST_ASSERT_INT_EQ(1, (int)candidates.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("32:02:01:00:02:00",
+        candidates.candidates[0].logical_address));
+    TEST_ASSERT_INT_EQ(0, strcmp("10.2.1.20",
+        candidates.candidates[0].ipv4));
+    TEST_ASSERT_INT_EQ(1, candidates.candidates[0].configured);
+    TEST_ASSERT_INT_EQ(2, (int)candidates.candidates[0].reply_count);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 60100U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("none",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].monitorable);
+
+    registry.items[0].configured_ipv4 = observed_ipv4.s_addr;
+    registry.items[0].route_preference = DF_STATION_ROUTE_FIXED;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 120100U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("configured",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].monitorable);
+    registry.items[0].enabled = false;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].monitorable);
+
+    service.station_scan_enabled = false;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_station_scan(&service, 120100U));
+    service.station_scan_enabled = true;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_scan(&service, 120100U));
+    TEST_ASSERT_INT_EQ(1, scan.active);
     TEST_ASSERT_INT_EQ(1, df_runtime_id_is_valid(service.runtime_id) ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_unlock(&service, NULL, 1));
@@ -111,12 +214,13 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     TEST_ASSERT_INT_EQ(
         DF_ERR_INVALID,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 10));
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 11));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 120100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 120101U));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-                       df_runtime_ubus_process(&service, 9));
+                       df_runtime_ubus_process(&service, 120099U));
     TEST_ASSERT_INT_EQ(0, (int)calls);
     df_runtime_ubus_stop(&service);
+    df_station_registry_destroy(&registry);
     TEST_ASSERT_INT_EQ(0, service.runtime_id[0]);
     df_runtime_ubus_stop(&service);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,

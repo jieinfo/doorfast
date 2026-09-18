@@ -14,6 +14,21 @@ struct delay_trace {
     bool fail_second;
 };
 
+struct station_scan_trace {
+    struct df_gvs_station_scan_action actions[3];
+    size_t count;
+};
+
+static int record_station_scan(
+    const struct df_gvs_station_scan_action *action, void *context) {
+    struct station_scan_trace *trace = context;
+
+    if (action == NULL || trace == NULL || trace->count >= 3U)
+        return DF_ERR_INVALID;
+    trace->actions[trace->count++] = *action;
+    return DF_OK;
+}
+
 static int record_delay_slice(unsigned delay_ms, void *context) {
     struct delay_trace *trace = context;
 
@@ -29,6 +44,9 @@ static int record_delay_slice(unsigned delay_ms, void *context) {
 
 void test_runtime_delay_is_pumped_in_bounded_slices(void) {
     struct delay_trace trace = {0};
+    struct station_scan_trace scan_trace = {0};
+    struct df_gvs_station_scan scan = {0};
+    const uint8_t identity[6] = {0x61, 0x02, 0x01, 1, 1, 1};
 
     TEST_ASSERT_INT_EQ(
         DF_OK,
@@ -45,6 +63,21 @@ void test_runtime_delay_is_pumped_in_bounded_slices(void) {
     TEST_ASSERT_INT_EQ(2, (int)trace.count);
     TEST_ASSERT_INT_EQ(250, (int)trace.values[0]);
     TEST_ASSERT_INT_EQ(1, (int)trace.values[1]);
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_gvs_station_scan_start(&scan, identity, 1000U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_tick(
+        &scan, 1000U, record_station_scan, &scan_trace));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_tick(
+        &scan, 1499U, record_station_scan, &scan_trace));
+    TEST_ASSERT_INT_EQ(1, (int)scan_trace.count);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_tick(
+        &scan, 1500U, record_station_scan, &scan_trace));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_tick(
+        &scan, 2000U, record_station_scan, &scan_trace));
+    TEST_ASSERT_INT_EQ(3, (int)scan_trace.count);
+    TEST_ASSERT_INT_EQ(0x07, scan_trace.actions[0].family);
+    TEST_ASSERT_INT_EQ(0x06, scan_trace.actions[0].opcode);
 }
 
 void test_runtime_delay_rejects_invalid_input_and_stops_on_failure(void) {

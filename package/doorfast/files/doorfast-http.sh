@@ -161,6 +161,35 @@ select_audio_chunk() {
   return 1
 }
 
+if [ "$path" = /api/v1/stations ]; then
+  [ "${REQUEST_METHOD:-}" = GET ] || {
+    http_error '405 Method Not Allowed' 'method not allowed' GET
+    exit 0
+  }
+  case "${CONTENT_LENGTH:-0}" in
+    ''|*[!0-9]*)
+      http_error '400 Bad Request' 'invalid station request'
+      exit 0
+      ;;
+    0) ;;
+    *)
+      http_error '400 Bad Request' 'invalid station request'
+      exit 0
+      ;;
+  esac
+  [ -z "${QUERY_STRING:-}" ] || {
+    http_error '400 Bad Request' 'invalid station request'
+    exit 0
+  }
+  stations="$(ubus call doorfast stations 2>/dev/null)" || {
+    http_error '503 Service Unavailable' 'station service unavailable'
+    exit 0
+  }
+  printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+  printf '%s\n' "$stations"
+  exit 0
+fi
+
 if [ "$path" = /api/v1/video/latest.jpg ]; then
   snapshot="${DOORFAST_VIDEO_SNAPSHOT:-/tmp/doorfast-latest.jpg}"
   query_generation

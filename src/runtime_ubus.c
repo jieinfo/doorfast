@@ -1,7 +1,9 @@
 #include "runtime_ubus.h"
 #include "deployment_health.h"
 
+#include <arpa/inet.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -81,13 +83,181 @@ int df_runtime_ubus_log_get(const struct df_runtime_ubus *service,
     return DF_OK;
 }
 
+static int df_runtime_station_address_text(const uint8_t address[6],
+    char output[DF_RUNTIME_STATION_ADDRESS_TEXT_SIZE]) {
+    int written;
+
+    if (address == NULL || output == NULL) return DF_ERR_INVALID;
+    written = snprintf(output, DF_RUNTIME_STATION_ADDRESS_TEXT_SIZE,
+        "%02x:%02x:%02x:%02x:%02x:%02x", address[0], address[1], address[2],
+        address[3], address[4], address[5]);
+    return written == (int)DF_RUNTIME_STATION_ADDRESS_TEXT_SIZE - 1
+        ? DF_OK : DF_ERR_INVALID;
+}
+
+static const struct df_gvs_station_candidate *df_runtime_station_candidate_find(
+    const struct df_gvs_station_discovery *discovery,
+    const uint8_t logical_address[6]) {
+    size_t index;
+
+    for (index = 0U; index < DF_GVS_STATION_CANDIDATE_CAPACITY; index++) {
+        const struct df_gvs_station_candidate *candidate =
+            &discovery->candidates[index];
+
+        if (candidate->valid && memcmp(candidate->logical_address,
+                logical_address, sizeof(candidate->logical_address)) == 0)
+            return candidate;
+    }
+    return NULL;
+}
+
+static bool df_runtime_station_is_configured(
+    const struct df_station_registry *registry,
+    const uint8_t logical_address[6]) {
+    size_t index;
+
+    for (index = 0U; index < registry->count; index++) {
+        if (memcmp(registry->items[index].logical_address,
+                logical_address, 6U) == 0)
+            return true;
+    }
+    return false;
+}
+
+int df_runtime_ubus_bind_stations(struct df_runtime_ubus *service,
+    const struct df_station_registry *registry,
+    const struct df_gvs_station_discovery *discovery,
+    const struct df_gvs_station_routes *routes, struct df_gvs_station_scan *scan,
+    const uint8_t identity[6], bool scan_enabled) {
+    struct df_gvs_station_scan validation;
+    struct df_station_snapshot_entry *entries = NULL;
+
+    if (service == NULL || !service->started || registry == NULL ||
+        discovery == NULL || routes == NULL || scan == NULL || identity == NULL ||
+        service->stations_bound ||
+        (registry->count > 0U && registry->items == NULL) ||
+        df_gvs_station_scan_start(
+            &validation, identity, service->last_now_ms) != DF_OK)
+        return DF_ERR_INVALID;
+    if (registry->count > 0U) {
+        entries = calloc(registry->count, sizeof(*entries));
+        if (entries == NULL) return DF_ERR_IO;
+    }
+    service->station_registry = registry;
+    service->station_discovery = discovery;
+    service->station_routes = routes;
+    service->station_scan = scan;
+    service->station_snapshot_entries = entries;
+    memcpy(service->station_identity, identity, sizeof(service->station_identity));
+    service->station_scan_enabled = scan_enabled;
+    service->stations_bound = true;
+    return DF_OK;
+}
+
+int df_runtime_ubus_station_list(struct df_runtime_ubus *service,
+    struct df_station_snapshot *snapshot) {
+    struct df_station_snapshot next = {0};
+    size_t index;
+
+    if (service == NULL || !service->started || !service->stations_bound ||
+        snapshot == NULL)
+        return DF_ERR_INVALID;
+    for (index = 0U; index < service->station_registry->count; index++) {
+        const struct df_station *station = &service->station_registry->items[index];
+        const struct df_gvs_station_candidate *candidate =
+            df_runtime_station_candidate_find(
+                service->station_discovery, station->logical_address);
+        struct df_station_snapshot_entry entry = {0};
+        uint32_t observed_ipv4 = 0U;
+        bool observed_fresh = df_gvs_station_routes_lookup(
+            service->station_routes, station->logical_address,
+            service->last_now_ms, 60000U, &observed_ipv4) == DF_OK;
+        const char *route_source = "none";
+
+        (void)observed_ipv4;
+        if (snprintf(entry.id, sizeof(entry.id), "%s", station->id) < 0 ||
+            snprintf(entry.name, sizeof(entry.name), "%s", station->name) < 0 ||
+            snprintf(entry.stream_name, sizeof(entry.stream_name), "%s",
+                station->stream_name) < 0 ||
+            df_runtime_station_address_text(station->logical_address,
+                entry.logical_address) != DF_OK)
+            return DF_ERR_INVALID;
+        if (station->route_preference == DF_STATION_ROUTE_FIXED) {
+            if (station->configured_ipv4 != 0U) route_source = "configured";
+        } else if (observed_fresh) {
+            route_source = "discovered";
+        } else if (station->configured_ipv4 != 0U) {
+            route_source = "configured";
+        }
+        if (snprintf(entry.route_source, sizeof(entry.route_source), "%s",
+                route_source) < 0)
+            return DF_ERR_INVALID;
+        entry.enabled = station->enabled;
+        entry.route_fresh = strcmp(route_source, "none") != 0;
+        entry.monitorable = entry.enabled && entry.route_fresh;
+        if (candidate != NULL) {
+            entry.has_last_seen = true;
+            entry.last_seen_ms = candidate->last_seen_ms;
+        }
+        service->station_snapshot_entries[index] = entry;
+    }
+    memcpy(next.runtime_id, service->runtime_id, sizeof(next.runtime_id));
+    next.revision = service->station_registry->revision;
+    next.stations = service->station_snapshot_entries;
+    next.count = service->station_registry->count;
+    *snapshot = next;
+    return DF_OK;
+}
+
+int df_runtime_ubus_station_candidates(struct df_runtime_ubus *service,
+    struct df_station_candidate_snapshot *snapshot) {
+    struct df_station_candidate_snapshot next = {0};
+    size_t source;
+    size_t target = 0U;
+
+    if (service == NULL || !service->started || !service->stations_bound ||
+        snapshot == NULL)
+        return DF_ERR_INVALID;
+    for (source = 0U; source < DF_GVS_STATION_CANDIDATE_CAPACITY; source++) {
+        const struct df_gvs_station_candidate *candidate =
+            &service->station_discovery->candidates[source];
+        struct df_station_candidate_snapshot_entry entry = {0};
+        struct in_addr address;
+
+        if (!candidate->valid) continue;
+        address.s_addr = candidate->ipv4;
+        if (df_runtime_station_address_text(candidate->logical_address,
+                entry.logical_address) != DF_OK ||
+            inet_ntop(AF_INET, &address, entry.ipv4, sizeof(entry.ipv4)) == NULL)
+            return DF_ERR_INVALID;
+        entry.first_seen_ms = candidate->first_seen_ms;
+        entry.last_seen_ms = candidate->last_seen_ms;
+        entry.reply_count = candidate->reply_count;
+        entry.configured = df_runtime_station_is_configured(
+            service->station_registry, candidate->logical_address);
+        service->station_candidate_entries[target++] = entry;
+    }
+    memcpy(next.runtime_id, service->runtime_id, sizeof(next.runtime_id));
+    next.candidates = service->station_candidate_entries;
+    next.count = target;
+    *snapshot = next;
+    return DF_OK;
+}
+
+int df_runtime_ubus_station_scan(struct df_runtime_ubus *service,
+    uint64_t now_ms) {
+    if (service == NULL || !service->started || !service->stations_bound ||
+        !service->station_scan_enabled || now_ms < service->last_now_ms)
+        return DF_ERR_INVALID;
+    return df_gvs_station_scan_start(
+        service->station_scan, service->station_identity, now_ms);
+}
+
 #ifdef DF_WITH_UBUS
 
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
-#include <stdlib.h>
-
 #include <libubox/blobmsg_json.h>
 #include <libubus.h>
 
@@ -405,6 +575,123 @@ static int df_runtime_ubus_logs_handler(
         blobmsg_close_table(&platform->response, table);
     }
     blobmsg_close_array(&platform->response, entries);
+    result = ubus_send_reply(context, request, platform->response.head);
+    blob_buf_free(&platform->response);
+    return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+}
+
+static int df_runtime_ubus_stations_handler(
+    struct ubus_context *context, struct ubus_object *object,
+    struct ubus_request_data *request, const char *method,
+    struct blob_attr *message) {
+    struct df_runtime_ubus_platform *platform =
+        container_of(object, struct df_runtime_ubus_platform, object);
+    struct df_station_snapshot snapshot;
+    void *stations;
+    size_t index;
+    int result;
+
+    (void)method;
+    (void)message;
+    if (df_runtime_ubus_station_list(platform->owner, &snapshot) != DF_OK)
+        return UBUS_STATUS_UNKNOWN_ERROR;
+    blob_buf_init(&platform->response, 0);
+    blobmsg_add_string(&platform->response, "runtime_id", snapshot.runtime_id);
+    blobmsg_add_u64(&platform->response, "revision", snapshot.revision);
+    stations = blobmsg_open_array(&platform->response, "stations");
+    for (index = 0U; index < snapshot.count; index++) {
+        const struct df_station_snapshot_entry *station =
+            &snapshot.stations[index];
+        void *entry = blobmsg_open_table(&platform->response, NULL);
+
+        blobmsg_add_string(&platform->response, "id", station->id);
+        blobmsg_add_string(&platform->response, "name", station->name);
+        blobmsg_add_string(&platform->response, "logical_address",
+            station->logical_address);
+        blobmsg_add_u8(&platform->response, "enabled", station->enabled);
+        blobmsg_add_string(&platform->response, "stream_name",
+            station->stream_name);
+        blobmsg_add_string(&platform->response, "route_source",
+            station->route_source);
+        blobmsg_add_u8(&platform->response, "route_fresh",
+            station->route_fresh);
+        blobmsg_add_u8(&platform->response, "monitorable",
+            station->monitorable);
+        if (station->has_last_seen) {
+            blobmsg_add_u64(&platform->response, "last_seen_ms",
+                station->last_seen_ms);
+        } else {
+            blobmsg_add_field(&platform->response, BLOBMSG_TYPE_UNSPEC,
+                "last_seen_ms", NULL, 0U);
+        }
+        blobmsg_close_table(&platform->response, entry);
+    }
+    blobmsg_close_array(&platform->response, stations);
+    result = ubus_send_reply(context, request, platform->response.head);
+    blob_buf_free(&platform->response);
+    return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+}
+
+static int df_runtime_ubus_station_candidates_handler(
+    struct ubus_context *context, struct ubus_object *object,
+    struct ubus_request_data *request, const char *method,
+    struct blob_attr *message) {
+    struct df_runtime_ubus_platform *platform =
+        container_of(object, struct df_runtime_ubus_platform, object);
+    struct df_station_candidate_snapshot snapshot;
+    void *candidates;
+    size_t index;
+    int result;
+
+    (void)method;
+    (void)message;
+    if (df_runtime_ubus_station_candidates(
+            platform->owner, &snapshot) != DF_OK)
+        return UBUS_STATUS_UNKNOWN_ERROR;
+    blob_buf_init(&platform->response, 0);
+    blobmsg_add_string(&platform->response, "runtime_id", snapshot.runtime_id);
+    candidates = blobmsg_open_array(&platform->response, "candidates");
+    for (index = 0U; index < snapshot.count; index++) {
+        const struct df_station_candidate_snapshot_entry *candidate =
+            &snapshot.candidates[index];
+        void *entry = blobmsg_open_table(&platform->response, NULL);
+
+        blobmsg_add_string(&platform->response, "logical_address",
+            candidate->logical_address);
+        blobmsg_add_string(&platform->response, "ipv4", candidate->ipv4);
+        blobmsg_add_u64(&platform->response, "first_seen_ms",
+            candidate->first_seen_ms);
+        blobmsg_add_u64(&platform->response, "last_seen_ms",
+            candidate->last_seen_ms);
+        blobmsg_add_u64(&platform->response, "reply_count",
+            candidate->reply_count);
+        blobmsg_add_u8(&platform->response, "configured",
+            candidate->configured);
+        blobmsg_close_table(&platform->response, entry);
+    }
+    blobmsg_close_array(&platform->response, candidates);
+    result = ubus_send_reply(context, request, platform->response.head);
+    blob_buf_free(&platform->response);
+    return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+}
+
+static int df_runtime_ubus_station_scan_handler(
+    struct ubus_context *context, struct ubus_object *object,
+    struct ubus_request_data *request, const char *method,
+    struct blob_attr *message) {
+    struct df_runtime_ubus_platform *platform =
+        container_of(object, struct df_runtime_ubus_platform, object);
+    int result;
+
+    (void)method;
+    (void)message;
+    if (df_runtime_ubus_station_scan(
+            platform->owner, platform->owner->last_now_ms) != DF_OK)
+        return UBUS_STATUS_PERMISSION_DENIED;
+    blob_buf_init(&platform->response, 0);
+    blobmsg_add_string(&platform->response, "runtime_id",
+        platform->owner->runtime_id);
+    blobmsg_add_u8(&platform->response, "scheduled", true);
     result = ubus_send_reply(context, request, platform->response.head);
     blob_buf_free(&platform->response);
     return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
@@ -931,6 +1218,10 @@ static const struct ubus_method df_runtime_ubus_methods[] = {
     UBUS_METHOD("unlock", df_runtime_ubus_unlock_handler,
                 df_runtime_ubus_unlock_policy),
     UBUS_METHOD_NOARG("status", df_runtime_ubus_status_handler),
+    UBUS_METHOD_NOARG("stations", df_runtime_ubus_stations_handler),
+    UBUS_METHOD_NOARG("station_candidates",
+                      df_runtime_ubus_station_candidates_handler),
+    UBUS_METHOD_NOARG("station_scan", df_runtime_ubus_station_scan_handler),
     UBUS_METHOD_NOARG("logs", df_runtime_ubus_logs_handler),
     UBUS_METHOD("answer", df_runtime_ubus_answer_handler,
                 df_runtime_ubus_answer_policy),
@@ -1356,6 +1647,7 @@ void df_runtime_ubus_stop(struct df_runtime_ubus *service) {
 #ifdef DF_WITH_UBUS
     df_runtime_ubus_platform_stop(service);
 #endif
+    free(service->station_snapshot_entries);
     memset(service, 0, sizeof(*service));
 }
 

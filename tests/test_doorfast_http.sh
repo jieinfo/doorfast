@@ -21,6 +21,8 @@ if [ "$*" = 'call doorfast status' ]; then
     "${TEST_AUDIO_GENERATION:-7}" "${TEST_AUDIO_REVISION:-40}" \
     "${TEST_AUDIO_PREVIOUS_REVISION:-30}" "${TEST_AUDIO_BYTES:-12}" \
     "${TEST_AUDIO_DROPPED_BYTES:-0}"
+elif [ "$*" = 'call doorfast stations' ]; then
+  printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":1,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"none","route_fresh":false,"monitorable":false,"last_seen_ms":null}]}'
 else
   printf '{"ok":true}\n'
 fi
@@ -109,6 +111,13 @@ run /api/v1/unlock '{"runtime_id":"0123456789abcdef","generation":7}'
 run /api/v1/answer '{"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}'
 run /api/v1/hangup '{"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}'
 run /api/v1/call_elevator '{"runtime_id":"0123456789abcdef","direction":"up"}'
+run_method /api/v1/stations '' GET >"$workspace/stations"
+grep -aFq 'Content-Type: application/json' "$workspace/stations"
+grep -aFq 'Cache-Control: no-store' "$workspace/stations"
+tail -n 1 "$workspace/stations" >"$workspace/stations-json"
+printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":1,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"none","route_fresh":false,"monitorable":false,"last_seen_ms":null}]}' \
+  >"$workspace/stations-expected"
+cmp "$workspace/stations-expected" "$workspace/stations-json"
 run_method /api/v1/monitor/start '' POST >"$workspace/monitor-start"
 run_method /api/v1/monitor/stop \
   '{"generation":7}' POST >"$workspace/monitor-stop"
@@ -116,13 +125,24 @@ run_method /api/v1/monitor/viewer \
   '{"active":true,"generation":7}' POST \
   >"$workspace/monitor-viewer"
 run_method /api/v1/monitor/status '' GET >"$workspace/monitor-status"
-test "$(wc -l <"$trace" | tr -d ' ')" -eq 9
+test "$(wc -l <"$trace" | tr -d ' ')" -eq 10
+grep -Fxq 'call doorfast stations' "$trace"
 grep -Fxq 'call doorfast monitor_start {}' "$trace"
 grep -Fxq 'call doorfast monitor_stop {"generation":7}' "$trace"
 grep -Fxq 'call doorfast monitor_viewer {"generation":7,"active":true}' "$trace"
 grep -Fxq 'call doorfast monitor_status {}' "$trace"
 ! grep -Fq 'secret-' "$trace"
 trace_lines="$(wc -l <"$trace" | tr -d ' ')"
+run_method /api/v1/stations '' POST >"$workspace/stations-post"
+grep -aFq 'Status: 405 Method Not Allowed' "$workspace/stations-post"
+run_method /api/v1/stations '{}' GET >"$workspace/stations-body"
+grep -aFq 'Status: 400 Bad Request' "$workspace/stations-body"
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  PATH_INFO=/api/v1/stations REQUEST_METHOD=GET QUERY_STRING=refresh \
+  CONTENT_LENGTH=0 sh package/doorfast/files/doorfast-http.sh \
+  >"$workspace/stations-query"
+grep -aFq 'Status: 400 Bad Request' "$workspace/stations-query"
+test "$(wc -l <"$trace" | tr -d ' ')" -eq "$trace_lines"
 run_method /api/v1/monitor/stop \
   '{"generation":7,"ignored":"secret-stop"}' POST \
   >"$workspace/monitor-extra"
