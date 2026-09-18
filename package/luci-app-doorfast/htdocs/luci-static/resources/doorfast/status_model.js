@@ -110,8 +110,7 @@ function formatMediaStatus(payload) {
 
     if (typeof media.available !== 'boolean' ||
         typeof media.encoder_running !== 'boolean' ||
-        typeof media.rtsp_password_set !== 'boolean' ||
-        typeof media.relay_token_set !== 'boolean')
+        typeof media.rtsp_password_set !== 'boolean')
         throw new TypeError('media status flag must be boolean');
     if (failure === undefined)
         failure = '';
@@ -125,10 +124,7 @@ function formatMediaStatus(payload) {
                                               'effective capacity')],
         ['Queue drops', unsignedText(media.queue_drops, 'queue drops')],
         ['RTSP password', media.rtsp_password_set ? 'Set' : 'Not set'],
-        ['Relay token', media.relay_token_set ? 'Set' : 'Not set'],
         ['Encoder', media.encoder_running ? 'Running' : 'Stopped'],
-        ['Relay failures', unsignedText(media.relay_failures,
-                                        'relay failures')],
         ['Failure', failure === '' ? 'None' : failure]
     ];
 }
@@ -137,8 +133,7 @@ function localizedMediaStatus(payload) {
     var labels = {
         State: '状态', Generation: '代次', 'Effective capacity': '有效容量',
         'Queue drops': '队列丢帧', 'RTSP password': 'RTSP 密码',
-        'Relay token': 'relay 令牌', Encoder: '编码器',
-        'Relay failures': 'relay 失败次数', Failure: '失败原因'
+        Encoder: '编码器', Failure: '失败原因'
     };
     var states = {
         Unavailable: '模块不可用', Idle: '空闲', Requesting: '请求中',

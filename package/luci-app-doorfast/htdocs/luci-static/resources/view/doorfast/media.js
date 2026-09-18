@@ -13,10 +13,7 @@ var callStatus = rpc.declare({
 var callMediaCredentials = rpc.declare({
     object: 'doorfast',
     method: 'media_credentials',
-    params: [
-        'rtsp_password', 'relay_token', 'clear_rtsp_password',
-        'clear_relay_token'
-    ],
+    params: ['rtsp_password', 'clear_rtsp_password'],
     expect: { '': {} }
 });
 
@@ -68,28 +65,6 @@ function validateIdentifier(sectionId, value) {
 function validateStreamName(sectionId, value) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(value))
         return '流名称只能包含 ASCII 字母、数字、下划线或连字符，且长度不超过 64。';
-    return true;
-}
-
-function validateRelayUrl(sectionId, value) {
-    var match;
-    var port;
-
-    if (value === '')
-        return true;
-    match = /^https?:\/\/([A-Za-z0-9](?:[A-Za-z0-9.-]{0,61}[A-Za-z0-9])?)(?::([0-9]{1,5}))?(\/[^\x00-\x20?#@\x7f-\uffff]*)?$/.exec(value);
-    if (match === null) {
-        if (value.indexOf('?') !== -1)
-            return 'relay 地址不能包含 query。';
-        if (value.indexOf('#') !== -1)
-            return 'relay 地址不能包含 fragment。';
-        return 'relay 地址必须是 http:// 或 https:// 的主机地址，可带端口和 HA 入口路径，但不能包含用户信息。';
-    }
-    if (match[2] !== undefined) {
-        port = Number(match[2]);
-        if (!Number.isSafeInteger(port) || port < 1 || port > 65535)
-            return 'relay 端口必须在 1 到 65535 之间。';
-    }
     return true;
 }
 
@@ -203,18 +178,11 @@ function buildMediaMap(page) {
     option.validate = integerInRange(2, 30, '首帧超时');
     option.datatype = 'uinteger';
 
-    option = addMediaOption(section, form.Value, 'media_relay_url', '媒体事件 relay 地址（可选）',
-        '填写 http:// 或 https:// 的主机地址，可带端口和 HA 入口路径，但不能包含 query 或 fragment。relay 令牌单独保存。');
-    option.rmempty = true;
-    option.validate = validateRelayUrl;
-
     section = map.section(form.NamedSection, 'main', 'gvs', '媒体凭据');
-    section.description = '留空保留原值。页面始终不回显已经保存的密码或 relay 令牌。修改凭据后需要重启 Doorfast 才会应用到运行中的媒体模块。';
+    section.description = '留空保留原值。页面始终不回显已经保存的密码。修改凭据后需要重启 Doorfast 才会应用到运行中的媒体模块。';
 
     page.rtspPassword = privateValue(section, '_media_rtsp_password', 'RTSP 密码');
     page.clearRtspPassword = privateFlag(section, '_media_clear_rtsp_password', '清除已保存的 RTSP 密码');
-    page.relayToken = privateValue(section, '_media_relay_token', '媒体 relay Bearer 令牌');
-    page.clearRelayToken = privateFlag(section, '_media_clear_relay_token', '清除已保存的媒体 relay 令牌');
 
     return map;
 }
@@ -242,25 +210,16 @@ return view.extend({
 
     captureMediaCredentials: function() {
         var rtspPassword;
-        var relayToken;
         var clearRtspPassword;
-        var clearRelayToken;
 
         rtspPassword = fieldValue(this.rtspPassword);
-        relayToken = fieldValue(this.relayToken);
         clearRtspPassword = flagValue(this.clearRtspPassword);
-        clearRelayToken = flagValue(this.clearRelayToken);
         if (rtspPassword !== '' && clearRtspPassword)
             throw new Error('不能同时填写并清除 RTSP 密码。');
-        if (relayToken !== '' && clearRelayToken)
-            throw new Error('不能同时填写并清除媒体 relay 令牌。');
         return {
             rtspPassword: rtspPassword,
-            relayToken: relayToken,
             clearRtspPassword: clearRtspPassword,
-            clearRelayToken: clearRelayToken,
-            changed: rtspPassword !== '' || relayToken !== '' ||
-                clearRtspPassword || clearRelayToken
+            changed: rtspPassword !== '' || clearRtspPassword
         };
     },
 
@@ -268,8 +227,7 @@ return view.extend({
         if (!credentials.changed)
             return Promise.resolve();
         return callMediaCredentials(credentials.rtspPassword,
-            credentials.relayToken, credentials.clearRtspPassword,
-            credentials.clearRelayToken);
+            credentials.clearRtspPassword);
     },
 
     saveMedia: function(apply) {

@@ -31,3 +31,16 @@ Verification completed successfully:
 Targeted scans found no `trace.last_json`, `df_media_relay_tick`, or
 `module.relay` references in source or tests, and no media relay source is
 included in either package build.
+
+Supplemental commit `fix: finish media relay removal` includes the two LuCI
+changes that were already present in the Task 6 worktree: media status no
+longer requires or renders relay fields, and the media page no longer exposes
+relay URL/token controls or sends relay credential parameters.
+
+Supplemental verification:
+
+* `node tests/test_luci_media.js`
+* `node tests/js/test_media_status.mjs`
+* `node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js`
+* `node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/media.js`
+* `git diff --check`
