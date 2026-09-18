@@ -88,6 +88,8 @@ TEST_SOURCES += tests/test_media_frame_queue.c src/media_frame_queue.c
 TEST_SOURCES += tests/test_media_capacity.c src/media_capacity.c
 TEST_SOURCES += tests/test_media_encoder.c src/media_encoder.c
 TEST_SOURCES += tests/test_media_module.c src/media_module.c
+TEST_SOURCES += tests/test_media_session.c src/media_session.c
+TEST_SOURCES += tests/test_media_session_manager.c src/media_session_manager.c
 TEST_SOURCES += tests/test_runtime_media_module.c src/runtime_media_module.c
 build/doorfast-tests: src/evidence_recorder.h
 build/doorfast-tests: src/evidence_classifier.h
