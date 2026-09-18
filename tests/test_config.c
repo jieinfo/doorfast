@@ -136,12 +136,6 @@ void test_media_config_requires_an_active_host_and_valid_public_values(void) {
     invalid = config;
     invalid.media.station_ipv4 = "10.2.3.4";
     TEST_ASSERT_INT_EQ(DF_OK, df_config_validate(&invalid));
-    invalid = config;
-    invalid.media.relay_url = "http://ha.local:8123/api/doorfast/entry-1";
-    TEST_ASSERT_INT_EQ(DF_OK, df_config_validate(&invalid));
-    invalid = config;
-    invalid.media.relay_url = "http://ha.local:8123/api/doorfast/entry-1?x=1";
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_config_validate(&invalid));
 }
 
 void test_legacy_config_import_keeps_only_safe_fields(void) {

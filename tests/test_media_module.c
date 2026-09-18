@@ -11,10 +11,41 @@
 #include "media_module.h"
 #include "test.h"
 
+typedef int (*expected_deprecated_relay_send_fn)(const char *, const char *,
+    const char *, void *);
+
+_Static_assert(DF_MEDIA_MODULE_ABI_VERSION == 2U,
+    "Task 6 must not renumber the media module ABI");
+#if UINTPTR_MAX == UINT64_MAX
+_Static_assert(sizeof(struct df_media_module_config_v2) == 96U,
+    "media ABI v2 config size changed");
+_Static_assert(offsetof(struct df_media_module_config_v2,
+    deprecated_relay_url) == 88U, "media ABI v2 config relay slot moved");
+_Static_assert(sizeof(struct df_media_module_callbacks_v2) == 40U,
+    "media ABI v2 callbacks size changed");
+_Static_assert(offsetof(struct df_media_module_callbacks_v2,
+    deprecated_relay_send) == 16U, "media ABI v2 callback relay slot moved");
+_Static_assert(sizeof(struct df_media_module_status) == 152U,
+    "media ABI v2 status size changed");
+_Static_assert(offsetof(struct df_media_module_status,
+    deprecated_relay_failures) == 148U, "media ABI v2 status relay slot moved");
+_Static_assert(sizeof(struct df_media_module_api_v2) == 80U,
+    "media ABI v2 API size changed");
+#endif
+_Static_assert(_Generic(((struct df_media_module_config_v2 *)0)->
+    deprecated_relay_url, const char *: 1, default: 0),
+    "media ABI v2 config relay slot type changed");
+_Static_assert(_Generic(((struct df_media_module_callbacks_v2 *)0)->
+    deprecated_relay_send, expected_deprecated_relay_send_fn: 1, default: 0),
+    "media ABI v2 callback relay slot type changed");
+_Static_assert(_Generic(((struct df_media_module_status *)0)->
+    deprecated_relay_failures, unsigned: 1, default: 0),
+    "media ABI v2 status relay slot type changed");
+
 struct module_trace {
     char entries[8][32];
-    char last_json[512];
     unsigned count;
+    unsigned deprecated_relay_calls;
     uint64_t available_memory_kib;
 };
 
@@ -27,8 +58,7 @@ static int module_available_memory(uint64_t *available_kib, void *context) {
 }
 
 static int module_write_credentials(char path[]) {
-    static const char contents[] =
-        "rtsp_password=rtsp-secret\nrelay_token=relay-secret\n";
+    static const char contents[] = "rtsp_password=rtsp-secret\n";
     int descriptor = mkstemp(path);
 
     if (descriptor < 0 || fchmod(descriptor, 0600) != 0 ||
@@ -104,24 +134,13 @@ static int module_write_ffmpeg_stub(char directory[], char program[],
         "ffmpeg");
 }
 
-static int module_send_relay(const char *url, const char *token,
+static int module_deprecated_relay_send(const char *url, const char *token,
     const char *json, void *context) {
     struct module_trace *trace = context;
     (void)url;
     (void)token;
-    (void)snprintf(trace->last_json, sizeof(trace->last_json), "%s", json);
-    if (strstr(json, "monitor_preempted") != NULL) {
-        (void)snprintf(trace->entries[trace->count++],
-            sizeof(trace->entries[0]), "monitor_preempted");
-    } else if (strstr(json, "monitor_stopped") != NULL) {
-        (void)snprintf(trace->entries[trace->count++],
-            sizeof(trace->entries[0]), "%s",
-            strstr(json, "stop_timeout") == NULL ?
-                "monitor_stopped" : "stop_timeout");
-    } else if (strstr(json, "monitor_failed") != NULL) {
-        (void)snprintf(trace->entries[trace->count++],
-            sizeof(trace->entries[0]), "monitor_failed");
-    }
+    (void)json;
+    trace->deprecated_relay_calls++;
     return DF_OK;
 }
 
@@ -173,7 +192,6 @@ void test_media_module_applies_resource_and_timeout_config(void) {
         .min_free_kib = 131072U,
         .preview_timeout_s = 15U,
         .first_frame_timeout_s = 2U,
-        .relay_url = "",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
@@ -205,7 +223,7 @@ void test_media_module_applies_resource_and_timeout_config(void) {
     TEST_ASSERT_INT_EQ(0, unlink(path));
 }
 
-void test_media_module_preempts_with_control_before_event(void) {
+void test_media_module_preempts_without_deprecated_relay_callback(void) {
     struct df_media_module module = {0};
     struct module_trace trace = {0};
     char path[] = "/tmp/doorfast-media-preempt-XXXXXX";
@@ -214,12 +232,10 @@ void test_media_module_preempts_with_control_before_event(void) {
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
         .station_ipv4 = 0x01020304,
-        .relay_url = "http://ha.local",
         .credentials_path = path,
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
-        .relay_send = module_send_relay,
         .context = &trace,
     };
 
@@ -233,8 +249,7 @@ void test_media_module_preempts_with_control_before_event(void) {
     TEST_ASSERT_INT_EQ(2, (int)trace.count);
     TEST_ASSERT_INT_EQ(0, strcmp("control", trace.entries[1]));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 110));
-    TEST_ASSERT_INT_EQ(3, (int)trace.count);
-    TEST_ASSERT_INT_EQ(0, strcmp("monitor_preempted", trace.entries[2]));
+    TEST_ASSERT_INT_EQ(2, (int)trace.count);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(path));
 }
@@ -266,7 +281,6 @@ void test_media_module_restarts_encoder_when_source_dimensions_change(void) {
         .fps = 10,
         .bitrate_kbps = 800,
         .profile = DF_MEDIA_PROFILE_BASELINE,
-        .relay_url = "",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
@@ -343,11 +357,9 @@ void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
         .fps = 10,
         .bitrate_kbps = 800,
         .profile = DF_MEDIA_PROFILE_BASELINE,
-        .relay_url = "http://ha.local",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
-        .relay_send = module_send_relay,
         .context = &trace,
     };
 
@@ -391,16 +403,10 @@ void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
     TEST_ASSERT_INT_EQ(0, module.encoder.running ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, (int)module.encoder.pid);
     TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
-    TEST_ASSERT_INT_EQ(1, (int)trace.count);
-    TEST_ASSERT_INT_EQ(0, strcmp("monitor_failed", trace.entries[0]));
-    TEST_ASSERT_INT_EQ(1,
-        strstr(trace.last_json, "\"failure\":\"encoder_exited\"") != NULL ?
-            1 : 0);
+    TEST_ASSERT_INT_EQ(0, (int)trace.count);
     TEST_ASSERT_INT_EQ(1, (int)module.monitor.generation);
-    TEST_ASSERT_INT_EQ(1,
-        strstr(trace.last_json, "\"generation\":1") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 202U));
-    TEST_ASSERT_INT_EQ(1, (int)trace.count);
+    TEST_ASSERT_INT_EQ(0, (int)trace.count);
 
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(&module, 203U));
     module.monitor.state = DF_GVS_MONITOR_PUBLISHING;
@@ -434,10 +440,7 @@ void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
     TEST_ASSERT_INT_EQ(2, (int)module.monitor.generation);
     TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 206U));
-    TEST_ASSERT_INT_EQ(2, (int)trace.count);
-    TEST_ASSERT_INT_EQ(0, strcmp("monitor_failed", trace.entries[1]));
-    TEST_ASSERT_INT_EQ(1,
-        strstr(trace.last_json, "\"generation\":2") != NULL ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, (int)trace.count);
     TEST_ASSERT_INT_EQ(0, setenv("PATH", original_path, 1));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(credentials_path));
@@ -445,27 +448,33 @@ void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
     TEST_ASSERT_INT_EQ(0, rmdir(encoder_directory));
 }
 
-void test_media_module_clears_credentials_when_relay_initialization_fails(void) {
+void test_media_module_ignores_deprecated_relay_slots(void) {
     struct df_media_module module = {0};
-    char path[] = "/tmp/doorfast-media-relay-failure-XXXXXX";
+    struct module_trace trace = {0};
+    char path[] = "/tmp/doorfast-media-deprecated-XXXXXX";
     const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
         .station_ipv4 = htonl(INADDR_LOOPBACK),
         .credentials_path = path,
-        .relay_url = "ftp://invalid.example",
+        .deprecated_relay_url = "ftp://invalid.example",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
+        .deprecated_relay_send = module_deprecated_relay_send,
+        .context = &trace,
     };
 
     TEST_ASSERT_INT_EQ(DF_OK, module_write_credentials(path));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_module_init(&module, &config,
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(&module, &config,
         &callbacks, 0U));
-    TEST_ASSERT_INT_EQ(0, module.credentials.rtsp_password[0]);
-    TEST_ASSERT_INT_EQ(0, module.credentials.relay_token[0]);
-    TEST_ASSERT_INT_EQ(0, module.initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, module.credentials.rtsp_password[0] != '\0');
+    TEST_ASSERT_INT_EQ(1, module.config.deprecated_relay_url == NULL);
+    TEST_ASSERT_INT_EQ(1, module.callbacks.deprecated_relay_send == NULL);
+    TEST_ASSERT_INT_EQ(0, (int)trace.deprecated_relay_calls);
+    TEST_ASSERT_INT_EQ(1, module.initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(path));
 }
 
@@ -479,12 +488,10 @@ void test_media_module_rejects_stale_commands_and_status_has_no_secrets(void) {
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
         .station_ipv4 = 0x01020304,
-        .relay_url = "http://ha.local",
         .credentials_path = path,
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
-        .relay_send = module_send_relay,
         .context = &trace,
     };
 
@@ -496,8 +503,8 @@ void test_media_module_rejects_stale_commands_and_status_has_no_secrets(void) {
         DF_MEDIA_MODULE_COMMAND_STOP, 99, false, 110));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
     TEST_ASSERT_INT_EQ(1, status.available);
-    TEST_ASSERT_INT_EQ(0, strstr(status.state, "relay-secret") != NULL);
-    TEST_ASSERT_INT_EQ(0, strstr(status.failure, "relay-secret") != NULL);
+    TEST_ASSERT_INT_EQ(0, strstr(status.state, "rtsp-secret") != NULL);
+    TEST_ASSERT_INT_EQ(0, strstr(status.failure, "rtsp-secret") != NULL);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(path));
 }
@@ -509,10 +516,8 @@ void test_media_module_owns_config_loads_credentials_and_redacts_status(void) {
     char host[] = "ha.local";
     char stream[] = "doorfast_preview";
     char username[] = "doorfast";
-    char relay_url[] = "http://ha.local";
     char path[] = "/tmp/doorfast-media-module-XXXXXX";
-    const char contents[] =
-        "rtsp_password=rtsp-secret\nrelay_token=relay-secret\n";
+    const char contents[] = "rtsp_password=rtsp-secret\n";
     int descriptor = mkstemp(path);
     struct df_media_module_config_v2 config = {
         .enabled = true,
@@ -529,11 +534,11 @@ void test_media_module_owns_config_loads_credentials_and_redacts_status(void) {
         .fps = 10,
         .bitrate_kbps = 800,
         .profile = DF_MEDIA_PROFILE_BASELINE,
-        .relay_url = relay_url,
+        .deprecated_relay_url = "http://ha.local",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
-        .relay_send = module_send_relay,
+        .deprecated_relay_send = module_deprecated_relay_send,
         .context = &trace,
     };
 
@@ -547,15 +552,13 @@ void test_media_module_owns_config_loads_credentials_and_redacts_status(void) {
     memset(host, 'x', sizeof(host) - 1U);
     memset(stream, 'x', sizeof(stream) - 1U);
     memset(username, 'x', sizeof(username) - 1U);
-    memset(relay_url, 'x', sizeof(relay_url) - 1U);
     TEST_ASSERT_INT_EQ(0, strcmp("ha.local", module.config.go2rtc_host));
     TEST_ASSERT_INT_EQ(0, strcmp("doorfast_preview", module.config.stream_name));
     TEST_ASSERT_INT_EQ(0, strcmp("doorfast", module.config.rtsp_username));
-    TEST_ASSERT_INT_EQ(0, strcmp("http://ha.local", module.config.relay_url));
+    TEST_ASSERT_INT_EQ(1, module.config.deprecated_relay_url == NULL);
+    TEST_ASSERT_INT_EQ(1, module.callbacks.deprecated_relay_send == NULL);
     TEST_ASSERT_INT_EQ(0, strcmp("rtsp-secret",
         module.credentials.rtsp_password));
-    TEST_ASSERT_INT_EQ(0, strcmp("relay-secret",
-        module.credentials.relay_token));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
     TEST_ASSERT_INT_EQ(0, strstr(status.state, "secret") != NULL);
     TEST_ASSERT_INT_EQ(0, strstr(status.failure, "secret") != NULL);
@@ -571,7 +574,6 @@ void test_media_module_restarts_after_failure_with_new_generation(void) {
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
         .station_ipv4 = 0x01020304,
-        .relay_url = "",
         .credentials_path = "/tmp/doorfast-media-module-missing",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
@@ -611,11 +613,9 @@ void test_media_module_stop_ack_cleans_local_media(void) {
         .station = {0x32, 2, 1, 0, 2, 0},
         .station_ipv4 = 0x01020304U,
         .credentials_path = path,
-        .relay_url = "http://ha.local",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
-        .relay_send = module_send_relay,
         .context = &trace,
     };
 
@@ -631,8 +631,7 @@ void test_media_module_stop_ack_cleans_local_media(void) {
     TEST_ASSERT_INT_EQ(0, module.encoder.running ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 102U));
-    TEST_ASSERT_INT_EQ(1, (int)trace.count);
-    TEST_ASSERT_INT_EQ(0, strcmp("monitor_stopped", trace.entries[0]));
+    TEST_ASSERT_INT_EQ(0, (int)trace.count);
     TEST_ASSERT_INT_EQ(0, memcmp(module.monitor.local, local, sizeof(local)));
     TEST_ASSERT_INT_EQ(0, memcmp(module.monitor.station, station, sizeof(station)));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
@@ -649,11 +648,9 @@ void test_media_module_stop_timeout_cleans_local_media(void) {
         .station = {0x32, 2, 1, 0, 2, 0},
         .station_ipv4 = 0x01020304U,
         .credentials_path = path,
-        .relay_url = "http://ha.local",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
-        .relay_send = module_send_relay,
         .context = &trace,
     };
 
@@ -669,14 +666,11 @@ void test_media_module_stop_timeout_cleans_local_media(void) {
     TEST_ASSERT_INT_EQ(0, module.encoder.running ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, strcmp("stop_timeout", module.failure));
-    TEST_ASSERT_INT_EQ(1, (int)trace.count);
-    TEST_ASSERT_INT_EQ(0, strcmp("stop_timeout", trace.entries[0]));
+    TEST_ASSERT_INT_EQ(0, (int)trace.count);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(
         &module, 102U + DF_GVS_MONITOR_STOP_TIMEOUT_MS));
     TEST_ASSERT_INT_EQ(2, (int)module.monitor.generation);
     TEST_ASSERT_INT_EQ(0, module.failure[0]);
-    TEST_ASSERT_INT_EQ(1,
-        strstr(trace.last_json, "\"failure\":\"\"") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(path));
 }
@@ -697,11 +691,9 @@ void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void) {
         .station = {0x32, 2, 1, 0, 2, 0},
         .station_ipv4 = 0x01020304U,
         .credentials_path = path,
-        .relay_url = "http://ha.local",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
-        .relay_send = module_send_relay,
         .context = &trace,
     };
 
@@ -717,11 +709,7 @@ void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_FAILED, module.monitor.state);
     TEST_ASSERT_INT_EQ(0, strcmp("encoder_exited", module.failure));
     TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_relay_tick(&module.relay, 102U));
-    TEST_ASSERT_INT_EQ(1, (int)trace.count);
-    TEST_ASSERT_INT_EQ(0, strcmp("monitor_failed", trace.entries[0]));
-    TEST_ASSERT_INT_EQ(0,
-        strstr(trace.last_json, "monitor_stopped") != NULL ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, (int)trace.count);
     module.stop_encoder = df_media_encoder_stop;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(path));

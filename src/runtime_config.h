@@ -15,7 +15,6 @@
 #define DF_RUNTIME_MEDIA_HOST_MAX 64
 #define DF_RUNTIME_MEDIA_STREAM_MAX 65
 #define DF_RUNTIME_MEDIA_USERNAME_MAX 33
-#define DF_RUNTIME_MEDIA_RELAY_URL_MAX 256
 
 enum df_gvs_multicast_mode {
     DF_GVS_MULTICAST_AUTO = 0,
@@ -44,7 +43,6 @@ struct df_runtime_config {
     char media_go2rtc_host[DF_RUNTIME_MEDIA_HOST_MAX];
     char media_stream_name[DF_RUNTIME_MEDIA_STREAM_MAX];
     char media_rtsp_username[DF_RUNTIME_MEDIA_USERNAME_MAX];
-    char media_relay_url[DF_RUNTIME_MEDIA_RELAY_URL_MAX];
 };
 
 int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime);

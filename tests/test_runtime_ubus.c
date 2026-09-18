@@ -329,8 +329,6 @@ void test_runtime_ubus_keeps_bounded_redacted_event_log(void) {
         &service, 3, "event=unlock access_material=secret"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
         &service, 3, "event=media rtsp_password=secret"));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
-        &service, 3, "event=media relay_token=secret"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_ubus_log_get(&service,
                            DF_RUNTIME_UBUS_LOG_CAPACITY, &entry));
@@ -416,7 +414,6 @@ void test_runtime_ubus_media_controls_require_current_generation(void) {
             .generation = 7,
             .status_revision = 9,
             .queue_drops = 2,
-            .relay_failures = 1,
         },
     };
     struct df_runtime_media_module module = {
@@ -533,8 +530,6 @@ void test_runtime_ubus_media_credentials_preserve_blank_and_redact(void) {
     struct df_media_credentials_update update = {
         .set_rtsp_password = true,
         .rtsp_password = "secret-rtsp",
-        .set_relay_token = true,
-        .relay_token = "secret-relay",
     };
     unsigned sync_calls = 0;
 
@@ -551,18 +546,15 @@ void test_runtime_ubus_media_credentials_preserve_blank_and_redact(void) {
         df_runtime_ubus_read_media_status(&service, &status));
     TEST_ASSERT_INT_EQ(0, status.available);
     TEST_ASSERT_INT_EQ(1, status.rtsp_password_set);
-    TEST_ASSERT_INT_EQ(1, status.relay_token_set);
     TEST_ASSERT_INT_EQ(0, status.has_credential_text);
 
     memset(&update, 0, sizeof(update));
     update.set_rtsp_password = true;
     update.rtsp_password = "";
-    update.clear_relay_token = true;
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_update_media_credentials(&service, &update));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_credentials_load(path, &credentials));
     TEST_ASSERT_INT_EQ(0, strcmp("secret-rtsp", credentials.rtsp_password));
-    TEST_ASSERT_INT_EQ(0, credentials.relay_token[0]);
 
     update.clear_rtsp_password = true;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,

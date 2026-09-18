@@ -13,8 +13,7 @@ DF_MEDIA_MODULE_SOURCES:= \
 	$(PKG_BUILD_DIR)/src/media_capacity.c \
 	$(PKG_BUILD_DIR)/src/media_encoder.c \
 	$(PKG_BUILD_DIR)/src/media_frame_queue.c \
-	$(PKG_BUILD_DIR)/src/media_module.c \
-	$(PKG_BUILD_DIR)/src/media_relay.c
+	$(PKG_BUILD_DIR)/src/media_module.c
 define Package/doorfast
   SECTION:=net
   CATEGORY:=Network
@@ -89,6 +88,23 @@ endef
 
 define Package/doorfast/postinst
 #!/bin/sh
+migrate_media_credentials() {
+	credential_path="$${1:-/etc/doorfast/media-credentials}"
+	[ -f "$${credential_path}" ] || return 0
+	set -- $$(ls -ln "$${credential_path}")
+	[ "$${#}" -ge 4 ] || return 1
+	owner="$${3}"
+	group="$${4}"
+	temporary_path=$$(mktemp "$${credential_path}.tmp.XXXXXX") || return 1
+	trap 'rm -f "$${temporary_path}"' 0 HUP INT TERM
+	awk '/^rtsp_password=/{print; found=1; exit} END{if (!found) print "rtsp_password="}' \
+		"$${credential_path}" >"$${temporary_path}" || { rm -f "$${temporary_path}"; trap - 0 HUP INT TERM; return 1; }
+	chmod 0600 "$${temporary_path}" || { rm -f "$${temporary_path}"; trap - 0 HUP INT TERM; return 1; }
+	chown "$${owner}:$${group}" "$${temporary_path}" || { rm -f "$${temporary_path}"; trap - 0 HUP INT TERM; return 1; }
+	mv "$${temporary_path}" "$${credential_path}" || { rm -f "$${temporary_path}"; trap - 0 HUP INT TERM; return 1; }
+	temporary_path=''
+	trap - 0 HUP INT TERM
+}
 if ! group_exists doorfast; then
 	group_add_next doorfast >/dev/null
 	group_exists doorfast || exit 1
@@ -98,6 +114,7 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	chmod 0750 /etc/doorfast || exit 1
 fi
 if [ -z "$${IPKG_INSTROOT}" ] && [ "$${PKG_UPGRADE}" = "1" ]; then
+	migrate_media_credentials || exit 1
 	/etc/init.d/doorfast restart
 	/etc/init.d/doorfast-event-relay restart
 fi

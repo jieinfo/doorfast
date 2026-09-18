@@ -200,7 +200,6 @@ void test_runtime_media_builds_module_config_without_guessing_route(void) {
     runtime.config.media.stream_name = "doorfast_preview";
     runtime.config.media.rtsp_username = "doorfast";
     runtime.config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
-    runtime.config.media.relay_url = "";
     runtime.config.media.min_free_kib = 262144U;
     runtime.config.media.preview_timeout_s = 90U;
     runtime.config.media.first_frame_timeout_s = 6U;

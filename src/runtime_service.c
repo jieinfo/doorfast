@@ -413,7 +413,6 @@ int df_runtime_media_build_module_config(const struct df_runtime_config *runtime
     output->min_free_kib = media->min_free_kib;
     output->preview_timeout_s = media->preview_timeout_s;
     output->first_frame_timeout_s = media->first_frame_timeout_s;
-    output->relay_url = media->relay_url;
     return DF_OK;
 }
 

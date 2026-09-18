@@ -48,7 +48,6 @@
 #define DF_SEEN_MEDIA_PUBLISH_RETRIES (1ULL << 34)
 #define DF_SEEN_MEDIA_OVERLOAD_POLICY (1ULL << 35)
 #define DF_SEEN_MEDIA_DIAGNOSTICS (1ULL << 36)
-#define DF_SEEN_MEDIA_RELAY_URL (1ULL << 37)
 #define DF_SEEN_SYNC_MINI1_SECRETKEY (1ULL << 38)
 #define DF_SEEN_SYNC_MINI2_SECRETKEY (1ULL << 39)
 #define DF_SEEN_MULTICAST_MODE (1ULL << 40)
@@ -72,7 +71,6 @@ static void df_runtime_config_bind(struct df_runtime_config *runtime) {
     runtime->config.media.stream_name = runtime->media_stream_name;
     runtime->config.media.rtsp_username = runtime->media_rtsp_username;
     runtime->config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
-    runtime->config.media.relay_url = runtime->media_relay_url;
 }
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
@@ -546,12 +544,6 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_parse_boolean(value, &runtime->config.media.diagnostics);
     }
-    if (strcmp(name, "media_relay_url") == 0) {
-        option = DF_SEEN_MEDIA_RELAY_URL;
-        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
-        return df_copy_option(runtime->media_relay_url,
-                              sizeof(runtime->media_relay_url), value);
-    }
     return result;
 }
 
@@ -570,7 +562,7 @@ static int df_runtime_config_parse_into(const char *uci_text,
     while (*cursor != '\0') {
         char line[DF_RUNTIME_LINE_MAX];
         char name[64];
-        char value[DF_RUNTIME_MEDIA_RELAY_URL_MAX];
+        char value[DF_RUNTIME_LINE_MAX];
         const char *line_end = strchr(cursor, '\n');
         const char *trimmed;
         size_t line_length = line_end == NULL ? strlen(cursor) : (size_t)(line_end - cursor);

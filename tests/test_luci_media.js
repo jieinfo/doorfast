@@ -145,9 +145,8 @@ async function renderPage(values) {
         'media_rtsp_username', 'media_encoder', 'media_resolution',
         'media_fps', 'media_bitrate_kbps', 'media_profile',
         'media_min_free_kib', 'media_preview_timeout',
-        'media_first_frame_timeout', 'media_relay_url',
-        '_media_rtsp_password', '_media_clear_rtsp_password',
-        '_media_relay_token', '_media_clear_relay_token'
+        'media_first_frame_timeout', '_media_rtsp_password',
+        '_media_clear_rtsp_password'
     ]);
     assert.equal(byName('media_enabled').optionType, Flag);
     assert.equal(byName('media_station_address').validate(
@@ -162,33 +161,21 @@ async function renderPage(values) {
     assert.equal(byName('_media_rtsp_password').password, true);
     assert.equal(byName('_media_rtsp_password').cfgvalue('main'), '');
     assert.equal(byName('_media_rtsp_password').write('main', ''), undefined);
-    assert.equal(byName('_media_relay_token').password, true);
     assert.equal(byName('_media_clear_rtsp_password').cfgvalue('main'), '0');
-    assert.equal(byName('_media_clear_relay_token').cfgvalue('main'), '0');
-    assert.equal(byName('media_relay_url').validate(
-        'main', 'https://ha.local/api/doorfast/entry-1'), true);
-    assert.match(byName('media_relay_url').validate(
-        'main', 'https://ha.local/api/doorfast/entry-1?x=1'), /query/);
     assert.equal(source.includes("'media_rtsp_password'"), false);
-    assert.equal(source.includes("'media_relay_token'"), false);
     assert.doesNotMatch(statusSource, /media_enabled|media_credentials/);
 
     const credentialsDeclaration = rpcDeclarations.find(declaration =>
         declaration.method === 'media_credentials');
-    assert.deepEqual(credentialsDeclaration.params, [
-        'rtsp_password', 'relay_token', 'clear_rtsp_password',
-        'clear_relay_token'
-    ]);
+    assert.deepEqual(credentialsDeclaration.params,
+        ['rtsp_password', 'clear_rtsp_password']);
 
     resetTransaction();
-    rendered = await renderPage({
-        _media_rtsp_password: 'new-password',
-        _media_clear_relay_token: '1'
-    });
+    rendered = await renderPage({_media_rtsp_password: 'new-password'});
     await rendered.page.saveMedia(true);
     assert.deepEqual(rpcCalls.find(call => call.method === 'media_credentials'), {
         method: 'media_credentials',
-        args: ['new-password', '', false, true]
+        args: ['new-password', false]
     });
     assert.deepEqual(transactionLog,
         ['parse', 'uci', 'media_credentials', 'apply']);
@@ -203,33 +190,18 @@ async function renderPage(values) {
     rendered = await renderPage({_media_clear_rtsp_password: '1'});
     await rendered.page.saveMedia(false);
     assert.deepEqual(rpcCalls.at(-1), {
-        method: 'media_credentials', args: ['', '', true, false]
+        method: 'media_credentials', args: ['', true]
     });
     assert.deepEqual(transactionLog, ['parse', 'uci', 'media_credentials']);
 
     resetTransaction();
-    rendered = await renderPage({_media_clear_relay_token: '1'});
-    await rendered.page.saveMedia(false);
-    assert.deepEqual(rpcCalls.at(-1), {
-        method: 'media_credentials', args: ['', '', false, true]
+    rendered = await renderPage({
+        _media_rtsp_password: 'new-password',
+        _media_clear_rtsp_password: '1'
     });
-
-    for (const conflict of [
-        {
-            _media_rtsp_password: 'new-password',
-            _media_clear_rtsp_password: '1'
-        },
-        {
-            _media_relay_token: 'new-token',
-            _media_clear_relay_token: '1'
-        }
-    ]) {
-        resetTransaction();
-        rendered = await renderPage(conflict);
-        await assert.rejects(rendered.page.saveMedia(true), /不能同时填写并清除/);
-        assert.deepEqual(transactionLog, []);
-        assert.equal(rpcCalls.length, 0);
-    }
+    await assert.rejects(rendered.page.saveMedia(true), /不能同时填写并清除/);
+    assert.deepEqual(transactionLog, []);
+    assert.equal(rpcCalls.length, 0);
 
     resetTransaction();
     rendered = await renderPage({_media_rtsp_password: 'new-password'});
@@ -239,7 +211,7 @@ async function renderPage(values) {
     assert.equal(rpcCalls.length, 0);
 
     resetTransaction();
-    rendered = await renderPage({_media_relay_token: 'new-token'});
+    rendered = await renderPage({_media_rtsp_password: 'new-password'});
     credentialFailure = new Error('credential write failed');
     await assert.rejects(rendered.page.saveMedia(true), /credential write failed/);
     assert.deepEqual(transactionLog, ['parse', 'uci', 'media_credentials']);

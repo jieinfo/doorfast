@@ -238,7 +238,8 @@ void test_runtime_config_requires_valid_media_prerequisites(void) {
         "\toption indoor_netmask '255.0.0.0'\n"
         "\toption media_enabled '1'\n"
         "\toption media_station_address '32:02:01:00:02:00'\n"
-        "\toption media_go2rtc_host 'ha.local'\n";
+        "\toption media_go2rtc_host 'ha.local'\n"
+        "\toption media_relay_url 'https://legacy.invalid/ignored'\n";
     const char secret_in_uci[] =
         "config gvs 'main'\n"
         "\toption enabled '0'\n"

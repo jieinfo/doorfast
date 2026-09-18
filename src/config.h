@@ -42,7 +42,6 @@ struct df_media_config {
     const char *stream_name;
     const char *rtsp_username;
     const char *credentials_path;
-    const char *relay_url;
     uint16_t go2rtc_port;
     enum df_media_encoder encoder;
     enum df_media_resolution resolution;

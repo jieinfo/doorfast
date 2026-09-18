@@ -11,7 +11,6 @@
 #include "media_credentials.h"
 #include "media_encoder.h"
 #include "media_frame_queue.h"
-#include "media_relay.h"
 
 #define DF_MEDIA_MODULE_ABI_VERSION 2U
 #define DF_MEDIA_MODULE_STATE_MAX 24U
@@ -43,7 +42,7 @@ struct df_media_module_config_v2 {
     uint32_t min_free_kib;
     uint16_t preview_timeout_s;
     uint8_t first_frame_timeout_s;
-    const char *relay_url;
+    const char *deprecated_relay_url;
 };
 
 typedef int (*df_media_module_emit_control_fn)(
@@ -63,7 +62,7 @@ typedef int (*df_media_module_available_memory_fn)(uint64_t *available_kib,
 struct df_media_module_callbacks_v2 {
     df_media_module_emit_control_fn emit_control;
     df_media_module_resolve_route_fn resolve_route;
-    df_media_relay_send_fn relay_send;
+    int (*deprecated_relay_send)(const char *, const char *, const char *, void *);
     df_media_module_available_memory_fn available_memory;
     void *context;
 };
@@ -77,7 +76,7 @@ struct df_media_module_status {
     uint64_t generation;
     uint64_t status_revision;
     unsigned queue_drops;
-    unsigned relay_failures;
+    unsigned deprecated_relay_failures;
 };
 
 struct df_media_module {
@@ -86,13 +85,11 @@ struct df_media_module {
     struct df_gvs_monitor monitor;
     struct df_media_frame_queue queue;
     struct df_media_encoder_process encoder;
-    struct df_media_relay relay;
     struct df_media_credentials credentials;
     char go2rtc_host[DF_MEDIA_MODULE_HOST_MAX];
     char stream_name[DF_MEDIA_MODULE_STREAM_MAX];
     char rtsp_username[DF_MEDIA_MODULE_USERNAME_MAX];
     char credentials_path[256];
-    char relay_url[DF_MEDIA_RELAY_URL_MAX];
     df_media_module_encoder_start_fn start_encoder;
     df_media_module_encoder_stop_fn stop_encoder;
     bool queue_initialized;
@@ -141,5 +138,23 @@ struct df_media_module_api_v2 {
 };
 
 extern const struct df_media_module_api_v2 df_media_module_api_v2;
+
+#if UINTPTR_MAX == UINT64_MAX
+_Static_assert(sizeof(struct df_media_module_config_v2) == 96U,
+    "media ABI v2 config size changed");
+_Static_assert(offsetof(struct df_media_module_config_v2,
+    deprecated_relay_url) == 88U, "media ABI v2 config relay slot moved");
+_Static_assert(sizeof(struct df_media_module_callbacks_v2) == 40U,
+    "media ABI v2 callbacks size changed");
+_Static_assert(offsetof(struct df_media_module_callbacks_v2,
+    deprecated_relay_send) == 16U, "media ABI v2 callback relay slot moved");
+_Static_assert(sizeof(struct df_media_module_status) == 152U,
+    "media ABI v2 status size changed");
+_Static_assert(offsetof(struct df_media_module_status,
+    deprecated_relay_failures) == 148U, "media ABI v2 status relay slot moved");
+#endif
+_Static_assert(_Generic(((struct df_media_module_config_v2 *)0)->
+    deprecated_relay_url, const char *: 1, default: 0),
+    "media ABI v2 config relay slot type changed");
 
 #endif

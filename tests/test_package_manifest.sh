@@ -3,7 +3,8 @@ set -eu
 
 test -f package/doorfast/Makefile
 test -f package/doorfast-media/Makefile
-grep -Fq 'DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libcurl +ca-bundle +libx264' package/doorfast-media/Makefile
+grep -Fq 'DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libx264' package/doorfast-media/Makefile
+! grep -Fq 'libcurl' package/doorfast-media/Makefile
 grep -Fq '/usr/lib/doorfast/media-v2.so' package/doorfast-media/Makefile
 test "$(grep -Ec '^\s*\$\(INSTALL_(BIN|DATA|CONF)\)' package/doorfast-media/Makefile)" -eq 1
 ! find package/doorfast-media -name '*init*' -print -quit | grep .
@@ -11,7 +12,8 @@ grep -Fq -- '-fPIC -shared' package/doorfast-media/Makefile
 grep -Fq -- '-Wl,-z,defs' package/doorfast-media/Makefile
 grep -Fq 'gvs_video_reassembly.c' package/doorfast-media/Makefile
 grep -Fq 'media_module.c' package/doorfast-media/Makefile
-grep -Fq 'media_relay.c' package/doorfast-media/Makefile
+! grep -Fq 'media_relay.c' package/doorfast-media/Makefile
+! grep -Fq 'media_relay.h' package/doorfast-media/Makefile
 ! grep -Fq '$(wildcard $(PKG_BUILD_DIR)/src/*.c)' package/doorfast/Makefile
 grep -Fq '$(RM) $(DF_MEDIA_MODULE_SOURCES)' package/doorfast/Makefile
 test "$(grep -Fc '$(PKG_BUILD_DIR)/src/*.c' package/doorfast/Makefile)" -eq 2
@@ -144,6 +146,7 @@ grep -F "option media_enabled '0'" package/doorfast/files/doorfast.config
 grep -F "option media_go2rtc_port '8554'" package/doorfast/files/doorfast.config
 ! grep -Fq 'media_rtsp_password' package/doorfast/files/doorfast.config
 ! grep -Fq 'media_relay_token' package/doorfast/files/doorfast.config
+! grep -Fq 'media_relay_url' package/doorfast/files/doorfast.config
 ! grep -Fq 'media_publish_retries' package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-automation.config
 grep -F "config automation 'main'" package/doorfast/files/doorfast-automation.config

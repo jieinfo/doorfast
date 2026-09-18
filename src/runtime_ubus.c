@@ -370,9 +370,7 @@ static void df_ubus_add_media_status(struct blob_buf *buffer,
     blobmsg_add_u32(buffer, "effective_capacity", status->effective_capacity);
     blobmsg_add_u8(buffer, "encoder_running", status->encoder_running);
     blobmsg_add_u32(buffer, "queue_drops", status->queue_drops);
-    blobmsg_add_u32(buffer, "relay_failures", status->relay_failures);
     blobmsg_add_u8(buffer, "rtsp_password_set", status->rtsp_password_set);
-    blobmsg_add_u8(buffer, "relay_token_set", status->relay_token_set);
     if (status->failure[0] != '\0')
         blobmsg_add_string(buffer, "failure", status->failure);
 }
@@ -1221,19 +1219,10 @@ static int df_runtime_ubus_media_credentials_handler(
             update.rtsp_password = blobmsg_get_string(attribute);
             update.set_rtsp_password = update.rtsp_password[0] != '\0';
             seen |= 1U;
-        } else if (strcmp(name, "relay_token") == 0 && !(seen & 2U) &&
-                   blobmsg_type(attribute) == BLOBMSG_TYPE_STRING) {
-            update.relay_token = blobmsg_get_string(attribute);
-            update.set_relay_token = update.relay_token[0] != '\0';
-            seen |= 2U;
-        } else if (strcmp(name, "clear_rtsp_password") == 0 && !(seen & 4U) &&
+        } else if (strcmp(name, "clear_rtsp_password") == 0 && !(seen & 2U) &&
                    blobmsg_type(attribute) == BLOBMSG_TYPE_BOOL) {
             update.clear_rtsp_password = blobmsg_get_bool(attribute);
-            seen |= 4U;
-        } else if (strcmp(name, "clear_relay_token") == 0 && !(seen & 8U) &&
-                   blobmsg_type(attribute) == BLOBMSG_TYPE_BOOL) {
-            update.clear_relay_token = blobmsg_get_bool(attribute);
-            seen |= 8U;
+            seen |= 2U;
         } else {
             return UBUS_STATUS_INVALID_ARGUMENT;
         }
@@ -1256,9 +1245,7 @@ static const struct blobmsg_policy df_runtime_ubus_monitor_viewer_policy[] = {
 
 static const struct blobmsg_policy df_runtime_ubus_media_credentials_policy[] = {
     {.name = "rtsp_password", .type = BLOBMSG_TYPE_STRING},
-    {.name = "relay_token", .type = BLOBMSG_TYPE_STRING},
     {.name = "clear_rtsp_password", .type = BLOBMSG_TYPE_BOOL},
-    {.name = "clear_relay_token", .type = BLOBMSG_TYPE_BOOL},
 };
 
 static const struct ubus_method df_runtime_ubus_methods[] = {
@@ -1601,7 +1588,6 @@ int df_runtime_ubus_read_media_status(struct df_runtime_ubus *service,
         /* This ABI revision has one protocol-verified preview slot. */
         next.effective_capacity = module_status.available ? 1U : 0U;
         next.queue_drops = module_status.queue_drops;
-        next.relay_failures = module_status.relay_failures;
         (void)snprintf(next.state, sizeof(next.state), "%s",
             df_runtime_ubus_media_state_name(module_status.monitor_state));
         (void)snprintf(next.failure, sizeof(next.failure), "%s",
@@ -1613,7 +1599,6 @@ int df_runtime_ubus_read_media_status(struct df_runtime_ubus *service,
             service->media_credentials_path, &credentials_status) != DF_OK)
         return DF_ERR_IO;
     next.rtsp_password_set = credentials_status.rtsp_password_set;
-    next.relay_token_set = credentials_status.relay_token_set;
     next.has_credential_text = false;
     *status = next;
     return DF_OK;

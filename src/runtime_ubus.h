@@ -74,9 +74,7 @@ struct df_runtime_media_status {
     uint64_t status_revision;
     unsigned effective_capacity;
     unsigned queue_drops;
-    unsigned relay_failures;
     bool rtsp_password_set;
-    bool relay_token_set;
     bool has_credential_text;
 };
 

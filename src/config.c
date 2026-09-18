@@ -144,73 +144,6 @@ static bool df_media_stream_name_is_valid(const char *text) {
     return true;
 }
 
-static bool df_media_port_is_valid(const char *text) {
-    char *end = NULL;
-    unsigned long value;
-
-    if (!df_media_text_is_valid(text, 5U) ||
-        strspn(text, "0123456789") != strlen(text)) return false;
-    value = strtoul(text, &end, 10);
-    return end != text && *end == '\0' && value >= 1UL && value <= 65535UL;
-}
-
-static bool df_media_relay_url_is_valid(const char *url) {
-    const char *authority;
-    const char *path;
-    const char *port;
-    char host[64];
-    char port_text[6];
-    size_t authority_length;
-    size_t host_length;
-    size_t index;
-
-    if (url == NULL || url[0] == '\0') return true;
-    if (strncmp(url, "http://", 7U) == 0) authority = url + 7;
-    else if (strncmp(url, "https://", 8U) == 0) authority = url + 8;
-    else return false;
-    if (strlen(url) >= 256U) return false;
-    path = strchr(authority, '/');
-    authority_length = path == NULL ? strlen(authority) :
-        (size_t)(path - authority);
-    if (authority_length == 0U || authority_length > 69U) return false;
-    for (index = 0U; index < strlen(authority); index++) {
-        unsigned char value = (unsigned char)authority[index];
-
-        if (value < 0x21U || value > 0x7eU || value == '?' ||
-            value == '#' || value == '@') return false;
-    }
-    if (path != NULL) {
-        for (index = 0U; path[index] != '\0'; index++) {
-            unsigned char value = (unsigned char)path[index];
-
-            if (value < 0x21U || value > 0x7eU || value == '?' ||
-                value == '#' || value == '@') return false;
-        }
-    }
-    port = memchr(authority, ':', authority_length);
-    if (port != NULL && memchr(port + 1, ':',
-                               authority_length - (size_t)(port + 1 - authority)) != NULL)
-        return false;
-    if (port == NULL) {
-        if (authority_length >= sizeof(host)) return false;
-        memcpy(host, authority, authority_length);
-        host[authority_length] = '\0';
-        return df_media_host_is_valid(host);
-    }
-    host_length = (size_t)(port - authority);
-    if (host_length == 0 || host_length >= sizeof(host)) return false;
-    memcpy(host, authority, host_length);
-    host[host_length] = '\0';
-    if ((size_t)(port + 1 - authority) >= authority_length ||
-        authority_length - (size_t)(port + 1 - authority) >= sizeof(port_text))
-        return false;
-    memcpy(port_text, port + 1,
-           authority_length - (size_t)(port + 1 - authority));
-    port_text[authority_length - (size_t)(port + 1 - authority)] = '\0';
-    return df_media_host_is_valid(host) &&
-        df_media_port_is_valid(port_text);
-}
-
 static bool df_media_config_is_valid(const struct df_config *config) {
     const char *fps_values[] = {"5", "8", "10", "12", "15"};
     const struct df_media_config *media;
@@ -231,7 +164,6 @@ static bool df_media_config_is_valid(const struct df_config *config) {
         !df_media_identifier_is_valid(media->rtsp_username, 32U) ||
         media->credentials_path == NULL ||
         strcmp(media->credentials_path, DF_MEDIA_CREDENTIALS_PATH) != 0 ||
-        !df_media_relay_url_is_valid(media->relay_url) ||
         media->encoder < DF_MEDIA_ENCODER_AUTO || media->encoder > DF_MEDIA_ENCODER_QSV ||
         media->resolution < DF_MEDIA_RESOLUTION_SOURCE ||
         media->resolution > DF_MEDIA_RESOLUTION_240X320 ||
