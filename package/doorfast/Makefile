@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=52
+PKG_RELEASE:=53
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -18,7 +18,7 @@ define Package/doorfast
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Doorfast GVS integration daemon
-  DEPENDS:=+libpcap +libuci +libjson-c +libopenssl +libubus +libubox +libblobmsg-json +jsonfilter +ip-full
+  DEPENDS:=+libpcap +libuci +libjson-c +libopenssl +libubus +libubox +libblobmsg-json +jsonfilter +ip-full +ca-bundle
   USERID:=:doorfast
 endef
 

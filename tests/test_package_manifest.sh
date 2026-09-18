@@ -5,6 +5,7 @@ test -f package/doorfast/Makefile
 test -f package/doorfast-media/Makefile
 grep -Fq 'DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libx264' package/doorfast-media/Makefile
 ! grep -Fq 'libcurl' package/doorfast-media/Makefile
+grep -Eq 'DEPENDS:=.*\+ca-bundle' package/doorfast/Makefile
 grep -Fq '/usr/lib/doorfast/media-v2.so' package/doorfast-media/Makefile
 test "$(grep -Ec '^\s*\$\(INSTALL_(BIN|DATA|CONF)\)' package/doorfast-media/Makefile)" -eq 1
 ! find package/doorfast-media -name '*init*' -print -quit | grep .
@@ -47,7 +48,7 @@ test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/rel
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
-grep -q 'PKG_RELEASE:=16' package/luci-app-doorfast/Makefile
+grep -q 'PKG_RELEASE:=17' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
 grep -q 'preview media configuration' package/luci-app-doorfast/Makefile
 grep -Fq 'deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js' package/luci-app-doorfast/Makefile
@@ -122,6 +123,7 @@ grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
 grep -q 'sh tests/test_site_inventory.sh' .github/workflows/build-apk.yml
 grep -Fq 'node tests/test_luci_media.js' .github/workflows/build-apk.yml
+grep -Fq 'sh tests/test_media_credential_migration.sh' .github/workflows/build-apk.yml
 grep -Fq 'node tests/test_luci_deployment.js' .github/workflows/build-apk.yml
 grep -Fq 'node tests/test_luci_stations.js' .github/workflows/build-apk.yml
 ! grep -Fq 'node tests/test_luci_media_view.js' .github/workflows/build-apk.yml
@@ -163,8 +165,10 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=52' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=2' package/doorfast-media/Makefile
+grep -q 'PKG_RELEASE:=53' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=3' package/doorfast-media/Makefile
+doorfast_release=$(sed -n 's/^PKG_RELEASE:=//p' package/doorfast/Makefile)
+test "$doorfast_release" -gt 52
 grep -Fq "option token ''" package/doorfast/files/doorfast-events.config
 grep -Fq 'store_token "$token" "$token_file"' package/doorfast/files/doorfast-event-relay.init
 grep -Fq 'http://*) ;;' package/doorfast/files/doorfast-event-relay.init

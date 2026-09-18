@@ -149,6 +149,7 @@ void test_media_module_restarts_after_failure_with_new_generation(void);
 void test_media_module_stop_ack_cleans_local_media(void);
 void test_media_module_stop_timeout_cleans_local_media(void);
 void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void);
+void test_media_module_status_revision_tracks_public_snapshot_changes(void);
 void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void);
 void test_runtime_module_rejects_commands_when_unavailable(void);
 void test_runtime_module_rejects_incompatible_or_incomplete_api(void);
@@ -269,7 +270,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 168;
+    return 169;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -341,6 +342,7 @@ int main(int argc, char **argv) {
     test_media_module_stop_ack_cleans_local_media();
     test_media_module_stop_timeout_cleans_local_media();
     test_media_module_stop_cleanup_failure_is_not_reported_as_stopped();
+    test_media_module_status_revision_tracks_public_snapshot_changes();
     test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing();
     test_runtime_module_rejects_commands_when_unavailable();
     test_runtime_module_rejects_incompatible_or_incomplete_api();
@@ -356,7 +358,7 @@ int main(int argc, char **argv) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(168, test_suite_count());
+    TEST_ASSERT_INT_EQ(169, test_suite_count());
     test_runtime_id_encodes_random_bytes_and_validates_exact_lowercase_hex();
     test_runtime_id_clears_output_when_random_fill_fails_or_is_short();
     test_event_stream_serializes_exact_json();

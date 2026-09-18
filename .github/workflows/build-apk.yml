@@ -39,6 +39,7 @@ jobs:
             -o build/doorfast-pcm-http-acceptance-host
           python3 -B tests/run_doorfast_vm_pcm_http.py --isolated build/doorfast-pcm-http-acceptance-host
       - run: sh tests/test_site_inventory.sh
+      - run: sh tests/test_media_credential_migration.sh
       - run: sh tests/test_package_manifest.sh
       - run: sh tests/test_doorfast_http.sh
 

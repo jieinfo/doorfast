@@ -95,6 +95,11 @@ struct df_media_module {
     bool queue_initialized;
     bool initialized;
     uint64_t status_revision;
+    enum df_gvs_monitor_state revision_monitor_state;
+    uint64_t revision_generation;
+    unsigned revision_queue_drops;
+    bool revision_encoder_running;
+    char revision_failure[DF_MEDIA_MODULE_FAILURE_MAX];
     uint64_t preview_deadline_ms;
     char failure[DF_MEDIA_MODULE_FAILURE_MAX];
 };

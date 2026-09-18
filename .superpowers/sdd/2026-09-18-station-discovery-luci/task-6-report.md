@@ -28,6 +28,39 @@ Verification completed successfully:
 * `node tests/js/test_media_status.mjs`
 * `git diff --check`
 
+## Fix Round 1/5 Evidence
+
+The package releases now advance to `doorfast` 53, `doorfast-media` 3, and
+`luci-app-doorfast` 17. The main package owns the retained event relay's
+`+ca-bundle` dependency while the media package continues to omit `libcurl`.
+The manifest test asserts the release values and that the main release is
+newer than the base release 52. Host CI runs the credential migration test.
+
+The migration test now detects GNU and BSD `stat` modes, captures both output
+streams on success and failure, checks that credential values never appear,
+and injects `awk`, `chmod`, `chown`, and `mv` failures while verifying the
+original file remains intact and temporary files are removed. It passed on
+the host and under `alpine:3.20` BusyBox userland.
+
+`status_revision` now tracks the exported media snapshot fields: monitor
+state, generation, failure, encoder running state, and queue drops. A cached
+snapshot increments the revision exactly once for a changed public field and
+does not increment for hidden-only `media_ready` changes or repeated no-op
+updates. Unit coverage asserts viewer, encoder, queue, stop, timeout/failure,
+and no-op transitions individually.
+
+Fix-round verification:
+
+* `make clean && make test`
+* `sh tests/test_media_credential_migration.sh`
+* `docker run --rm -v <worktree>:/work -w /work alpine:3.20 sh tests/test_media_credential_migration.sh`
+* `sh tests/test_package_manifest.sh`
+* `sh tests/test_doorfast_init.sh`
+* `sh tests/test_event_relay_init.sh`
+* `node tests/test_luci_media.js`
+* `node tests/js/test_media_status.mjs`
+* `git diff --check`
+
 Targeted scans found no `trace.last_json`, `df_media_relay_tick`, or
 `module.relay` references in source or tests, and no media relay source is
 included in either package build.

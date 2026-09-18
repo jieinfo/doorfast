@@ -714,3 +714,82 @@ void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(path));
 }
+
+void test_media_module_status_revision_tracks_public_snapshot_changes(void) {
+    struct df_media_module module = {0};
+    struct df_media_module_status status = {0};
+    struct module_trace trace = {0};
+    char path[] = "/tmp/doorfast-media-revision-XXXXXX";
+    const struct df_media_module_config_v2 config = {
+        .enabled = true,
+        .local = {0x61, 2, 1, 1, 1, 1},
+        .station = {0x32, 2, 1, 0, 2, 0},
+        .station_ipv4 = 0x01020304U,
+        .credentials_path = path,
+    };
+    const struct df_media_module_callbacks_v2 callbacks = {
+        .emit_control = module_noop_control,
+        .context = &trace,
+    };
+    const uint8_t jpeg[] = {0xff, 0xd8, 0x01, 0xff, 0xd9};
+    unsigned index;
+
+    TEST_ASSERT_INT_EQ(DF_OK, module_write_credentials(path));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(
+        &module, &config, &callbacks, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(1, (int)status.status_revision);
+
+    module_set_running_media(&module, 1U, 100U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_command(&module,
+        DF_MEDIA_MODULE_COMMAND_VIEWER, 1U, true, 101U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(2, (int)status.status_revision);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_VIEWING, status.monitor_state);
+    TEST_ASSERT_INT_EQ(1, status.encoder_running ? 1 : 0);
+
+    module.monitor.media_ready = false;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 102U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(2, (int)status.status_revision);
+
+    module.encoder.running = false;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 103U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(3, (int)status.status_revision);
+    module.encoder.running = true;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 104U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(4, (int)status.status_revision);
+
+    for (index = 0; index <= DF_MEDIA_FRAME_QUEUE_CAPACITY; ++index) {
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_push(&module.queue,
+            jpeg, sizeof(jpeg), 1U, 105U + index));
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_command(&module,
+        DF_MEDIA_MODULE_COMMAND_VIEWER, 1U, true, 110U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(5, (int)status.status_revision);
+    TEST_ASSERT_INT_EQ(1, (int)status.queue_drops);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_command(&module,
+        DF_MEDIA_MODULE_COMMAND_VIEWER, 1U, true, 111U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(5, (int)status.status_revision);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_command(&module,
+        DF_MEDIA_MODULE_COMMAND_STOP, 1U, false, 112U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(6, (int)status.status_revision);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, status.monitor_state);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(
+        &module, 112U + DF_GVS_MONITOR_STOP_TIMEOUT_MS));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_status(&module, &status));
+    TEST_ASSERT_INT_EQ(7, (int)status.status_revision);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_IDLE, status.monitor_state);
+    TEST_ASSERT_INT_EQ(0, status.encoder_running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, strcmp("stop_timeout", status.failure));
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
+    TEST_ASSERT_INT_EQ(0, unlink(path));
+}
