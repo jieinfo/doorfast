@@ -106,7 +106,7 @@ jobs:
           ! grep -E -q '/etc/init.d/|/usr/sbin/' "$media_list"
           grep -Fxq '/usr/share/luci/menu.d/luci-app-doorfast.json' "$luci_list"
           ! grep -Fq 'gvs-peer-' "$doorfast_list" "$luci_list"
-      - name: Stage non-installed PCM acceptance executable
+      - name: Stage installable artifacts
         run: |
           mapfile -t sdk_dirs < <(find . -maxdepth 1 -type d -name 'immortalwrt-sdk-*' -print)
           test "${#sdk_dirs[@]}" -eq 1
@@ -120,12 +120,21 @@ jobs:
           mapfile -t doorfast_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'doorfast-[0-9]*.apk' -print)
           mapfile -t media_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'doorfast-media-*.apk' -print)
           mapfile -t luci_apks < <(find "$sdk_dir/bin/packages/x86_64/base" -maxdepth 1 -type f -name 'luci-app-doorfast-*.apk' -print)
+          mapfile -t ffmpeg_apks < <(find "$sdk_dir/bin/packages/x86_64/packages" -maxdepth 1 -type f -name 'ffmpeg-[0-9]*.apk' -print)
+          mapfile -t libffmpeg_apks < <(find "$sdk_dir/bin/packages/x86_64/packages" -maxdepth 1 -type f -name 'libffmpeg-full-[0-9]*.apk' -print)
+          mapfile -t libx264_apks < <(find "$sdk_dir/bin/packages/x86_64/packages" -maxdepth 1 -type f -name 'libx264-[0-9]*.apk' -print)
           test "${#doorfast_apks[@]}" -eq 1
           test "${#media_apks[@]}" -eq 1
           test "${#luci_apks[@]}" -eq 1
+          test "${#ffmpeg_apks[@]}" -eq 1
+          test "${#libffmpeg_apks[@]}" -eq 1
+          test "${#libx264_apks[@]}" -eq 1
           cp "${doorfast_apks[0]}" artifacts/doorfast.apk
           cp "${media_apks[0]}" artifacts/doorfast-media.apk
           cp "${luci_apks[0]}" artifacts/luci-app-doorfast.apk
+          cp "${ffmpeg_apks[0]}" artifacts/ffmpeg.apk
+          cp "${libffmpeg_apks[0]}" artifacts/libffmpeg-full.apk
+          cp "${libx264_apks[0]}" artifacts/libx264.apk
       - uses: actions/upload-artifact@v4
         with:
           name: doorfast-apk
@@ -133,5 +142,8 @@ jobs:
             artifacts/doorfast.apk
             artifacts/doorfast-media.apk
             artifacts/luci-app-doorfast.apk
+            artifacts/ffmpeg.apk
+            artifacts/libffmpeg-full.apk
+            artifacts/libx264.apk
             artifacts/doorfast-pcm-http-acceptance
           if-no-files-found: error

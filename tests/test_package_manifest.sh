@@ -160,11 +160,23 @@ assert 'test \"${#acceptance_files[@]}\" -eq 1' in workflow
 assert 'test \"${#doorfast_apks[@]}\" -eq 1' in workflow
 assert 'test \"${#media_apks[@]}\" -eq 1' in workflow
 assert 'test \"${#luci_apks[@]}\" -eq 1' in workflow
+assert 'test \"${#ffmpeg_apks[@]}\" -eq 1' in workflow
+assert 'test \"${#libffmpeg_apks[@]}\" -eq 1' in workflow
+assert 'test \"${#libx264_apks[@]}\" -eq 1' in workflow
+assert "-name 'ffmpeg-[0-9]*.apk'" in workflow
+assert "-name 'libffmpeg-full-[0-9]*.apk'" in workflow
+assert "-name 'libx264-[0-9]*.apk'" in workflow
+assert 'cp \"${ffmpeg_apks[0]}\" artifacts/ffmpeg.apk' in workflow
+assert 'cp \"${libffmpeg_apks[0]}\" artifacts/libffmpeg-full.apk' in workflow
+assert 'cp \"${libx264_apks[0]}\" artifacts/libx264.apk' in workflow
 upload = workflow.split('uses: actions/upload-artifact@v4', 1)[1]
 assert 'artifacts/doorfast-pcm-http-acceptance' in upload
 assert 'artifacts/doorfast.apk' in upload
 assert 'artifacts/doorfast-media.apk' in upload
 assert 'artifacts/luci-app-doorfast.apk' in upload
+assert 'artifacts/ffmpeg.apk' in upload
+assert 'artifacts/libffmpeg-full.apk' in upload
+assert 'artifacts/libx264.apk' in upload
 assert '**/bin/packages/' not in upload
 # Fresh idle daemons report zero generations; only talking/active statuses
 # require a nonzero, matching TX generation. Target blobmsg parsing runs in VM.
