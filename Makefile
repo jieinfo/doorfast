@@ -23,10 +23,12 @@ PCM_HTTP_TEST_SOURCES := src/pcm_http.c src/runtime_id.c src/pcm_http_main.c
 
 TEST_SOURCES += tests/test_gvs_priority.c src/gvs_priority.c
 TEST_SOURCES += tests/test_gvs_station.c src/gvs_station.c
+TEST_SOURCES += tests/test_gvs_station_discovery.c src/gvs_station_discovery.c
 TEST_SOURCES += src/station_registry.c
 TEST_SOURCES += tests/test_gvs_monitor.c src/gvs_monitor.c
 TEST_SOURCES += tests/test_gvs_peer_sim.c tests/support/gvs_peer_sim.c
 DAEMON_SOURCES += src/gvs_priority.c src/gvs_station.c
+DAEMON_SOURCES += src/gvs_station_discovery.c
 DAEMON_SOURCES += src/station_registry.c
 TEST_SOURCES += tests/test_gvs_call_dispatch.c src/gvs_call_dispatch.c
 TEST_SOURCES += tests/test_gvs_transport_policy.c src/gvs_transport_policy.c

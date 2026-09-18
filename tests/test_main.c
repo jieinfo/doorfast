@@ -109,6 +109,7 @@ void test_gvs_udp_sender_transmits_periodic_sync_and_counts_packets(void);
 void test_gvs_udp_sender_emits_exact_control_to_configured_route(void);
 void test_gvs_udp_sender_accepts_only_fresh_observed_preview_routes(void);
 void test_gvs_udp_sender_binds_configured_source_address(void);
+void test_gvs_udp_sender_broadcasts_exact_station_scan_frame(void);
 void test_gvs_udp_presence_treats_unsendable_presence_actions_as_local_only(void);
 void test_gvs_udp_sender_emits_elevator_request_to_observed_route(void);
 void test_gvs_udp_sender_emits_audio_to_observed_peer_port(void);
@@ -188,6 +189,9 @@ void test_gvs_identity_parses_and_filters_the_first_five_address_bytes(void);
 void test_gvs_identity_derives_network_addresses_and_indoor_peers(void);
 void test_gvs_station_parses_only_door_station_shape(void);
 void test_gvs_station_route_requires_fresh_discovery_reply(void);
+void test_gvs_station_scan_emits_exact_three_frame_intents(void);
+void test_gvs_station_discovery_strictly_admits_and_refreshes_replies(void);
+void test_gvs_station_discovery_evicts_least_recently_seen_candidate(void);
 void test_gvs_monitor_retries_captured_request_and_accepts_confirmation(void);
 void test_gvs_monitor_rejects_wrong_reply_and_marks_unconfirmed_response(void);
 void test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout(void);
@@ -265,7 +269,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 164;
+    return 168;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -355,7 +359,7 @@ int main(int argc, char **argv) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(164, test_suite_count());
+    TEST_ASSERT_INT_EQ(168, test_suite_count());
     test_runtime_id_encodes_random_bytes_and_validates_exact_lowercase_hex();
     test_runtime_id_clears_output_when_random_fill_fails_or_is_short();
     test_event_stream_serializes_exact_json();
@@ -387,6 +391,7 @@ int main(int argc, char **argv) {
     test_runtime_config_ignores_legacy_elevator_direction();
     test_gvs_udp_sender_emits_elevator_request_to_observed_route();
     test_gvs_udp_sender_binds_configured_source_address();
+    test_gvs_udp_sender_broadcasts_exact_station_scan_frame();
     test_gvs_udp_presence_treats_unsendable_presence_actions_as_local_only();
     test_gvs_udp_sender_emits_audio_to_observed_peer_port();
     test_gvs_multicast_prepares_group_from_local_identity();
@@ -525,6 +530,9 @@ int main(int argc, char **argv) {
     test_gvs_identity_derives_network_addresses_and_indoor_peers();
     test_gvs_station_parses_only_door_station_shape();
     test_gvs_station_route_requires_fresh_discovery_reply();
+    test_gvs_station_scan_emits_exact_three_frame_intents();
+    test_gvs_station_discovery_strictly_admits_and_refreshes_replies();
+    test_gvs_station_discovery_evicts_least_recently_seen_candidate();
     test_gvs_monitor_retries_captured_request_and_accepts_confirmation();
     test_gvs_monitor_rejects_wrong_reply_and_marks_unconfirmed_response();
     test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout();
