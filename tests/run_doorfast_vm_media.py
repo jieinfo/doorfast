@@ -220,7 +220,13 @@ umask 077
 tar -xf - -C "$root"
 test -s "$root/doorfast.apk"
 test -s "$root/doorfast-media.apk"
-opkg install "$root/doorfast.apk" "$root/doorfast-media.apk" >/dev/null
+if command -v apk >/dev/null 2>&1; then
+    apk add --allow-untrusted "$root/doorfast.apk" "$root/doorfast-media.apk" >/dev/null
+elif command -v opkg >/dev/null 2>&1; then
+    opkg install "$root/doorfast.apk" "$root/doorfast-media.apk" >/dev/null
+else
+    exit 127
+fi
 test -x /usr/sbin/doorfast
 '''
     child = subprocess.Popen([str(ssh), remote_script], stdin=subprocess.PIPE,
@@ -240,7 +246,7 @@ def _run_vm(ssh: Path, doorfast_apk: Path, media_apk: Path, output: Path) -> dic
     for apk in (doorfast_apk, media_apk):
         if not apk.is_file():
             raise RuntimeError(f"APK does not exist: {apk.name}")
-    install = _remote(ssh, "test -x /usr/bin/opkg || test -x /sbin/opkg")
+    install = _remote(ssh, "command -v apk >/dev/null 2>&1 || command -v opkg >/dev/null 2>&1")
     if install.returncode:
         raise RuntimeError("VM package manager is unavailable")
     _vm_install(ssh, doorfast_apk, media_apk)
