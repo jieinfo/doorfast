@@ -208,7 +208,7 @@ python3 -B tests/run_doorfast_vm_stations.py \
   tests/fixtures/fake-vm-preflight-ssh.sh
 ```
 
-该 runner 只证明软件接口、三次扫描请求、候选与已配置站点数量、revision、路由新鲜度和组播推导值；输出中的 `physical_registration` 与 `physical_actions` 固定为 `unconfirmed`，不代表物业系统已经注册，也不代表门口机、门锁或电梯已经动作。
+该 runner 只证明一次扫描生命周期的三帧发送结果（fixture 通过 `frames_sent=3` 暴露）、候选与已配置站点数量、ubus 与 `/api/v1/stations` 投影一致、revision、路由新鲜度和组播推导值；输出中的 `physical_registration` 与 `physical_actions` 固定为 `unconfirmed`，不代表物业系统已经注册，也不代表门口机、门锁或电梯已经动作。
 
 ## 来电、控制和 generation
 

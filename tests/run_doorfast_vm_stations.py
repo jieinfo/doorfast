@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Verify Doorfast station discovery and configured-station snapshots.
 
-The wrapper is intentionally read-only from the network's perspective. It
-requests three discovery bursts, reads the candidate cache and the configured
-station list, and records software-derived multicast values. Candidate replies
-are observations only; this runner never adopts or writes a station.
+The wrapper performs one active discovery request, reads the candidate cache
+and both configured-station projections, and records software-derived
+multicast values. Candidate replies are observations only; this runner never
+adopts or writes a station. The SSH fixture may expose ``frames_sent`` in the
+scan response so the acceptance can verify the complete three-frame burst.
 """
 
 from __future__ import annotations
@@ -16,11 +17,31 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+RUNTIME_ID_CHARS = set("0123456789abcdef")
+CANDIDATE_FIELDS = (
+    "logical_address", "ipv4", "first_seen_ms", "last_seen_ms",
+    "reply_count", "configured",
+)
+
+
+def valid_runtime_id(value: object) -> bool:
+    return (isinstance(value, str) and len(value) == 16 and
+            value == value.lower() and set(value) <= RUNTIME_ID_CHARS)
+
+
+def redact_station(value: dict) -> dict:
+    fields = ("id", "logical_address", "route_source", "route_fresh",
+              "monitorable", "last_seen_ms")
+    return {field: value.get(field) for field in fields}
+
 
 def remote(ssh: Path, command: str) -> str:
-    result = subprocess.run(
-        [str(ssh), command], text=True, capture_output=True, timeout=30
-    )
+    try:
+        result = subprocess.run(
+            [str(ssh), command], text=True, capture_output=True, timeout=30
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"VM command timed out: {command}") from error
     if result.returncode:
         raise RuntimeError(
             f"VM command failed ({result.returncode}): {command}: "
@@ -89,17 +110,19 @@ def run(ssh: Path, output: Path) -> dict:
     before = remote(ssh, "uci export network")
     status = remote_json(ssh, "ubus call doorfast status '{}'")
     runtime_id = status.get("runtime_id")
-    if not isinstance(runtime_id, str) or len(runtime_id) != 16:
+    if not valid_runtime_id(runtime_id):
         raise RuntimeError("status did not expose a valid runtime_id")
 
-    scans = []
-    for _ in range(3):
-        response = remote_json(ssh, "ubus call doorfast station_scan '{}'")
-        if response.get("runtime_id") != runtime_id or response.get("scheduled") is not True:
-            raise RuntimeError(f"station scan response mismatch: {response!r}")
-        scans.append({"scheduled": True})
+    response = remote_json(ssh, "ubus call doorfast station_scan '{}'")
+    if response.get("runtime_id") != runtime_id or response.get("scheduled") is not True:
+        raise RuntimeError(f"station scan response mismatch: {response!r}")
+    scan_sent = response.get("frames_sent")
+    if not isinstance(scan_sent, int) or scan_sent != 3:
+        raise RuntimeError("station scan did not report all three emitted frames")
     candidates = remote_json(ssh, "ubus call doorfast station_candidates '{}'")
     stations = remote_json(ssh, "ubus call doorfast stations '{}'")
+    http_stations = remote_json(
+        ssh, "wget -qO- http://127.0.0.1/cgi-bin/doorfast/api/v1/stations")
     if candidates.get("runtime_id") != runtime_id or stations.get("runtime_id") != runtime_id:
         raise RuntimeError("station response runtime_id changed during acceptance")
     candidate_rows = candidates.get("candidates")
@@ -108,13 +131,22 @@ def run(ssh: Path, output: Path) -> dict:
         raise RuntimeError("expected exactly three discovery candidates")
     if not isinstance(station_rows, list) or len(station_rows) != 2:
         raise RuntimeError("expected exactly two configured stations")
+    configured_candidates = []
+    unconfigured_candidates = []
+    redacted_candidates = []
     for candidate in candidate_rows:
         if not isinstance(candidate, dict):
             raise RuntimeError("candidate row is not an object")
-        for field in ("logical_address", "ipv4", "first_seen_ms", "last_seen_ms",
-                      "reply_count", "configured"):
+        if set(candidate) != set(CANDIDATE_FIELDS):
+            raise RuntimeError("candidate contains unexpected or missing fields")
+        for field in CANDIDATE_FIELDS:
             if field not in candidate:
                 raise RuntimeError(f"candidate is missing {field}")
+        redacted_candidates.append({field: candidate[field] for field in CANDIDATE_FIELDS})
+        (configured_candidates if candidate["configured"] else unconfigured_candidates).append(candidate)
+    if len(configured_candidates) != 2 or len(unconfigured_candidates) != 1:
+        raise RuntimeError("candidate/configured separation is invalid")
+    redacted_stations = []
     for station in station_rows:
         if not isinstance(station, dict):
             raise RuntimeError("configured station row is not an object")
@@ -124,6 +156,21 @@ def run(ssh: Path, output: Path) -> dict:
                 raise RuntimeError(f"configured station is missing {field}")
         if not isinstance(station["route_fresh"], bool):
             raise RuntimeError("route_fresh is not boolean")
+        redacted_stations.append(redact_station(station))
+    configured_addresses = {candidate["logical_address"] for candidate in configured_candidates}
+    station_addresses = {station["logical_address"] for station in station_rows}
+    if station_addresses != configured_addresses:
+        raise RuntimeError("configured station rows do not match configured candidates")
+    if unconfigured_candidates[0]["logical_address"] in station_addresses:
+        raise RuntimeError("unconfigured candidate leaked into configured stations")
+    if http_stations.get("runtime_id") != runtime_id:
+        raise RuntimeError("HTTP station list runtime_id mismatch")
+    http_rows = http_stations.get("stations")
+    if not isinstance(http_rows, list) or len(http_rows) != 2:
+        raise RuntimeError("HTTP station list does not contain exactly two stations")
+    http_addresses = {row.get("logical_address") for row in http_rows if isinstance(row, dict)}
+    if http_addresses != station_addresses:
+        raise RuntimeError("HTTP station list does not match configured stations")
 
     revision = stations.get("revision")
     if not isinstance(revision, int) or revision < 1:
@@ -136,9 +183,9 @@ def run(ssh: Path, output: Path) -> dict:
         "mode": "vm-software-acceptance",
         "network_unchanged": True,
         "multicast": multicast_snapshot(ssh),
-        "scan_sent": len(scans),
-        "candidates": candidate_rows,
-        "configured_stations": station_rows,
+        "scan_sent": scan_sent,
+        "candidates": redacted_candidates,
+        "configured_stations": redacted_stations,
         "configured_revision": revision,
         "physical_registration": "unconfirmed",
         "physical_actions": "unconfirmed",
