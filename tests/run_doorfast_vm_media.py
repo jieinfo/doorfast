@@ -168,7 +168,15 @@ def _redacted_media_status(raw: object, source: str) -> dict:
 def _remote_media_check(ssh: Path, output: Path, before_network: dict[str, str]) -> dict:
     status_result = _remote(ssh, "ubus call doorfast status '{}'")
     monitor_result = _remote(ssh, "ubus call doorfast monitor_status '{}'")
-    count_result = _remote(ssh, "pgrep -fc '[f]fmpeg' || true")
+    # ImmortalWrt images do not necessarily include procps/pgrep. Read the
+    # kernel's per-process comm files instead so this check only needs BusyBox
+    # shell and /proc, both of which are part of the base system.
+    count_result = _remote(
+        ssh,
+        "count=0; for comm in /proc/[0-9]*/comm; do "
+        "[ -r \"$comm\" ] || continue; read -r name <\"$comm\" || continue; "
+        "[ \"$name\" = ffmpeg ] && count=$((count + 1)); done; printf '%s\\n' \"$count\"",
+    )
     if status_result.returncode or monitor_result.returncode or count_result.returncode:
         raise RuntimeError("VM Doorfast status check failed")
     try:
