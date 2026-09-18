@@ -9,6 +9,8 @@ void test_runtime_config_parses_main_gvs_section(void) {
         "\toption enabled '1'\n"
         "\toption passive_interface 'vlan-door.42'\n"
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption multicast_mode 'auto'\n"
+        "\toption multicast_address ''\n"
         "\toption uplink_interface 'br-home'\n"
         "\toption access_material '0d753ea99003cd5d'\n"
         "\toption sync_mini1_secretkey 'mini-one'\n"
@@ -22,6 +24,8 @@ void test_runtime_config_parses_main_gvs_section(void) {
     TEST_ASSERT_INT_EQ(0, strcmp("gvs", runtime.config.brand));
     TEST_ASSERT_INT_EQ(0, strcmp("vlan-door.42", runtime.config.gvs_interface));
     TEST_ASSERT_INT_EQ(0, strcmp("IS:2-1-101-1", runtime.config.gvs_local_address));
+    TEST_ASSERT_INT_EQ(DF_GVS_MULTICAST_AUTO, runtime.multicast_mode);
+    TEST_ASSERT_INT_EQ(0, strcmp("", runtime.multicast_address));
     TEST_ASSERT_INT_EQ(0, strcmp("br-home", runtime.config.uplink_interface));
     TEST_ASSERT_INT_EQ(0, strcmp("0d753ea99003cd5d",
                                  runtime.config.access_material));
@@ -123,6 +127,16 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
         "\toption passive_only '0'\n"
         "\toption indoor_netmask '255.0.0.0'\n"
         "\toption call_elev '1'\n";
+    const char custom_multicast[] =
+        "config gvs 'main'\n"
+        "\toption enabled '0'\n"
+        "\toption multicast_mode 'custom'\n"
+        "\toption multicast_address '239.1.2.3'\n";
+    const char invalid_custom_multicast[] =
+        "config gvs 'main'\n"
+        "\toption enabled '0'\n"
+        "\toption multicast_mode 'custom'\n"
+        "\toption multicast_address '192.168.1.1'\n";
     struct df_runtime_config runtime;
 
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(duplicate, &runtime));
@@ -137,6 +151,13 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
                        df_runtime_config_parse(automatic_without_direction,
                                                &runtime));
     TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
+    TEST_ASSERT_INT_EQ(DF_OK,
+                       df_runtime_config_parse(custom_multicast, &runtime));
+    TEST_ASSERT_INT_EQ(DF_GVS_MULTICAST_CUSTOM, runtime.multicast_mode);
+    TEST_ASSERT_INT_EQ(0, strcmp("239.1.2.3", runtime.multicast_address));
+    TEST_ASSERT_INT_EQ(
+        DF_ERR_INVALID,
+        df_runtime_config_parse(invalid_custom_multicast, &runtime));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse("", &runtime));
 }
 

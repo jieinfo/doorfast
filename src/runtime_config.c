@@ -2,6 +2,7 @@
 #include "gvs_identity.h"
 
 #include <ctype.h>
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,8 @@
 #define DF_SEEN_MEDIA_RELAY_URL (1ULL << 37)
 #define DF_SEEN_SYNC_MINI1_SECRETKEY (1ULL << 38)
 #define DF_SEEN_SYNC_MINI2_SECRETKEY (1ULL << 39)
+#define DF_SEEN_MULTICAST_MODE (1ULL << 40)
+#define DF_SEEN_MULTICAST_ADDRESS (1ULL << 41)
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     memset(runtime, 0, sizeof(*runtime));
@@ -72,6 +75,7 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.media.rtsp_username = runtime->media_rtsp_username;
     runtime->config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
     runtime->config.media.relay_url = runtime->media_relay_url;
+    runtime->multicast_mode = DF_GVS_MULTICAST_AUTO;
     (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
                    "%s", "/etc/config/doorfast-sync");
     runtime->config.passive_only = true;
@@ -260,6 +264,21 @@ static int df_parse_media_overload_policy(const char *value,
     return DF_OK;
 }
 
+static int df_parse_multicast_mode(const char *value,
+                                   enum df_gvs_multicast_mode *output) {
+    if (strcmp(value, "auto") == 0) *output = DF_GVS_MULTICAST_AUTO;
+    else if (strcmp(value, "custom") == 0) *output = DF_GVS_MULTICAST_CUSTOM;
+    else return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static bool df_multicast_address_is_valid(const char *value) {
+    struct in_addr address;
+
+    return value != NULL && inet_pton(AF_INET, value, &address) == 1 &&
+           IN_MULTICAST(ntohl(address.s_addr));
+}
+
 static bool df_runtime_media_option_is_forbidden(const char *name) {
     if (strcmp(name, "media_credentials_path") == 0) return true;
     return strncmp(name, "media_", sizeof("media_") - 1U) == 0 &&
@@ -312,6 +331,17 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         option = DF_SEEN_GVS_ADDRESS;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_copy_option(runtime->gvs_local_address, sizeof(runtime->gvs_local_address), value);
+    }
+    if (strcmp(name, "multicast_mode") == 0) {
+        option = DF_SEEN_MULTICAST_MODE;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_multicast_mode(value, &runtime->multicast_mode);
+    }
+    if (strcmp(name, "multicast_address") == 0) {
+        option = DF_SEEN_MULTICAST_ADDRESS;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->multicast_address,
+                              sizeof(runtime->multicast_address), value);
     }
     if (strcmp(name, "indoor_ipaddr") == 0) {
         option = DF_SEEN_INDOOR_IPADDR;
@@ -576,6 +606,12 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
         }
     }
     if (!found_main) {
+        return DF_ERR_INVALID;
+    }
+    if ((runtime->multicast_mode == DF_GVS_MULTICAST_AUTO &&
+         runtime->multicast_address[0] != '\0') ||
+        (runtime->multicast_mode == DF_GVS_MULTICAST_CUSTOM &&
+         !df_multicast_address_is_valid(runtime->multicast_address))) {
         return DF_ERR_INVALID;
     }
     if (runtime->config.active_host) {

@@ -18,8 +18,12 @@ struct df_gvs_multicast {
 
 int df_gvs_multicast_prepare(struct df_gvs_multicast *, const uint8_t [6],
                              const char *);
+int df_gvs_multicast_prepare_group(struct df_gvs_multicast *, const char *,
+                                   const char *);
 int df_gvs_multicast_open(struct df_gvs_multicast *, const uint8_t [6],
                           const char *);
+int df_gvs_multicast_open_group(struct df_gvs_multicast *, const char *,
+                                const char *);
 void df_gvs_multicast_close(struct df_gvs_multicast *);
 
 #endif

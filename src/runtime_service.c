@@ -476,6 +476,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         .event_stream = &event_stream,
     };
     uint8_t identity[6];
+    char derived_multicast_group[DF_GVS_IPV4_TEXT_SIZE];
+    const char *effective_multicast_group;
     struct df_runtime_call_binding call_binding = {
         .control = &call_control,
         .session = &session,
@@ -496,6 +498,16 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     if (runtime == NULL || df_config_validate(&runtime->config) != DF_OK ||
         !runtime->config.enabled ||
         df_gvs_identity_parse(runtime->config.gvs_local_address, identity) != DF_OK) {
+        return DF_ERR_INVALID;
+    }
+    if (df_gvs_identity_multicast_ip(identity, derived_multicast_group) != DF_OK)
+        return DF_ERR_INVALID;
+    if (runtime->multicast_mode == DF_GVS_MULTICAST_AUTO &&
+        runtime->multicast_address[0] == '\0') {
+        effective_multicast_group = derived_multicast_group;
+    } else if (runtime->multicast_mode == DF_GVS_MULTICAST_CUSTOM) {
+        effective_multicast_group = runtime->multicast_address;
+    } else {
         return DF_ERR_INVALID;
     }
     {
@@ -567,8 +579,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         reply_send_attempt = df_gvs_udp_peer_reply_send_attempt;
         reply_send_context = &presence_context;
         reply_send_mode = "udp";
-        if (df_gvs_multicast_open(&multicast, identity,
-                                  runtime->config.indoor_ipaddr) != DF_OK) {
+        if (df_gvs_multicast_open_group(&multicast, effective_multicast_group,
+                                        runtime->config.indoor_ipaddr) != DF_OK) {
             df_gvs_udp_sender_close(&udp_sender);
             df_gvs_runtime_sync_stop(&sync);
             return DF_ERR_IO;
@@ -664,6 +676,11 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                  runtime->config.gvs_interface,
                  (runtime->config.passive_only && !runtime->config.active_host)
                      ? "passive" : "active_host");
+    (void)printf(
+        "doorfast: event=multicast_config mode=%s derived_group=%s "
+        "effective_group=%s\n",
+        runtime->multicast_mode == DF_GVS_MULTICAST_CUSTOM ? "custom" : "auto",
+        derived_multicast_group, effective_multicast_group);
     if (multicast.joined) {
         (void)printf("doorfast: event=multicast_joined group=%s port=%u\n",
                      multicast.group, (unsigned)multicast.port);
