@@ -86,3 +86,21 @@ void test_media_relay_retries_bounded_and_rejects_other_schemes(void) {
     TEST_ASSERT_INT_EQ(1, (int)df_media_relay_failed(&relay));
     df_media_relay_destroy(&relay);
 }
+
+void test_media_relay_accepts_home_assistant_path(void) {
+    struct relay_capture capture = {0};
+    struct df_media_relay relay = {0};
+    const struct df_media_relay_event event = {
+        .name = "monitor_publishing", .generation = 1,
+        .status_revision = 1, .timestamp_ms = 10, .state = "publishing",
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_relay_init(&relay,
+        "http://ha.local:8123/api/doorfast/entry-1", "token",
+        relay_capture_send, &capture));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_relay_enqueue(&relay, &event));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_relay_tick(&relay, 10));
+    TEST_ASSERT_INT_EQ(0, strcmp(
+        "http://ha.local:8123/api/doorfast/entry-1", capture.url));
+    df_media_relay_destroy(&relay);
+}

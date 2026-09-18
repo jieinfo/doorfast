@@ -8,7 +8,9 @@
 
 static bool df_media_relay_url_valid(const char *url) {
     const char *authority;
+    const char *path;
     size_t length;
+    size_t authority_length;
     size_t index;
 
     if (url == NULL) return false;
@@ -17,11 +19,14 @@ static bool df_media_relay_url_valid(const char *url) {
     else if (strncmp(url, "https://", 8U) == 0) authority = url + 8U;
     else return false;
     length = strlen(authority);
-    if (length == 0U || length >= DF_MEDIA_RELAY_URL_MAX ||
-        strpbrk(authority, "/?#@\r\n") != NULL) return false;
+    if (length == 0U || length >= DF_MEDIA_RELAY_URL_MAX) return false;
+    path = strchr(authority, '/');
+    authority_length = path == NULL ? length : (size_t)(path - authority);
+    if (authority_length == 0U) return false;
     for (index = 0U; index < length; index++) {
         unsigned char value = (unsigned char)authority[index];
-        if (value < 0x21U || value > 0x7eU) return false;
+        if (value < 0x21U || value > 0x7eU || value == '?' ||
+            value == '#' || value == '@') return false;
     }
     return true;
 }

@@ -141,27 +141,59 @@ static bool df_media_port_is_valid(const char *text) {
 
 static bool df_media_relay_url_is_valid(const char *url) {
     const char *authority;
+    const char *path;
     const char *port;
     char host[64];
+    char port_text[6];
     size_t authority_length;
     size_t host_length;
+    size_t index;
 
     if (url == NULL || url[0] == '\0') return true;
     if (strncmp(url, "http://", 7U) == 0) authority = url + 7;
     else if (strncmp(url, "https://", 8U) == 0) authority = url + 8;
     else return false;
-    authority_length = strlen(authority);
-    if (authority_length == 0 || authority_length > 69U ||
-        strpbrk(authority, "/?#@") != NULL) return false;
-    port = strrchr(authority, ':');
+    if (strlen(url) >= 256U) return false;
+    path = strchr(authority, '/');
+    authority_length = path == NULL ? strlen(authority) :
+        (size_t)(path - authority);
+    if (authority_length == 0U || authority_length > 69U) return false;
+    for (index = 0U; index < strlen(authority); index++) {
+        unsigned char value = (unsigned char)authority[index];
+
+        if (value < 0x21U || value > 0x7eU || value == '?' ||
+            value == '#' || value == '@') return false;
+    }
+    if (path != NULL) {
+        for (index = 0U; path[index] != '\0'; index++) {
+            unsigned char value = (unsigned char)path[index];
+
+            if (value < 0x21U || value > 0x7eU || value == '?' ||
+                value == '#' || value == '@') return false;
+        }
+    }
+    port = memchr(authority, ':', authority_length);
+    if (port != NULL && memchr(port + 1, ':',
+                               authority_length - (size_t)(port + 1 - authority)) != NULL)
+        return false;
     if (port == NULL) {
-        return df_media_host_is_valid(authority);
+        if (authority_length >= sizeof(host)) return false;
+        memcpy(host, authority, authority_length);
+        host[authority_length] = '\0';
+        return df_media_host_is_valid(host);
     }
     host_length = (size_t)(port - authority);
     if (host_length == 0 || host_length >= sizeof(host)) return false;
     memcpy(host, authority, host_length);
     host[host_length] = '\0';
-    return df_media_host_is_valid(host) && df_media_port_is_valid(port + 1);
+    if ((size_t)(port + 1 - authority) >= authority_length ||
+        authority_length - (size_t)(port + 1 - authority) >= sizeof(port_text))
+        return false;
+    memcpy(port_text, port + 1,
+           authority_length - (size_t)(port + 1 - authority));
+    port_text[authority_length - (size_t)(port + 1 - authority)] = '\0';
+    return df_media_host_is_valid(host) &&
+        df_media_port_is_valid(port_text);
 }
 
 static bool df_media_config_is_valid(const struct df_config *config) {

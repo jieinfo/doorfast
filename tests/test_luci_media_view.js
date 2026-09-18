@@ -144,8 +144,12 @@ const page = {...dashboard};
         'main', 'http://ha.local:65535'), true);
     assert.match(byName('media_relay_url').validate(
         'main', 'http://ha.local:65536'), /端口/);
+    assert.equal(byName('media_relay_url').validate(
+        'main', 'https://ha.local/api/doorfast/entry-1'), true);
     assert.match(byName('media_relay_url').validate(
-        'main', 'https://ha.local/api'), /路径/);
+        'main', 'https://ha.local/api/doorfast/entry-1?x=1'), /query/);
+    assert.match(byName('media_relay_url').validate(
+        'main', 'https://ha.local/api/doorfast/entry-1#fragment'), /fragment/);
     assert.equal(source.includes("'media_rtsp_password'"), false);
     assert.equal(source.includes("'media_relay_token'"), false);
 
