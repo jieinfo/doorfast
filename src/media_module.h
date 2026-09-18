@@ -12,7 +12,8 @@
 #include "media_encoder.h"
 #include "media_frame_queue.h"
 
-#define DF_MEDIA_MODULE_ABI_VERSION 2U
+#define DF_MEDIA_MODULE_ABI_VERSION 3U
+#define DF_MEDIA_MODULE_ABI_VERSION_V2 2U
 #define DF_MEDIA_MODULE_STATE_MAX 24U
 #define DF_MEDIA_MODULE_FAILURE_MAX 96U
 #define DF_MEDIA_MODULE_HOST_MAX 64U
@@ -22,6 +23,46 @@
 enum df_media_module_command {
     DF_MEDIA_MODULE_COMMAND_STOP = 1,
     DF_MEDIA_MODULE_COMMAND_VIEWER,
+};
+
+enum df_media_session_purpose {
+    DF_MEDIA_SESSION_PREVIEW = 0,
+    DF_MEDIA_SESSION_CALL,
+};
+
+enum df_media_call_policy {
+    DF_MEDIA_CALL_PREEMPT_OLDEST_PREVIEW = 0,
+    DF_MEDIA_CALL_PRESERVE_PREVIEWS,
+};
+
+struct df_media_station_config_v3 {
+    const char *id;
+    const char *stream_name;
+};
+
+struct df_media_module_config_v3 {
+    const struct df_media_station_config_v3 *stations;
+    size_t station_count;
+    size_t max_encoders;
+    enum df_media_call_policy incoming_call_policy;
+};
+
+struct df_media_session_key {
+    const char *station_id;
+    uint64_t generation;
+};
+
+struct df_media_session_status_v3 {
+    struct df_media_session_key key;
+    enum df_media_session_purpose purpose;
+    bool active;
+};
+
+struct df_media_module_status_v3 {
+    /* Caller-owned output array; query required_session_count first. */
+    size_t required_session_count;
+    size_t session_count;
+    struct df_media_session_status_v3 *sessions;
 };
 
 struct df_media_module_config_v2 {
@@ -58,6 +99,31 @@ typedef int (*df_media_module_encoder_start_fn)(
     const struct df_media_credentials *, uint64_t generation);
 typedef int (*df_media_module_available_memory_fn)(uint64_t *available_kib,
     void *context);
+
+struct df_media_module_callbacks_v3 {
+    df_media_module_emit_control_fn emit_control;
+    df_media_module_resolve_route_fn resolve_route;
+    df_media_module_available_memory_fn available_memory;
+    void *context;
+};
+
+struct df_media_module_api_v3 {
+    uint32_t abi_version;
+    size_t struct_size;
+    void *(*create)(const struct df_media_module_config_v3 *,
+                    const struct df_media_module_callbacks_v3 *);
+    void (*destroy)(void *);
+    int (*start)(void *, const char *, enum df_media_session_purpose,
+                 uint64_t, uint64_t);
+    int (*command)(void *, enum df_media_module_command,
+                   const struct df_media_session_key *, bool, uint64_t);
+    int (*receive_control)(void *, const struct df_gvs_frame *,
+                           uint32_t, uint64_t);
+    int (*push_jpeg)(void *, const uint8_t[6], const uint8_t[6], uint32_t,
+                     const uint8_t *, size_t, uint16_t, uint16_t, uint64_t);
+    int (*tick)(void *, uint64_t);
+    int (*status)(const void *, struct df_media_module_status_v3 *);
+};
 
 struct df_media_module_callbacks_v2 {
     df_media_module_emit_control_fn emit_control;
@@ -157,6 +223,8 @@ _Static_assert(sizeof(struct df_media_module_status) == 152U,
     "media ABI v2 status size changed");
 _Static_assert(offsetof(struct df_media_module_status,
     deprecated_relay_failures) == 148U, "media ABI v2 status relay slot moved");
+_Static_assert(sizeof(struct df_media_module_api_v3) == 80U,
+    "media ABI v3 API size changed");
 #endif
 _Static_assert(_Generic(((struct df_media_module_config_v2 *)0)->
     deprecated_relay_url, const char *: 1, default: 0),
