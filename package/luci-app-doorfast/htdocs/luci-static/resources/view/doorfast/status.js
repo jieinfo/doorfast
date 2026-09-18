@@ -92,9 +92,14 @@ function validateRelayUrl(sectionId, value) {
 
     if (value === '')
         return true;
-    match = /^https?:\/\/([A-Za-z0-9](?:[A-Za-z0-9.-]{0,61}[A-Za-z0-9])?)(?::([0-9]{1,5}))?$/.exec(value);
-    if (match === null)
-        return 'relay 地址必须是 http:// 或 https:// 的主机地址，可带端口但不能包含路径。';
+    match = /^https?:\/\/([A-Za-z0-9](?:[A-Za-z0-9.-]{0,61}[A-Za-z0-9])?)(?::([0-9]{1,5}))?(\/[^\x00-\x20?#@\x7f-\uffff]*)?$/.exec(value);
+    if (match === null) {
+        if (value.indexOf('?') !== -1)
+            return 'relay 地址不能包含 query。';
+        if (value.indexOf('#') !== -1)
+            return 'relay 地址不能包含 fragment。';
+        return 'relay 地址必须是 http:// 或 https:// 的主机地址，可带端口和 HA 入口路径，但不能包含用户信息。';
+    }
     if (match[2] !== undefined) {
         port = Number(match[2]);
         if (!Number.isSafeInteger(port) || port < 1 || port > 65535)
@@ -199,7 +204,7 @@ function buildMediaMap(page) {
     option.value('main', 'Main');
 
     option = addMediaOption(section, form.Value, 'media_relay_url', '媒体事件 relay 地址（可选）',
-        '填写 http:// 或 https:// 的主机地址，可带端口但不能包含路径。relay 令牌单独保存。');
+        '填写 http:// 或 https:// 的主机地址，可带端口和 HA 事件入口路径，但不能包含 query 或 fragment。relay 令牌单独保存。');
     option.rmempty = true;
     option.validate = validateRelayUrl;
 

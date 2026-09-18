@@ -133,6 +133,7 @@ void test_media_encoder_requires_resolved_encoder_and_builds_hardware_argv(void)
 void test_media_encoder_tracks_source_and_fixed_output_dimensions_separately(void);
 void test_media_relay_accepts_http_and_redacts_event_payload(void);
 void test_media_relay_retries_bounded_and_rejects_other_schemes(void);
+void test_media_relay_accepts_home_assistant_path(void);
 void test_media_module_preempts_with_control_before_event(void);
 void test_media_module_restarts_encoder_when_source_dimensions_change(void);
 void test_media_module_encoder_exit_fails_generation_and_cleans_media(void);
@@ -315,6 +316,7 @@ int main(int argc, char **argv) {
     test_media_encoder_tracks_source_and_fixed_output_dimensions_separately();
     test_media_relay_accepts_http_and_redacts_event_payload();
     test_media_relay_retries_bounded_and_rejects_other_schemes();
+    test_media_relay_accepts_home_assistant_path();
     test_media_module_preempts_with_control_before_event();
     test_media_module_restarts_encoder_when_source_dimensions_change();
     test_media_module_encoder_exit_fails_generation_and_cleans_media();
