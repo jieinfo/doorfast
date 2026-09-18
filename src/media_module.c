@@ -90,6 +90,25 @@ static int df_media_module_cleanup_media(struct df_media_module *module) {
     return result;
 }
 
+static int df_media_module_handle_encoder_exit(struct df_media_module *module,
+    uint64_t generation, uint64_t now_ms) {
+    if (module == NULL || generation == 0U) return DF_ERR_INVALID;
+    if (!module->encoder.encoder_exited) return DF_OK;
+    if (module->monitor.state == DF_GVS_MONITOR_FAILED &&
+        strcmp(module->failure, "encoder_exited") == 0) {
+        df_media_module_queue_destroy(module);
+        return DF_OK;
+    }
+    module->monitor.state = DF_GVS_MONITOR_FAILED;
+    module->monitor.failure = DF_GVS_MONITOR_FAILURE_NONE;
+    module->monitor.media_ready = false;
+    df_media_module_set_failure(module, "encoder_exited");
+    df_media_module_queue_destroy(module);
+    if (df_media_module_emit_event(module, "monitor_failed", generation,
+            now_ms) != DF_OK) return DF_ERR_IO;
+    return DF_OK;
+}
+
 static int df_media_module_report_cleanup_failure(struct df_media_module *module,
     uint64_t generation, uint64_t now_ms) {
     if (module == NULL || generation == 0U) return DF_ERR_INVALID;
@@ -320,8 +339,16 @@ int df_media_module_push_jpeg(struct df_media_module *module,
     }
     if (df_media_frame_queue_pop(&module->queue, &frame) == DF_OK) {
         int status = df_media_encoder_write_frame(&module->encoder, &frame);
-        if (status != DF_OK && status != DF_MEDIA_ENCODER_RETRY) return status;
+        if (status != DF_OK && status != DF_MEDIA_ENCODER_RETRY) {
+            if (module->encoder.encoder_exited &&
+                df_media_module_handle_encoder_exit(module, generation,
+                    timestamp_ms) != DF_OK) return DF_ERR_IO;
+            return status;
+        }
     }
+    if (module->encoder.encoder_exited &&
+        df_media_module_handle_encoder_exit(module, generation,
+            timestamp_ms) != DF_OK) return DF_ERR_IO;
     return DF_OK;
 }
 
@@ -373,12 +400,22 @@ int df_media_module_tick(struct df_media_module *module, uint64_t now_ms) {
     }
     if (df_media_encoder_is_running(&module->encoder)) {
         (void)df_media_encoder_tick(&module->encoder, now_ms);
-        if (df_media_frame_queue_pop(&module->queue, &frame) == DF_OK) {
+        if (module->encoder.encoder_exited) {
+            if (df_media_module_handle_encoder_exit(module, generation,
+                    now_ms) != DF_OK) return DF_ERR_IO;
+        } else if (df_media_frame_queue_pop(&module->queue, &frame) == DF_OK) {
             int status = df_media_encoder_write_frame(&module->encoder, &frame);
-            if (status != DF_OK && status != DF_MEDIA_ENCODER_RETRY)
+            if (status != DF_OK && status != DF_MEDIA_ENCODER_RETRY) {
                 df_media_module_set_failure(module, "encoder_exited");
+                if (module->encoder.encoder_exited &&
+                    df_media_module_handle_encoder_exit(module, generation,
+                        now_ms) != DF_OK) return DF_ERR_IO;
+            }
         }
     }
+    if (module->encoder.encoder_exited &&
+        df_media_module_handle_encoder_exit(module, generation,
+            now_ms) != DF_OK) return DF_ERR_IO;
     relay_status = df_media_relay_tick(&module->relay, now_ms);
     return relay_status == DF_ERR_IO ? DF_OK : relay_status;
 }
