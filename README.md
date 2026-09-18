@@ -1,122 +1,582 @@
 # Doorfast
 
-现场串联学习部署请先阅读 [现场部署步骤](docs/doorfast-inline-field-deployment.md)。
-APK 不会创建透明桥；软件桥或整机故障会中断 MT8157，必须保留人工直连回退线。
+Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的 GVS 可视门禁适配服务。它提供被动观察、主机模式呼叫与控制、双向音频、视频接收、主动预览、Home Assistant 事件接入，以及现场部署取证工具。
 
-协议开发以用户指定的 MT8157 厂商交付数据集为依据。数据来源、功能映射和证据
-使用规则见 [MT8157 厂商数据参考矩阵](docs/mt8157-vendor-reference-matrix.md)。
-本地厂商数据不提交到公共仓库，项目只提交可复核的来源标识、匿名化字段和测试。
+> **文档规则：本 README 是项目能力、配置、接口、验证状态和后续工作的唯一权威文档。** 仓库不再维护并行的计划、设计或进度 Markdown。`docs/` 中可以保留带明确标识的抓包、逆向、来源和验收证据记录，但其中的历史状态与下一步不构成当前项目结论。功能变化必须同时更新本文件；若文档与代码冲突，以已合并代码和可复现测试为准。
 
-Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的原生门禁网络观察与集成服务。
-它以透明抓包、GVS 会话归一化、脱敏审计和事件通知为起点，替代旧 Doorlink
-部署中的非开源、MIPS 专用和授权依赖部分。
+> **现场边界：协议报文已成功提交或收到协议确认，不等于门锁、电梯、门口机或物业平台已实际执行。** 本文分别记录代码接线、测试、材料交叉验证和实体设备闭环，禁止用前三者代替实机结论。
 
-> 默认保持被动观察；启用 `active_host` 后可发送已进入事务队列的控制、在线和同步报文。没有实体设备
-> 的开发环境可以完整验证配置、PCAP 回放、解析和策略，但不能凭空证明现场控制兼容性。
+本文基于 2026-09-18 对 `origin/main@13666b4` 的全仓库复核，覆盖 `src/`、3 个 APK 配方、LuCI、init 脚本、CLI、HTTP/ubus/Unix 接口、全部测试和 CI。此前“主程序只构造并排队控制报文”的描述已经过时：呼叫、开锁、召梯、音频和视频主链路都已接入生产 UDP；在线身份维护仍有明确缺口，见“已知限制”。
 
-## 当前能力
+## 安全和部署前提
 
-最终目标和阶段验收见[完整主机模式与 APK 项目规划](docs/doorfast-host-mode-roadmap.md)。
-按当前已合并代码逐项核对的结果见[当前能力与验证状态](docs/current-capability-status.md)。
-当前主程序已具备常驻服务、主动 UDP 控制和同步、呼叫信令、直接开锁、手动及来电自动召梯、视频快照、音频接收和上行音频核心；所有主动动作和媒体仍需逐项完成实体设备验收。
+- 软件包和主机模式默认关闭。首次安装不会猜测网口、逻辑身份、IP、子网掩码或门禁材料。
+- 被动模式只抓包，不给门禁网口绑定室内机 IP；主机模式会临时给指定网口添加室内机 IP，并主动发送 GVS UDP。
+- 透明串联桥由管理员提前配置。Doorfast 只检查和观察，不创建桥、不修改路由、防火墙、DHCP 或 RA。
+- CGI 控制桥自身不实现 Bearer Token 鉴权，应只允许受信管理网或经 Home Assistant 代理访问，禁止直接暴露到 WAN。
+- 厂商材料和 PCAP 是实现依据之一，但可能不完整或不准确。任何主动能力都必须以现场双向抓包和实体结果继续验证。
+- 现场串联可能中断原 MT8157。部署时必须保留物理直连回退方案，并先运行只读预检。
 
-- 已有 x86_64 ImmortalWrt 25.12.1 APK 构建配方与 CI；当前代码的目标安装运行仍需阶段验证。
-- 读取并校验 Doorfast 的基础配置模型。
-- 可通过 `--config` 对管理员明确选择的物理口、VLAN、bridge 或 bond 持续捕获 GVS 控制流量；接口名称不会预设为 `eth0` 或 `wlan0`。
-- 实时服务与离线回放共用 GVS 接收事务处理器，可观察来电、摘机交换、进入通话、时间同步、挂断、振铃抢占和空闲超时；主机模式还可发送来电回执、接听、挂断与保活报文。
-- 运行中捕获失效会结束当前会话并进行 5 次有限退避重开；连续失败后退出并由 procd 按策略处理。
-- 已实现 GVS 公共头解析、逻辑身份过滤及结束原因统计，并有合成和混合回放测试。
-- 直接开锁、手动向上/向下召梯、来电自动向上召梯和电梯状态查询已经接入运行服务；协议完成与实体动作确认分别报告。
-- UDP/8302 音频接收、增量 WAV 发布、会话绑定的 PCM 到 G.711 A-law 上行发送，以及 UDP/8303 JPEG 分片重组和最新画面发布已经接入运行服务。
-- 来电、通话建立、挂断、超时和抢占事件通过 generation 绑定的本地 Unix socket 发布；可选 relay 经 HTTPS 推送到 `doorfastforha`，HA 的五秒状态轮询继续兜底。
-- 生成经管理员审批才可使用的发现候选项。
-- 对自动化策略生成可审计的“允许 / 拒绝 / 延迟”决定。
+## 证据等级
 
-## GVS 接口配置
+本文的能力矩阵使用以下等级：
 
-软件包默认保持停用，也不会猜测本机接口。管理员需要为门禁网络和（可选）上行网络
-显式选择可用的本机接口名，例如物理口、VLAN、bridge 或 bond：
+| 等级 | 含义 | 能证明什么 |
+|---|---|---|
+| L1 生产接线 | 功能从主守护进程连接到真实 socket、文件、进程或系统接口 | 运行时会执行该代码路径 |
+| L2 测试验证 | 单元、CLI、HTTP、回放或 ImmortalWrt VM 验证通过 | 实现与测试模型一致 |
+| L3 材料交叉验证 | 厂商资料、反编译结果或现场 PCAP 支持字段和方向 | 协议推断有外部证据 |
+| L4 实机闭环 | 实体门口机、门锁、电梯或物业系统完成端到端动作 | 现场兼容性成立 |
+
+矩阵中的“部分”表示只覆盖了该等级的一部分，不可提升为更高等级。
+
+## 系统结构
+
+```mermaid
+flowchart LR
+    station["门口机 / 物业 GVS 网络"]
+    daemon["doorfast 守护进程"]
+    ubus["ubus 与 CGI API"]
+    event["Unix 事件流"]
+    relay["事件 relay"]
+    media["doorfast-media"]
+    ffmpeg["FFmpeg H.264 编码"]
+    go2rtc["Home Assistant go2rtc"]
+    ha["doorfastforha"]
+    luci["LuCI"]
+
+    station <-- "UDP 8300 控制" --> daemon
+    station <-- "UDP 8302 G.711 A-law" --> daemon
+    station -- "UDP 8303 JPEG 分片" --> daemon
+    daemon --> ubus
+    daemon --> event --> relay --> ha
+    luci --> ubus
+    ubus --> ha
+    daemon --> media --> ffmpeg --> go2rtc --> ha
+```
+
+单次守护进程运行期间以 `generation` 隔离呼叫、控制和媒体。新来电、抢占、挂断或超时会使旧 generation 的操作失效，避免把旧按钮、旧音频或旧画面提交到新会话。守护进程重启后 generation 会从 1 重新计数；`runtime_id` 可区分不同运行实例，但当前普通 HTTP/ubus 控制请求尚未强制携带它，见“已知限制和未完成项”。
+
+## 软件包
+
+| APK | 当前版本 | 内容 | 架构 |
+|---|---|---|---|
+| `doorfast` | `0.1.0-r51` | 守护进程、记录器、事件 relay、PCM HTTP/CLI、CGI 桥、init/UCI、站点清单工具 | x86_64 |
+| `doorfast-media` | `0.1.0-r1` | 可选的 `/usr/lib/doorfast/media-v1.so`，由主守护进程 `dlopen()`；不安装独立服务 | x86_64 |
+| `luci-app-doorfast` | `0.1.0-r14` | 状态、媒体、自动化、部署、HA relay 和日志页面 | all |
+
+`doorfast-media` 中的 `.so` 是本项目为 ImmortalWrt 编译的原生共享模块，不是 Android APK 内提取的二进制。
+
+GitHub Actions 使用校验过 SHA-256 的官方 ImmortalWrt 25.12.1 x86_64 SDK，依次运行主机测试并构建这 3 个 APK。CI 产物还包含仅用于验收的 `doorfast-pcm-http-acceptance`，该文件不会安装到路由器。
+
+## 当前能力矩阵
+
+| 能力 | 当前实现 | L1 | L2 | L3 | L4 |
+|---|---|---:|---:|---:|---:|
+| 被动抓包与 VLAN-aware UDP 提取 | 指定物理口、VLAN、bridge 或 bond；失效后有限重试 | 是 | 是 | 是 | 部分 |
+| GVS 身份与寻址 | 校验 `IS:楼栋-单元-房间-分机`，推导单播 IP、组播组和室内机 peer | 是 | 是 | 是 | 否 |
+| 主机网口生命周期 | 独立主机网口、临时地址添加/删除、UDP 源地址绑定、UDP/8300 组播加入 | 是 | 是 | 是 | 否 |
+| 来电 | 解析 `03/01`，建立 generation，发送 `03/81` 回执，处理抢占和超时 | 是 | 是 | 是 | 否 |
+| 接听 | 发送 `03/03`，跟踪重试和 `03/83` 确认 | 是 | 是 | 是 | 否 |
+| 挂断 | 发送 `03/02`，跟踪重试和 `03/82` 确认 | 是 | 是 | 是 | 否 |
+| 通话保活 | 发送和接收 `03/51`、`03/52`，维护通话状态 | 是 | 是 | 是 | 否 |
+| 直接开锁 | 使用 8 字节门禁材料发送 `04/09`，解析 `04/89` | 是 | 是 | 是 | 否 |
+| 手动召梯 | 向上/向下发送 `08/02`，解析 `08/82` | 是 | 是 | 部分 | 否 |
+| 自动召梯 | 每个来电 generation 最多自动向上召梯一次；LuCI 可开关，默认关闭 | 是 | 是 | 部分 | 否 |
+| 电梯状态 | 周期发送 `08/03`，解析 `08/83` 和轿厢状态 | 是 | 是 | 部分 | 否 |
+| 下行音频 | 接收 UDP/8302 G.711 A-law，统计丢包/重复/乱序，发布增量 WAV | 是 | 是 | 是 | 否 |
+| 上行音频 | generation 绑定的 PCM 经 A-law 编码，以 8 kHz、160 样本/20 ms 发送 UDP/8302 | 是 | 是 | 是 | 否 |
+| 通话视频 | 接收 UDP/8303 JPEG 分片，重组、校验、识别尺寸并发布最新帧 | 是 | 是 | 是 | 否 |
+| 主动预览 | 发送 `03/04`，处理 `03/84`/`03/50`，用 `03/02` 停止 | 是 | 是 | 部分 | 否 |
+| H.264/WebRTC 前置链路 | JPEG 经 FFmpeg 的 libx264/VAAPI/QSV 发布到预创建的 go2rtc RTSP 流 | 是 | 是 | 不适用 | 不适用 |
+| 本地事件流 | `/var/run/doorfast/events.sock` 发布带 event ID 和 generation 的 JSONL | 是 | 是 | 不适用 | 不适用 |
+| HA 事件 relay | HTTP/HTTPS、队列、重连、退避、令牌文件和轮询兜底 | 是 | 是 | 不适用 | 不适用 |
+| LuCI | 状态/媒体、来电自动化、部署配置、HA relay、内存日志 | 是 | 是 | 不适用 | 不适用 |
+| 透明串联取证 | 只读预检、轮转 PCAP、元数据、空间保护、前后站点清单比对 | 是 | 是 | 不适用 | 不适用 |
+| 在线 peer 回复 | `07/81` 可序列化，但生产 reply queue 仍写入内存 sender | 否 | 是 | 是 | 否 |
+| 周期同步 | `91/03` 可序列化并有测试，生产运行时没有调用发送 | 否 | 是 | 是 | 否 |
+
+### 已经接入真实 UDP 的控制路径
+
+下列路径不是只停留在序列化器或内存队列：
+
+- 来电回执 `03/81`。
+- 接听 `03/03`、接听确认 `03/83`。
+- 挂断 `03/02`、挂断确认 `03/82`。
+- 通话握手/保活 `03/51` 和 `03/52`。
+- 直接开锁 `04/09`、协议结果 `04/89`。
+- 手动和自动召梯 `08/02`、协议确认 `08/82`。
+- 电梯状态查询 `08/03`、状态响应 `08/83`。
+- G.711 A-law 上行音频 UDP/8302。
+- 主动预览请求 `03/04` 和停止 `03/02`。
+
+所有控制帧使用运行时厂商随机字段/变换字段。普通呼叫、开锁和召梯控制优先使用已观察到的 peer IPv4；该表项当前没有时间戳或过期机制，未命中时才根据目标逻辑身份推导 IPv4。主动预览使用另一张带时间戳的 station 路由表：抓包学习的地址只在 60 秒内有效，也可使用明确配置的门口机 IP 作为回退。`status` 中的 `physical_result_confirmed` 对开锁和召梯保持为 `false`，因为协议成功不能证明机械动作。
+
+## 安装与启动
+
+将同一次 CI 或 Release 生成的 APK 安装到 ImmortalWrt 25.12.1 x86_64：
+
+```sh
+apk add --allow-untrusted ./doorfast.apk ./luci-app-doorfast.apk
+# 需要主动 H.264 预览时再安装：
+apk add --allow-untrusted ./doorfast-media.apk
+```
+
+安装后服务仍保持关闭。通过 LuCI 的“服务 → Doorfast → 部署配置”设置模式和网口，或编辑 `/etc/config/doorfast`，然后执行：
+
+```sh
+/etc/init.d/doorfast enable
+/etc/init.d/doorfast restart
+ubus call doorfast status
+```
+
+修改 `doorfast` 或 `doorfast-automation` 后，init reload 会停止旧实例、清理临时主机地址并按新配置启动。
+
+## 配置被动观察
+
+被动模式适合保留原 MT8157，并从镜像口或透明串联接口观察。门禁接口可以继续保持 OpenWrt 的“无协议”状态；Doorfast 不为其绑定室内机 IP。
 
 ```uci
 config gvs 'main'
-	option enabled '0'
-	option gvs_interface 'br-door'
+	option enabled '1'
+	option passive_interface 'eth2'
+	option host_interface ''
 	option gvs_local_address 'IS:2-1-101-1'
-	option uplink_interface 'br-lan'
 	option passive_only '1'
 	option active_host '0'
 	option capture_promiscuous '0'
+	option sync_state_path '/etc/config/doorfast-sync'
 ```
 
-被动观察时保持 `passive_only '1'`。P1 离线/受控主机模式可设置 `active_host '1'`，并将
-`enabled` 改为 `1`；该模式会启用 UDP/8300 主动发送，并按
-[厂商公共头算法](docs/gvs-vendor-header-provider.md)为每个报文生成随机字段及其变换值，
-但仍必须在隔离网络和目标设备逐项验收后再接入生产。`gvs_local_address` 使用
-`IS:楼栋-单元-房间-分机` 格式，例如 `IS:2-1-101-1`；它仅用于本机入站帧筛选。
-Doorfast 不会修改网络、路由或防火墙；主动发送仅针对由会话状态机提交的控制事务。
-修改 `/etc/config/doorfast` 后执行 `/etc/init.d/doorfast reload` 会停止旧实例并按新配置启动。
+`gvs_local_address` 仍是必填项，用于只接纳发给本室内机的帧。`capture_promiscuous` 仅在交换网络和抓包拓扑确实需要时开启。
 
-## Home Assistant 主动事件
+## 配置主机模式
 
-事件 relay 默认关闭。将 Home Assistant 长期访问令牌写入 `/etc/doorfast/ha-token`，文件必须由 root 所有且权限为 `0600`；随后在 `/etc/config/doorfast-events` 设置 HTTPS authority、HA 配置项 ID 和 CA 文件。relay 固定投递到 `/api/doorfast/<entry_id>`，不会把 token 放入命令行或日志。事件失败不会阻塞 Doorfast 主服务，HA 仍使用状态轮询修复遗漏状态。
+主机模式用于 Doorfast 取代原 MT8157 的网络身份。它与被动模式使用独立的 `host_interface`，不会沿用被动网口选择。
 
-VM 验收可运行：
+```uci
+config gvs 'main'
+	option enabled '1'
+	option passive_interface ''
+	option host_interface 'eth2'
+	option gvs_local_address 'IS:2-1-101-1'
+	option indoor_ipaddr ''
+	option indoor_netmask '255.255.255.0'
+	option uplink_interface 'br-lan'
+	option passive_only '0'
+	option active_host '1'
+	option capture_promiscuous '0'
+	option access_material ''
+	option sync_state_path '/etc/config/doorfast-sync'
+```
+
+主机模式规则：
+
+- `gvs_local_address` 必须匹配 `IS:楼栋-单元-房间-分机`。楼栋为 1–99、单元为 1–9、楼层为 1–63、房号为 1–32、分机为 1–4，例如 `IS:2-1-101-1`。
+- `indoor_ipaddr` 留空时按 GVS 身份推导；手动填写时覆盖推导值。当前实现不会等待物业系统通过专用配置协议下发 IP。
+- `indoor_netmask` 必须按现场原室内机填写。现有材料不足以可靠推导通用掩码，因此不会自动猜测。
+- init 脚本把 `IP/掩码` 临时添加到 `host_interface`，守护进程将 UDP sender 绑定到该 IP；停服时删除临时地址。
+- 守护进程按身份推导组播地址，加入对应 UDP/8300 组。
+- `access_material` 是直接开锁报文使用的 8 字节材料，以 16 个十六进制字符填写。留空时开锁控制不可用，不生成默认值。
+- `uplink_interface` 仅标识可选的管理/上行接口，不改变门禁网口。
+
+主机模式的当前最大风险不是 IP 添加，而是完整在线身份流程尚未闭环：冷启动后物业系统能否识别 Doorfast、能否将来电正确送达，仍需完成 `07/81` 和 `91/03` 生产发送并做现场验证。
+
+## 来电、控制和 generation
+
+`ubus call doorfast status` 是运行状态的权威入口。来电创建 generation；接听、挂断和开锁都要求提交当前 generation，同一守护进程运行期间的旧 generation 会被拒绝。召梯操作由服务生成独立 transaction ID。状态中的 16 位十六进制 `runtime_id` 标识本次守护进程运行，但普通控制接口当前不校验该字段，因此客户端在重启后必须丢弃缓存的 generation 并重新读取状态。
+
+常用 ubus 方法：
+
+| 方法 | 参数 | 返回语义 |
+|---|---|---|
+| `status` | `{}` | 同步、呼叫、开锁、电梯、音频、视频和媒体状态 |
+| `logs` | `{}` | 最多 128 条内存日志；重启后清空 |
+| `answer` | `generation`、`primary_media_port`、`secondary_media_port`、`duration_seconds` | `queued=true` 只表示已进入发送事务 |
+| `hangup` | `generation`、`reason` | `queued=true` 只表示已进入发送事务 |
+| `unlock` | `generation` | `submitted=true` 只表示协议事务已提交 |
+| `call_elevator` | `direction=up|down` | 返回 transaction ID，不宣称电梯已动作 |
+| `monitor_start` | `{}` | 返回新的预览 generation 和 `queued` 状态 |
+| `monitor_stop` | `generation` | 只停止匹配的预览 |
+| `monitor_viewer` | `generation`、`active` | 更新当前 generation 的观看者状态 |
+| `monitor_status` | `{}` | 返回媒体模块状态 |
+| `media_credentials` | 密码/令牌写入或清除字段 | 保存 root-only 凭据，不回显明文 |
+
+示例：
 
 ```sh
-python3 tests/run_doorfast_vm_event_relay.py /absolute/path/to/vm/ssh.sh
+status="$(ubus call doorfast status)"
+generation="$(printf '%s' "$status" | jsonfilter -e '@.call.generation')"
+
+ubus call doorfast answer \
+  "{\"generation\":$generation,\"primary_media_port\":8303,\"secondary_media_port\":8302,\"duration_seconds\":60}"
+ubus call doorfast unlock "{\"generation\":$generation}"
+ubus call doorfast call_elevator '{"direction":"up"}'
+ubus call doorfast hangup "{\"generation\":$generation,\"reason\":0}"
 ```
 
-脚本使用一次性测试 CA 和 token，检查 HTTPS 投递、首次断开后的重试、组和 socket 权限，以及网络和防火墙配置保持不变。
+来电自动向上召梯位于 LuCI 的“来电自动化”页，配置保存在 `/etc/config/doorfast-automation`。默认关闭；启用后每个来电 generation 最多提交一次向上召梯。
 
-## 透明串联部署预检查
+## HTTP 接口
 
-APK 会安装一份默认关闭的 `/etc/config/doorfast-deployment`。填写实际的无地址网桥、
-门禁上联口、MT8157 下联口和独立管理口后，运行：
+CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端调用约定；PCM 与 monitor 路由会校验 `REQUEST_METHOD`，普通 status、控制及音视频快照路由当前只按路径分派，不能把表中的方法写法当作安全边界。
+
+| 方法和路径 | 用途 |
+|---|---|
+| `GET /api/v1/status` | 转发 `ubus doorfast status` |
+| `POST /api/v1/answer` | 接听；请求 JSON 与 ubus 参数相同 |
+| `POST /api/v1/hangup` | 挂断 |
+| `POST /api/v1/unlock` | 开锁 |
+| `POST /api/v1/call_elevator` | 向上/向下召梯 |
+| `GET /api/v1/video/latest.jpg?generation=N` | 当前 generation 的最新 JPEG，支持 ETag |
+| `GET /api/v1/audio/latest.wav?generation=N&after=R` | 增量 WAV；`after` 是上一 revision |
+| `POST /api/v1/audio/session?runtime=R&generation=N` | 获取独占 PCM producer lease |
+| `POST /api/v1/audio/submit.pcm?runtime=R&generation=N&sequence=S` | 提交 1–5 个 320 字节 PCM 帧 |
+| `POST /api/v1/audio/session/end?runtime=R&generation=N` | 结束 PCM producer session |
+| `POST /api/v1/monitor/start` | 启动主动预览 |
+| `POST /api/v1/monitor/stop` | 停止匹配 generation 的预览 |
+| `POST /api/v1/monitor/viewer` | 报告观看者进入或离开 |
+| `GET /api/v1/monitor/status` | 获取媒体状态 |
+
+PCM 为 little-endian signed 16-bit、单声道、8 kHz；每帧 160 样本/320 字节。session 打开后返回 `audio_session`，后续请求通过 `X-Doorfast-Audio-Session` 传递。lease 为 2 秒，每次成功提交会续期；序号必须连续，部分批次成功会返回已接受前缀和下一序号，调用方应从该位置恢复。
+
+HTTP producer 同一时间只允许一个请求在途。请求超时或失败后必须丢弃该旧请求的完整 body，既不重放已确认的前缀，也不重放未确认的后缀；先按服务返回的 `next_sequence` 对齐，再从新采集的音频继续。`runtime_id` 或 generation 改变时必须立即结束采集并清空本地缓冲。
+
+本地低层入口也可发送单帧：
+
+```sh
+# stdin 必须恰好为 320 字节 PCM
+doorfast-pcm-submit "$generation" < frame.pcm
+```
+
+本地入口是非阻塞 Unix datagram socket `/var/run/doorfast-audio.sock`，每个 datagram 必须恰好 336 字节：偏移 0 是 8 字节 `DFPCM01\0`，偏移 8 是 8 字节 little-endian 非零 generation，偏移 16 是 320 字节 PCM。服务每次调度最多检查 32 个 datagram，并保留消息边界。创建端只删除既有 socket，不会替换普通文件；发送端必须核对目标确为当前有效用户拥有、权限为 `0600` 的 socket。
+
+## 音视频和主动预览
+
+### 通话媒体
+
+- UDP/8302 接收 G.711 A-law，记录 sequence、丢包、重复和迟到包，并保留最近 4 个增量 WAV chunk。
+- 本地 `/var/run/doorfast-audio.sock` 只接受当前 talking generation 的 160 样本 PCM，编码后发往已观察到的对端音频路由。
+- UDP/8303 只接纳当前 generation 且来源/目标匹配的媒体，完成 JPEG 分片重组、结构校验和尺寸提取。
+- 最新 JPEG 默认发布到 `/tmp/doorfast-latest.jpg`；HTTP 读取时再次核对 generation、帧号和长度，避免读取到切换中的文件。
+
+这些路径已完成单元和 VM 验证，但真实扬声器播放、麦克风回声、时延、抖动及长时间稳定性尚未通过实体设备验收。
+
+### 主动预览到 Home Assistant
+
+主动预览要求：
+
+1. 主机模式已启用。
+2. 安装 `doorfast-media`。
+3. 从抓包或物业设备表获得精确门口机逻辑地址；它不能由室内机 GVS 身份推导。
+4. Home Assistant/go2rtc 已预创建与 `media_stream_name` 相同的 RTSP 发布入口。
+5. LuCI 中配置 go2rtc 主机、端口、编码器、帧率、码率和凭据。
+
+go2rtc 最小配置示例：
+
+```yaml
+streams:
+  doorfast_preview:
+
+rtsp:
+  listen: ":8554"
+  username: doorfast
+  password: ${DOORFAST_RTSP_PASSWORD}
+  default_query: "video=h264"
+```
+
+Doorfast 需要访问 Home Assistant/go2rtc 的 `8554/TCP` 来发布 RTSP；HA WebRTC 查看端通常还需要访问 `8555/TCP+UDP`。go2rtc 的 `1984/TCP` 是管理 API，应保持鉴权并仅限管理网络访问。
+
+运行链路为：发送 `03/04` → 等待 `03/84` → 接收 JPEG → 启动受监督的 FFmpeg → 通过 RTSP/TCP 发布 H.264 → HA 由 go2rtc 提供 WebRTC。来电会先抢占主动预览；停止时发送 `03/02`，处理 `03/82` 或本地超时，并回收 FFmpeg 子进程。
+
+编码器选项：
+
+- `auto`：探测启动环境后一次性选择 Intel QSV，其次 VAAPI，否则选择软件 libx264；已选 FFmpeg 启动失败时不会继续尝试其他编码器。
+- `software`：libx264，`veryfast` + `zerolatency`。
+- `vaapi`：`h264_vaapi`，使用 `/dev/dri/renderD128`。
+- `qsv`：`h264_qsv`。
+
+分辨率支持源尺寸、480x640、360x480 和 240x320；帧率支持 5、8、10、12、15 FPS；目标码率允许 256–2000 Kbps；Profile 支持 Baseline 和 Main。凭据保存在 `/etc/doorfast/media-credentials`，页面不会回显已保存值，修改后需重启 Doorfast 才进入运行模块。
+
+当前 ABI 只允许 1 条主动预览编码流。以下 UCI 字段已经解析并校验，但尚未传入运行媒体模块，当前修改它们不会改变运行行为：
+
+- `media_max_encoders`
+- `media_min_free_kib`
+- `media_preview_timeout`
+- `media_first_frame_timeout`
+- `media_publish_retries`
+- `media_overload_policy`
+- `media_diagnostics`
+
+当前实际监控常量为：请求间隔 1000 ms、最多 3 次请求、首帧超时 8000 ms、停止确认超时 1000 ms。文档和 LuCI 中存在配置项不代表它已经生效。
+
+## Home Assistant 集成
+
+配套集成位于 [jieinfo/doorfastforha](https://github.com/jieinfo/doorfastforha)。HA 负责展示、交互和下发指令；ImmortalWrt 负责门禁协议、媒体接收、编码和转发。
+
+### 呼叫事件 relay
+
+主守护进程在 `/var/run/doorfast/events.sock` 发布以下 JSONL 事件：
+
+- `incoming_call`
+- `call_established`
+- `hangup`
+- `timeout`
+- `preempted`
+
+事件包含 `schema_version=1`、单调递增的 `event_id`、`generation` 和 `timestamp_ms`。socket 最多连接 16 个客户端，每个客户端有 64 条有界队列；慢客户端不会阻塞呼叫主循环。
+
+独立的 `doorfast-event-relay` 负责断线重连、有界队列和指数退避。配置示例：
+
+```uci
+config relay 'main'
+	option enabled '1'
+	option url 'http://homeassistant.local:8123'
+	option entry_id '0123456789ABCDEF0123456789ABCDEF'
+	option token ''
+	option token_file '/etc/doorfast/ha-token'
+	option ca_file '/etc/ssl/certs/ca-certificates.crt'
+```
+
+`url` 只填写 HTTP/HTTPS authority，可带端口，不填写 `/auth/login_flow` 或其他路径。最终地址固定为 `<url>/api/doorfast/<entry_id>`。HTTP 可用于可信内网；HTTPS 会校验 CA 和主机名。LuCI 中输入长期访问令牌后，init 脚本将其移动到 root 所有且权限不超过 `0600` 的 `token_file`，并从 UCI 删除明文。
+
+事件推送用于降低延迟，HA 状态轮询仍是丢事件和重连后的权威兜底。
+
+### 媒体事件 relay
+
+`media_relay_url` 属于可选媒体模块，可填写带路径的 HTTP/HTTPS HA 入口，但不能带 query、fragment 或用户信息。它与上面的呼叫事件 relay 是两个独立配置；媒体 Bearer Token 保存在媒体凭据文件中。
+
+## LuCI 页面
+
+| 页面 | 当前功能 |
+|---|---|
+| 状态 | 每 5 秒读取 ubus；显示同步、呼叫、开锁、电梯、音频、视频和媒体状态；安装媒体 APK 后显示预览配置 |
+| 来电自动化 | 开关“来电自动向上召梯”；默认关闭 |
+| 部署配置 | 清晰分离被动接口与主机接口；配置 GVS 身份、室内机 IP/掩码、门禁材料和上行接口 |
+| HA 事件 relay | 配置 HTTP/HTTPS 地址、配置项 ID、长期令牌和 CA 文件 |
+| 日志 | 显示守护进程内存日志；内部最多保存 128 条，重启清空 |
+
+LuCI 刻意不提供接听、挂断、开锁和召梯操作页。这些动作由 HA 或受控本地 API 执行，避免在路由器管理界面重复一套控制入口。LuCI 的状态和日志不替代抓包或实体动作确认。
+
+## 透明串联和取证
+
+`/etc/config/doorfast-deployment` 描述管理员已经创建的透明桥：
+
+```uci
+config inline 'main'
+	option enabled '0'
+	option recording_enabled '0'
+	option bridge 'br-door'
+	option upstream 'eth2'
+	option downstream 'eth3'
+	option management 'br-lan'
+	option observation 'eth2'
+	option evidence_root '/mnt/doorfast'
+	option recent_budget_mib '14336'
+	option control_budget_mib '8192'
+	option log_budget_mib '1024'
+	option reserve_mib '6144'
+```
+
+先运行只读预检：
 
 ```sh
 doorfast --preflight /etc/config/doorfast-deployment
 ```
 
-检查通过时输出 `"safe":true` 的 JSON 并返回 0；配置有效但现场条件不安全时输出全部
-失败原因并返回 2；无法读取或计算状态时返回 1。检查只读取 sysfs、进程、UCI、挂载和
-接口地址，不创建网桥，不修改接口、路由、防火墙或 DHCP/RA，也不会自动启动记录。
-`/mnt/doorfast` 必须是独立持久挂载，首次部署需至少 30 GiB 总容量和 29 GiB 可用空间。
+返回规则：
 
-## 不会做的事
+- 退出 0 且 `"safe":true`：当前快照满足检查项。
+- 退出 2：配置可读取，但现场条件不安全，JSON 列出全部失败原因。
+- 退出 1：无法读取配置或系统证据。
 
-- 不包含 Doorlink 的程序代码、激活机制、激活码、供应商云部署或远程脚本执行。
-- 不启用未被用户自有设备证据验证的门锁、电梯、楼层控制。
-- 不暴露未认证的本地 HTTP 控制接口。
-- 不采集或提交真实住址、住户号码、密码、令牌、视频或完整原始 GVS 报文。
+预检核对独立管理口、无地址桥、成员关系、carrier、路由、防火墙、DHCP/RA、抓包能力、存储挂载与空间。它不修改系统。默认要求 `/mnt/doorfast` 是独立持久挂载，首次部署至少 30 GiB 总容量和 29 GiB 可用空间。
 
-## 构建与测试
+现场首次串联必须按以下顺序执行：
 
-离线检查命令为 `./build/doorfast --inspect-pcap capture.pcap IS:2-1-101-1`，其中地址应替换为测试环境配置。
-目前只输出解析和会话统计；它尚不代表完整来电流程或主机模式互操作验证。
+1. 核对接口、MAC 地址与机箱面板标识，确认门禁上游、原 MT8157 下游和独立管理口没有接反。
+2. 保持管理口可达，并准备一根可立即恢复原 MT8157 物理直连的回退网线。
+3. 由管理员提前建立无 IP、无 DHCP/RA 的透明桥，再运行上述只读预检。
+4. 首次插入透明桥时保持 Doorfast 和记录器停止，先验证原 MT8157 的上线、来电、接听、开锁和电梯行为均未改变。
+5. 为避免桥成员上的重复包，只选择一个 observation 接口。
+6. 先启动记录器，再启用 Doorfast 被动模式；连续观察至少 7 天后才评估主动主机模式。
+7. 任何来电、控制、在线状态或网络行为异常时，立即停止 Doorfast 并恢复原物理直连。
 
-在具备 libpcap 开发文件的主机上执行：
+记录器默认关闭且不由主服务自动启动：
 
 ```sh
-make test
+/etc/init.d/doorfast-recorder start
+```
+
+它生成有界轮转的 recent/control PCAP、脱敏元数据和状态文件；剩余空间达到保留阈值后进入 `space_guard` 并停止写入。站点前后快照可用于证明 Doorfast 没有改动网络配置：
+
+```sh
+doorfast-site-inventory /mnt/doorfast/inventory
+python3 scripts/compare-doorfast-site.py BEFORE_DIR AFTER_DIR ROLES.json
+```
+
+仓库保留一份非 Markdown 的 VM 证据样例：`docs/evidence/2026-09-15-vm-gvs-talking.json`。
+
+## CLI 工具
+
+```text
+doorfast --config <path> [--call-elev <0|1>]
+doorfast --preflight <path>
+doorfast --preflight <path> --root <fixture-root>
+doorfast --import-legacy <doorlink-uci>
+doorfast --inspect-pcap <capture.pcap> <IS-address>
+doorfast --simulate-handshake-pcap <capture.pcap> <IS-address>
+doorfast-recorder --config /etc/config/doorfast-deployment
+doorfast-recorder --self-test <directory>
+doorfast-pcm-submit GENERATION [SOCKET]
+```
+
+`--import-legacy` 只把旧 Doorlink UCI 转换成一份待人工审核的 Doorfast 起始配置并输出到 stdout；它不会写系统，也不会导出激活码、云令牌、Webhook 或更新设置，所有主动自动化保持关闭。
+
+`--inspect-pcap` 和 `--simulate-handshake-pcap` 是离线分析工具，不发送网络流量，也不能单独证明现场兼容性。`scripts/check_gvs_hybrid.py` 会在临时副本中插入明确标记的合成帧，用于敏感性实验，合成结果不是缺失原始报文的证据。
+
+## 协议证据索引
+
+厂商资料与授权 PCAP 不存入本仓库。复核时把数据集根目录设为 `$MT8157_DATASET`；以下 SHA-256 是当前协议判断使用的固定基线。
+
+| Evidence | 相对路径 | SHA-256 | 主要用途 |
+|---|---|---|---|
+| E-001 | `pcap/gvs-session-20260907.pcap` | `2690ccad19d9f19a210080cf5891cbde3c2a6144389fb80c2137af2a13c0ad89` | 通话、音频、视频和控制时序 |
+| E-002 | `pcap/gvs-active-three-20260907.pcap` | `06e1993ac20ac9157110ff3dcb5667c7dcbe909e5ae5bac456ce2f8cd32f726c` | 主动控制和直接开锁样本 |
+| E-003 | `pcap/gvs-inbound-call-20260907.pcap` | `70fd6ddc63eead07ae8bd39f8d68458e9110b456f33d16de5cb57259949c82fb` | 入站呼叫期间流量边界 |
+| E-004 | `pcap/gvs-incoming-three-20260907.pcap` | `dfc712339604ea90427c4a900f40570acfbcf0ddbeafb5a40ca0cb9db3e7e367` | 多次来电和控制关联 |
+| E-005 | `docs/doorfast-disconnect-20260911.pcap` | `c2a1ad01474665c430232e86083cd939ef2aa5c9fad28e6856ffb85a506ad2a7` | 断线和截断抓包边界 |
+
+由这些原始证据、厂商 APK 静态路径与当前实现交叉得到的结论：
+
+- 五份音频抓包共有 14,959 个 UDP/8302 包，其中 13,804 个完整、1,155 个受抓包长度限制而截断；完整 payload 为 128、160 或 192 字节。原 MT8157 发出的 6,245 个包全部使用 160 字节 payload，支持 Doorfast 上行采用 160 样本/20 ms，并要求下行兼容三种长度。
+- 五份视频抓包共有 56,759 个 UDP/8303 包，其中 26,773 个完整、29,986 个被截断；完整分片使用 1200 字节 capacity，长度、分片数、索引和偏移关系一致。
+- 多份抓包合计出现 6 个 `04/09` 直接开锁请求和 7 个 `04/89` 成功结果。这证明线上报文形状和协议结果，不证明门锁实际动作。
+- 电梯样本包含 5 个 `08/02` 和 2 个 `08/03`，没有 `08/82` 或 `08/83`；因此电梯回复和实体动作仍缺少现场证据。
+- E-003 本身没有捕获到最初的 `03/01`，来电入口由同期 logcat 和静态调用路径支持，不能写成 PCAP 已证明初始来电请求。`03/81` 是来电通知回复，不是来电请求。
+- 厂商 APK 静态路径把 `03/50` 命名为 `sendBusy`；当前只能把它作为该路径的控制响应处理，不能用它证明会话已经建立。
+
+复核路径：先校验原始文件哈希，再按控制、音频和视频端口读取时间线，最后把观察结果与当前解析器测试及现场实体结果分别记录。
+
+```sh
+export MT8157_DATASET=/absolute/path/to/mt8157
+shasum -a 256 "$MT8157_DATASET"/pcap/*.pcap
+tcpdump -nn -r "$MT8157_DATASET/pcap/gvs-session-20260907.pcap" \
+  'udp port 8300 or udp port 8302 or udp port 8303'
+```
+
+仓库中的 `docs/evidence/2026-09-15-vm-gvs-talking.json` 是可机读的合成 VM 验收样例；它不替代上述外部原始证据，也不替代实机闭环。
+
+保留的 Markdown 证据附件包括：来电抓包缺口与控制面更正、同步协议逆向、音视频 PCAP 验证、公共头和 native 库来源分析、VM UDP 验收、保活回放验收、旧 Doorlink 来源边界、厂商数据参考矩阵及同步分析范围。每份附件开头都声明其证据快照属性；其中出现的旧版本号、历史实现状态和历史下一步均由本 README 覆盖。
+
+## 构建与验证
+
+主机需要 C17 编译器、libpcap 开发文件、libcurl 开发文件、Python 3、Node.js 和 shell 工具。
+
+```sh
+make -B test
+make -B doorfast recorder peer-sim peer-udp-inject pcm-submit pcm-http-test
+python3 -B -m unittest discover -s tests -p 'test_*.py'
+```
+
+CI 还执行 LuCI/Node、CLI、包清单、HTTP、站点清单和 PCM fixture 验证。可在本地逐项运行：
+
+```sh
+node tests/test_luci_status.js
+node tests/test_luci_settings.js
+node tests/test_luci_media_view.js
+node tests/js/test_media_status.mjs
 sh tests/test_main_cli.sh
+sh tests/test_recorder_cli.sh
+sh tests/test_pcm_submit_cli.sh
+sh tests/test_pcm_http_cli.sh
+sh tests/test_site_inventory.sh
 sh tests/test_package_manifest.sh
+sh tests/test_doorfast_http.sh
 ```
 
-要从旧 Doorlink UCI 文件生成一份可人工审核的 Doorfast 起始配置：
+需要 VM 时，由调用者提供 SSH 包装脚本；测试不会猜测目标地址：
 
 ```sh
-doorfast --import-legacy /etc/config/doorlink
+python3 tests/run_gvs_vm_udp.py /absolute/path/to/vm/ssh.sh
+python3 tests/run_gvs_vm_ubus_call.py /absolute/path/to/vm/ssh.sh
+python3 tests/run_doorfast_vm_preflight.py /absolute/path/to/vm/ssh.sh
+python3 tests/run_doorfast_vm_inline_bridge.py /absolute/path/to/vm/ssh.sh
+python3 tests/run_doorfast_vm_recorder.py /absolute/path/to/vm/ssh.sh
+python3 tests/run_doorfast_vm_event_relay.py /absolute/path/to/vm/ssh.sh
+python3 tests/run_doorfast_vm_pcm_http.py /absolute/path/to/vm/ssh.sh
+python3 tests/run_doorfast_vm_media.py /absolute/path/to/vm/ssh.sh
 ```
 
-该命令只输出配置，不会写入路由器；不会导出激活码、云令牌、Webhook 或更新设置，
-并且始终将开门、挂断、召梯自动化选项设为禁用。
+测试证明的范围必须按“证据等级”解释。VM JSON 证明合成来电控制、保活、PCM ingress、A-law 编码和 UDP/8302 发送。下行音频与通话视频由主机测试、HTTP fixture 和 PCAP 交叉验证覆盖，并未完成整套 VM 媒体注入。主动预览的本地 fixture 验证 RTSP 发布与抢占；VM 的主动预览用例只验证软件包安装、状态结构、进程数量和网络状态未改变。UDP loopback、RTSP fixture 或合成 PCAP 通过，不等于门口机、门锁、电梯、扬声器或物业平台已经实机通过。
 
-GitHub Actions 使用官方 ImmortalWrt 25.12.1 x86_64 SDK 构建 APK。SDK 压缩包会在
-每次使用前校验 SHA-256；CI 产物只包含 `doorfast-*.apk` 本体。
+## 辅助模块的真实状态
 
-## 协议支持范围
+仓库还保留 SIP parser、发现候选、策略、审计和网段重叠诊断模块，并有单元测试。这些模块目前没有被生产 `runtime_service` 调用：
 
-Doorfast 仅维护项目自身验证过的 GVS 协议适配。它不接受新增品牌、第三方协议
-适配或第三方控制证据；所有发布的行为说明与匿名化测试夹具均由项目维护。
-每项新增协议行为必须引用厂商数据参考项，并分别记录项目测试与实体设备验收；
-不能用虚拟机或合成帧通过代替门锁、电梯或音视频对端确认。
+- SIP parser 能识别 `INVITE`/`BYE` 和 `Call-ID`，但当前 GVS 主运行链路不依赖 SIP。
+- discovery 能收集并人工批准 endpoint candidate，但没有生产持久化或 LuCI 工作流。
+- policy 能对来电给出 notify/hangup/delayed-open 决定，audit 能写 syslog，但当前主动控制由 GVS 状态机和 HA 入口驱动。
+- diagnostics 能判断两个 IPv4 网段是否重叠，但尚未接入 LuCI 或启动门禁。
+
+因此，源文件存在和单元测试通过只能记为库能力，不能列为用户可用的生产功能。
+
+## 已知限制和未完成项
+
+### 在线身份维护
+
+这是当前最关键的主程序缺口：
+
+- `07/01`、`91/01` 和 `91/02` 能经 UDP presence emitter 序列化和发送。
+- presence emitter 对 `peer_online`、`peer_offline` 和 `periodic_sync` 动作当前直接返回成功而不发包，日志可能因此误报 `sent=1`。
+- 收到 peer probe 后生成的 `07/81` 进入 `gvs_reply_queue`，随后由 placeholder header 的 memory sender 处理，没有进入真实 UDP socket。
+- `91/03` 周期同步序列化器已经实现并有测试/模拟器覆盖，但生产运行时没有调用它。
+
+所以，呼叫、控制和媒体的主要发送链已经是生产 UDP，但完整冷启动上线、peer 身份回复和周期同步尚未完成。最近一次现场测试中，门口机呼叫仍显示“无应答”；在修复并抓到双向在线报文前，不能宣称 Doorfast 已取代 MT8157 上线。
+
+### 实体设备闭环
+
+以下项目尚无充分 L4 证据：
+
+- 物业系统冷启动识别、分配/确认逻辑身份和持续在线。
+- 门口机呼叫 Doorfast、Doorfast 接听并进入稳定通话。
+- `04/89` 协议完成后门锁实际动作。
+- `08/82`/`08/83` 的完整现场样本，以及电梯实际响应。
+- 门口机主动预览 `03/04`/`03/84` 与持续视频取流。
+- 真实音频播放、麦克风上行、回声、延迟和断线恢复。
+- go2rtc/WebRTC 在目标 Home Assistant 上的长时间观看和多次启停。
+
+### 媒体资源策略
+
+- 当前仅 1 条主动预览流，`effective_capacity` 固定为模块可用时的 1。
+- 资源阈值、最大编码器数、预览时限、发布重试、过载策略和诊断开关尚未接入 ABI。
+- 编码器和 go2rtc 端到端失败处理已测试，但未在真实门口机视频流上调优。
+
+### 接口边界
+
+- LuCI 不包含控制按钮；控制入口属于 HA/受控 API。
+- HTTP CGI 没有独立用户认证，网络访问控制由 OpenWrt/uhttpd 和部署拓扑承担。
+- 普通 status、控制和快照 CGI 路由尚未强制校验 HTTP method；只有 PCM 与 monitor 路由执行 method 检查。
+- generation 在进程重启后从 1 重新计数。普通 HTTP/ubus 控制尚未绑定 `runtime_id`，忽略运行实例变化的客户端可能把延迟请求碰撞到重启后的同号 generation。
+- 普通控制学习到的 peer IPv4 没有时间戳和过期机制；网络地址变化后可能继续使用旧路由，直到表项被替换。主动预览的独立路由已有 60 秒新鲜度限制。
+- 内存日志容量为 128，重启即丢失；页面不会提供长期审计存储。
+- HTTP/ubus 返回的是接收、排队、提交或协议状态，永不代表实体动作已确认。
+
+## 下一步开发顺序
+
+1. 把 `07/81` peer reply 接到真实 UDP sender，并替换 placeholder header。
+2. 把 `91/03` 周期同步接入生产 runtime，修正 no-op 动作的 `sent` 日志语义。
+3. 让普通控制请求携带并强制匹配 `runtime_id`，同时为普通 peer 路由加入新鲜度和失效策略。
+4. 在现场按“冷启动 → 在线维护 → 来电 → 接听 → 挂断”顺序抓双向 PCAP，先解决门口机“无应答”。
+5. 分别验证开锁、向上/向下召梯和电梯状态，记录协议确认与实体结果。
+6. 验证主动预览、通话视频和双向音频，再根据实测调整超时、码率、缓冲和回声处理。
+7. 将现有媒体资源配置真正传入模块 ABI，并基于 CPU/内存实测实现可配置并发。
+8. 用 `doorfastforha` 完成事件去重、断线重连、轮询兜底、控制和 WebRTC 的整套 HA 验收。
+
+## 维护规则
+
+- 只在本 README 维护项目总设计和进度，不新增平行状态、路线图或设计 Markdown。证据附件可以保留，但必须标明采集日期、来源、哈希或复现路径、可证明边界，并声明当前状态以本 README 为准。
+- 可以保留机器可读的 JSON、PCAP 摘要和测试 fixture，但其中不得包含真实住址、住户身份、令牌、密码或未脱敏原始内容。
+- 新功能合并前必须更新能力矩阵、配置/API、证据等级、限制和下一步。
+- 每项协议结论至少说明代码路径、可复现测试和材料/PCAP 依据；只有现场实体结果才能标记 L4。
+- 厂商材料与逆向结果互相交叉验证，冲突时保留原始证据并以现场抓包为最终判据。

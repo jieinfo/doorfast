@@ -1,5 +1,7 @@
 # GVS 周期同步与版本维护逆向分析报告
 
+> **证据附件：** 本文保留 2026-09-08 的逆向、测试与证据链快照，不维护当前功能、设计、配置或开发进度。当前结论以仓库根目录 `README.md` 为准。
+
 > 分析日期：2026-09-08
 > 报告类型：普通协议逆向，`flavor = null`
 > 验证方式：APK 静态调用链、Doorfast C 单元测试和内存回放
@@ -58,7 +60,7 @@ Doorfast 生成的规范化 JSON 为：
 运行以下命令可复现本阶段验证：
 
 ```sh
-cd /Users/shenwenjie/Documents/PVE/doorfast
+cd /absolute/path/to/doorfast
 make -B test doorfast
 sh tests/test_main_cli.sh
 sh tests/test_gvs_peer_sim_cli.sh
@@ -78,9 +80,9 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `title`: 旧 APK 构造周期和单字段 JSON，并以 20 项分片
 - `observed_at`: 2026-09-08
 - `source_type`: file
-- `source_ref`: `/Users/shenwenjie/Downloads/moogren/work/moorgen-control-apk/apktool_out/smali_classes3/com/gvs/vdp/talkback_is/indoor/IndoorSyncBusiness.smali`
+- `source_ref`: `$MOOGREN_DECODED/smali_classes3/com/gvs/vdp/talkback_is/indoor/IndoorSyncBusiness.smali`
 - `content_hash`: `f5c0a15825f60562886fb00f2866454aaf6bf19f9b5e84fd4d7b13e4e29ee9e1`
-- `repro_command`: `sed -n '230,626p;1300,1740p;2186,2345p' /Users/shenwenjie/Downloads/moogren/work/moorgen-control-apk/apktool_out/smali_classes3/com/gvs/vdp/talkback_is/indoor/IndoorSyncBusiness.smali`
+- `repro_command`: `sed -n '230,626p;1300,1740p;2186,2345p' "$MOOGREN_DECODED/smali_classes3/com/gvs/vdp/talkback_is/indoor/IndoorSyncBusiness.smali"`
 - `raw_excerpt`: 方法 `a([B,String)` 按 20 项构造 `TYPE=Period`；`a([B,String,String,String)` 构造单项 `TYPE=Normal`；`updateSyncInfo` 在 60000 处回绕到 1。
 - `linked_workitem`: M2
 - `supersedes`: none
@@ -90,9 +92,9 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `title`: 旧协议层确认 `91/03`、小端版本和 ASCII JSON
 - `observed_at`: 2026-09-08
 - `source_type`: file
-- `source_ref`: `/Users/shenwenjie/Downloads/moogren/work/moorgen-control-apk/apktool_out/smali_classes3/com/gvs/general/protocol/c.smali`
+- `source_ref`: `$MOOGREN_DECODED/smali_classes3/com/gvs/general/protocol/c.smali`
 - `content_hash`: `f00c40bf2e45511d6e55ed5903d2231877073d43a2d78f1485d306eeb8a20196`
-- `repro_command`: `sed -n '2041,2135p' /Users/shenwenjie/Downloads/moogren/work/moorgen-control-apk/apktool_out/smali_classes3/com/gvs/general/protocol/c.smali`
+- `repro_command`: `sed -n '2041,2135p' "$MOOGREN_DECODED/smali_classes3/com/gvs/general/protocol/c.smali"`
 - `raw_excerpt`: `sendSyncInfoAsk` 写入功能族 `0x91`、操作码 `0x03`，长度为 JSON 字节数加 2，随后写入版本低字节、高字节和 US-ASCII JSON。
 - `linked_workitem`: M2
 - `supersedes`: none
@@ -205,7 +207,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `source_type`: file, network
 - `source_ref`: Moorgen APK `ManagerBusiness`/`IndoorDeviceBusiness`/`GVS_Protocol` smali，Doorfast `src/gvs_presence.c`、`src/runtime_service.c`、`tests/run_gvs_vm_udp.py`，ImmortalWrt 25.12.1 x86_64 虚拟机
 - `content_hash`: `moorgen_apk=6793c5777bea2c4f56f30c79c19d37d9089976eaaaa61c6da0ef6724a9a8487f; doorfast-0.1.0-r4.apk=518ed2bb05121250112b84b5214af47ab663db64feb7442308c65da2bb2517d4; gvs_presence.c=cf8ea2c23d8d5bdeb984dadc8b0f2023c2fbbe0ce522a7045424e6c83e86eb53; runtime_service.c=f276eca315cb765fd73258b5aef9cbb87db095e46dcd52f5aaac5d211a5b27d8`
-- `artifact_path`: `docs/gvs-peer-online-reply.md`, `src/gvs_presence.c`, `src/runtime_service.c`, `tests/run_gvs_vm_udp.py`
+- `artifact_path`: `src/gvs_presence.c`, `src/runtime_service.c`, `tests/run_gvs_vm_udp.py`
 - `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /absolute/path/to/vm/ssh.sh --wait-for-takeover`
 - `raw_excerpt`: 旧 APK 将功能码 7 注册到 ManagerBusiness；`0x81` 分支以源逻辑地址刷新候选设备，倒计时重置为 60 秒，线程每秒递减并在 30 秒倍数探测。Doorfast `r4` 在隔离虚拟机收到固定 48 字节 `07/81` 后状态为 `online_peers=1`，60 秒后为 0；随后同步版本保持 8，第一次周期缺失仍为 follower，第二次转为 maintainer，本户来电记录 `IncomingCall`。
 - `linked_workitem`: M2
@@ -218,7 +220,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `source_type`: file
 - `source_ref`: Moorgen APK `ManagerBusiness.smali:682-732`、`GVS_Protocol c.smali:2214-2385`
 - `content_hash`: `moorgen_apk=6793c5777bea2c4f56f30c79c19d37d9089976eaaaa61c6da0ef6724a9a8487f`
-- `artifact_path`: `docs/gvs-peer-online-reply.md`
+- `artifact_path`: n/a; static source is identified in `source_ref`
 - `repro_command`: `sed -n '660,742p' /absolute/path/to/decoded/smali_classes3/com/gvs/vdp/talkback_is/manager/ManagerBusiness.smali && sed -n '2214,2385p' /absolute/path/to/decoded/smali_classes3/com/gvs/general/protocol/c.smali`
 - `raw_excerpt`: `COM_PING_ASK` 分支先以请求源地址、目标 IP/端口、请求数据和空 MAC 参数调用回复方法，再尝试以源地址刷新候选在线状态。空 MAC 分支把请求数据前两字节写入 `07/81` 的 6 字节载荷，其余四字节写零。
 - `linked_workitem`: M2
@@ -245,7 +247,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `source_ref`: GitHub Actions 34299375775，ImmortalWrt 25.12.1 x86/64 QEMU，tests/run_gvs_vm_udp.py
 - `content_hash`: doorfast-0.1.0-r5.apk=fbc33c632d39db09c39308028229b93ecf7a6b5b5e5926d5d954f30b980e2c00; installed_daemon=00e4bfaee53cc88d771a1c11bd33889f30b8043ed3798df47215ef3b376ba738
 - `artifact_path`: build/ci-34299375775/immortalwrt-sdk-25.12.1-x86-64_gcc-14.3.0_musl.Linux-x86_64/bin/packages/x86_64/base/doorfast-0.1.0-r5.apk
-- `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /Users/shenwenjie/Documents/PVE/vms/doorfast-immortalwrt-25.12.1-x86_64/ssh.sh`
+- `repro_command`: `python3 -B tests/run_gvs_vm_udp.py /absolute/path/to/vm/ssh.sh`
 - `raw_excerpt`: r4 升级至 r5 成功；实际程序为 x86-64 musl ELF。日志出现 peer_probe accepted=1 reply_pending=1 peer_observed=1 mode=passive、peer_reply accepted=1 和 IncomingCall generation=1；ubus 为 follower、online_peers=1、version=8，UCI 版本为 8。短流程和服务冒烟通过。本轮未重跑两个 60 秒周期，未进行独立出站抓包；零发送结论来自当前源码没有发送路径。
 - `linked_workitem`: M2
 - `supersedes`: none
@@ -257,7 +259,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `source_type`: command
 - `source_ref`: `src/gvs_reply_queue.c`, `src/runtime_service.c`, `tests/test_gvs_reply_queue.c`, `tests/run_gvs_vm_udp.py`
 - `content_hash`: `gvs_reply_queue.c=f643982c18e736a4728607468ed488bde51a63d65ac33df05884ecb6051d3dc4; gvs_reply_queue.h=eedd0ed92f2047d447615ca10079210e913332d90bbb693207cf8e705465868f; runtime_service.c=b7252dc607bf73d84d0799484708b64244849396478be6b45d7952cb11470ee7; test_gvs_reply_queue.c=4eff9131925472f05a1dd27d336c96cf34bde1e832b7974f636308aade7cef46; run_gvs_vm_udp.py=f48edaceb8179fc3f54ca6054a52afbb41b3986369c798962aab92c88b1f70d8`
-- `artifact_path`: `src/gvs_reply_queue.c`, `src/gvs_reply_queue.h`, `src/runtime_service.c`, `tests/test_gvs_reply_queue.c`, `tests/run_gvs_vm_udp.py`, `docs/gvs-reply-queue.md`
+- `artifact_path`: `src/gvs_reply_queue.c`, `src/gvs_reply_queue.h`, `src/runtime_service.c`, `tests/test_gvs_reply_queue.c`, `tests/run_gvs_vm_udp.py`
 - `repro_command`: `make clean && make test doorfast peer-sim peer-udp-inject && python3 -B -m unittest tests/test_gvs_peer_udp.py && sh tests/test_gvs_peer_sim_cli.sh && sh tests/test_package_manifest.sh`
 - `raw_excerpt`: 68 项 C 测试和 Sanitizer 通过。队列固定 16 项、有效期 1000 毫秒；相同目标和请求数据合并并刷新期限，不同请求独立。过期清理、FIFO 取出、满队列、时间回退和溢出路径均有测试；运行时只入队、过期和记录脱敏日志，不调用取出或发送。
 - `linked_workitem`: M2
@@ -296,7 +298,7 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `source_type`: command
 - `source_ref`: `src/gvs_memory_sender.c`, `src/runtime_service.c`, `tests/test_gvs_memory_sender.c`, `tests/run_gvs_vm_udp.py`
 - `content_hash`: `gvs_memory_sender.c=5ebf4a66b781cdc08f7ea2e832ceb6b1cf953806d1d5c74cfb2722ea045250ef; gvs_memory_sender.h=a9c71ff00a8da57389a7f945711b779afc31f143fa790e8976a6b86db91f8ab4; test_gvs_memory_sender.c=2c901c4c9e364e21b2a2d1de93acc2ebbc8700287348527603581d122df1f89d; runtime_service.c=1359831dfbbaf43bb6e594827b95a8ea71a97ca5d2dda18f1d15bd5e8c42003c; run_gvs_vm_udp.py=4d290dbdd587cf9643724908fef0d1465917e095338ba91409ead81cbf357f34`
-- `artifact_path`: `src/gvs_memory_sender.c`, `src/gvs_memory_sender.h`, `tests/test_gvs_memory_sender.c`, `src/runtime_service.c`, `tests/run_gvs_vm_udp.py`, `docs/gvs-inmemory-frame-adapter.md`
+- `artifact_path`: `src/gvs_memory_sender.c`, `src/gvs_memory_sender.h`, `tests/test_gvs_memory_sender.c`, `src/runtime_service.c`, `tests/run_gvs_vm_udp.py`
 - `repro_command`: `make clean && make test doorfast peer-sim peer-udp-inject && python3 -B -m unittest tests/test_gvs_peer_udp.py && sh tests/test_gvs_peer_sim_cli.sh && sh tests/test_package_manifest.sh && sh tests/test_main_cli.sh && node tests/test_luci_status.js`
 - `raw_excerpt`: 79 项 C 测试及 AddressSanitizer/UndefinedBehaviorSanitizer 通过。适配器为每个待回复对象生成 48 字节 `07/81`，以本机逻辑地址为源、请求源为目标、请求前两字节加四个零为载荷；生成后由生产解析器回读并核对地址、功能码、操作码、声明长度和载荷。构帧失败不覆盖旧记录并触发事务重试。运行时公共头的两个 8 字节字段为明确标记的全零占位值，只记录长度和尝试号，不发送网络报文。
 - `linked_workitem`: M2
@@ -320,9 +322,9 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 - `title`: r9 公共头提供器获得完整只读帧上下文并保持失败原子性
 - `observed_at`: 2026-09-09
 - `source_type`: command
-- `source_ref`: `src/gvs_serialize.h`, `src/gvs_serialize.c`, `tests/test_gvs_serialize.c`, `docs/gvs-header-provider-contract.md`
-- `content_hash`: `gvs_serialize.h=9f5ff669d5b25d4a7908a4170c2de8e16705f3c229416d883161106e8ec0ffd0; gvs_serialize.c=129dffdd01ca88f6991b0b17c2596bd6c6aeed03b898df6522a4e09121bd36b5; test_gvs_serialize.c=3cb5fbf34165075e74cd163fb6a4d903219d8c33b1e2bed992e93afc50e9ef81; gvs-header-provider-contract.md=6c785e5074377bf6c32014ce44fbe3839045721e3e78f137c4b390cf5ac66917`
-- `artifact_path`: `src/gvs_serialize.h`, `src/gvs_serialize.c`, `src/gvs_memory_sender.c`, `tests/test_gvs_serialize.c`, `docs/gvs-header-provider-contract.md`
+- `source_ref`: `src/gvs_serialize.h`, `src/gvs_serialize.c`, `tests/test_gvs_serialize.c`
+- `content_hash`: `gvs_serialize.h=9f5ff669d5b25d4a7908a4170c2de8e16705f3c229416d883161106e8ec0ffd0; gvs_serialize.c=129dffdd01ca88f6991b0b17c2596bd6c6aeed03b898df6522a4e09121bd36b5; test_gvs_serialize.c=3cb5fbf34165075e74cd163fb6a4d903219d8c33b1e2bed992e93afc50e9ef81`
+- `artifact_path`: `src/gvs_serialize.h`, `src/gvs_serialize.c`, `src/gvs_memory_sender.c`, `tests/test_gvs_serialize.c`
 - `repro_command`: `make clean && make CC='cc -fsanitize=address,undefined -fno-omit-frame-pointer' test && make clean && make test doorfast peer-sim peer-udp-inject && python3 -B -m unittest tests/test_gvs_peer_udp.py && sh tests/test_gvs_peer_sim_cli.sh && sh tests/test_package_manifest.sh && sh tests/test_main_cli.sh && node tests/test_luci_status.js`
 - `raw_excerpt`: 85 项 C 测试在常规构建及 AddressSanitizer/UndefinedBehaviorSanitizer 下通过。提供器收到目标、来源、功能码、操作码、载荷视图和载荷长度；`07/81` 六字节载荷与 `91/02` 零载荷均有契约测试。提供器即使改写临时字段后返回失败，输出长度仍归零且调用者缓冲区逐字节保持不变。同步构帧、对端模拟器、Python UDP 模型、CLI、LuCI 和包清单回归通过。运行时仍显式使用全零占位提供器且没有网络发送。
 - `linked_workitem`: M2

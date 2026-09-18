@@ -1,5 +1,7 @@
 # GVS audio PCAP validation
 
+> **Evidence appendix:** This file preserves the captured-audio validation record. It does not define current features, configuration, or project status; the repository root `README.md` is authoritative.
+
 This note cross-checks the vendor APK analysis against five authorized captures
 under `mt8157`. The captures contain 14,959 UDP packets on port 8302.
 

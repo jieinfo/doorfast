@@ -1,11 +1,13 @@
 # MT8157 厂商数据参考矩阵
 
+> **证据附件：** 本文保留厂商数据集来源和证据强度映射，不维护当前功能、设计、配置或开发进度。当前结论以仓库根目录 `README.md` 为准。
+
 更新日期：2026-09-13
 
 ## 1. 来源声明
 
-本项目将用户指定目录 `/Users/shenwenjie/Documents/PVE/mt8157/` 的全部内容视为
-厂商交付数据集。该路径只用于本地开发和复核，不随 Doorfast 公共仓库提交。
+本项目将用户通过 `$MT8157_DATASET` 指定目录中的全部内容视为厂商交付数据集。
+该路径只用于本地开发和复核，不随 Doorfast 公共仓库提交。
 
 “厂商交付”只描述材料来源，不表示内容必然准确，也不自动表示每份文件都是厂商
 正式发布的协议规范。实现前必须用同目录材料交叉核对，并尽可能使用 PCAP、项目测试
@@ -49,7 +51,7 @@
 |---|---|---|---|---|
 | 呼叫推送 | `010-talkback-business.md`、`026-gvs-activity-intent-eventbus.md`、来电 PCAP | `03/01` 建立来电；每次有效通告回复 `03/81`；事件含来源、类型、方向和会话状态 | 接收器建立带 generation 的会话；事件层输出脱敏来电；回执作为独立事务发送 | 仍需实体门口机确认公共头和回执接受性 |
 | 通话接听与挂断 | `010-talkback-business.md`、来电/会话 PCAP | 接听 `03/03 -> 03/83`；挂断 `03/02 -> 03/82`；`03/51`/`03/52` 为通话保活 | 所有请求绑定 generation、目标地址和目标 IP；超时、拒绝、迟到回复分别处理 | 忙线、转接和跨固件结果矩阵仍需补证 |
-| 门禁控制 | `009-entrance-guard-unlock.md`、`029-gvs-entrance-guard-payload-result.md` | 直接路径 `04/09 -> 04/89`；挑战路径 `04/11 -> 04/91`；直接帧保留“声明 12、实际 body 8”兼容形状 | [直接门禁事务](gvs-direct-unlock.md)已实现构帧和结果关联；安装密钥不入日志；只有终端回复可形成协议成功/失败 | 生产发送控制器、失败码全集、挑战异常和物理门锁动作需 `D-F` |
+| 门禁控制 | `009-entrance-guard-unlock.md`、`029-gvs-entrance-guard-payload-result.md` | 直接路径 `04/09 -> 04/89`；挑战路径 `04/11 -> 04/91`；直接帧保留“声明 12、实际 body 8”兼容形状 | 历史实现完成构帧和结果关联；安装密钥不入日志；只有终端回复可形成协议成功/失败；当前状态见根目录 `README.md` | 失败码全集、挑战异常和物理门锁动作需 `D-F` |
 | 召梯 | `015-elevator.md`、`docs/doorfast-disconnect-20260911.pcap` | `08/02` 是 42 字节公共头加 4 字节 payload，总长 46 字节；上/下方向；立即发送、1000 ms 后最多重试一次、2000 ms 硬截止；`08/82` 只结束协议事务 | 46 字节构帧、UDP 发送、主机模式 `call_elevator`、来电固定上行自动召梯和单槽控制器已通过 `D-T`；请求、协议结果、超时和实体结果分开报告 | 尚无 `08/82` 现场样本和 `D-F`，不能宣称召梯成功 |
 | 电梯状态 | `015-elevator.md`、`docs/doorfast-disconnect-20260911.pcap` | `08/03` 是 42 字节零 payload 查询；UI 约 1 秒周期调用；`08/83` 返回数量及楼层/状态二元组 | 42 字节构帧、主机模式每秒查询、守护进程接收路径及最多 8 项的 `1 + 2 * count` 有界解析已通过 `D-T`，ubus/LuCI 发布状态年龄和原始值 | 尚无 `08/83` 现场样本和 `D-F`；`08/01` 语义未闭合 |
 | 视频功能 | `010-talkback-business.md`、`012-video-business.md`、`017-camera-input.md` | UDP/8303；JPEG 以最多 1200 字节分片；片号从 1 开始且连续；会话结束释放资源 | 先实现接收、校验、重组和会话隔离，再接入浏览器/HA 媒体桥；保存图片必须由显式策略触发 | 类型头映射、丢片策略、真实延迟和端到端画面需 `D-F` |
@@ -84,10 +86,11 @@
 本地只读复核命令：
 
 ```sh
-shasum -a 256 /Users/shenwenjie/Documents/PVE/mt8157/pcap/*.pcap
+export MT8157_DATASET=/absolute/path/to/mt8157
+shasum -a 256 "$MT8157_DATASET"/pcap/*.pcap
 make -B doorfast
 ./build/doorfast --inspect-pcap \
-  /Users/shenwenjie/Documents/PVE/mt8157/pcap/gvs-inbound-call-20260907.pcap \
+  "$MT8157_DATASET/pcap/gvs-inbound-call-20260907.pcap" \
   IS:2-1-101-1
 ```
 

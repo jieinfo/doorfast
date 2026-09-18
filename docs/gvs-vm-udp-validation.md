@@ -1,5 +1,7 @@
 # Isolated x86_64 UDP validation
 
+> **Evidence appendix:** This file preserves a dated VM acceptance record. Version numbers and implementation status below are historical; the repository root `README.md` is authoritative for current behavior.
+
 Validated on 2026-09-09 with ImmortalWrt 25.12.1 x86/64 and `doorfast-0.1.0-r9.apk` from successful GitHub run 34321275520 (commit `abb3df752592ef`). The core APK SHA-256 is `bf02a16d748f13a4752122c0142084f9b074f6c6c90b1c4dad20c0f5e0673d5a`; the installed daemon is an x86-64 musl ELF with SHA-256 `c0ffc2539881560f46f544af37d1d3492dd38652787a1096eb6f6719d4d5bdd8`.
 
 The test-only `make peer-udp-inject` tool sends one built-in synthetic frame to fixed loopback destination `127.0.0.1:18300`. QEMU forwards that UDP port to guest port 8300. No destination or arbitrary payload arguments are supported. Header authentication fields are synthetic fixtures; this test does not establish real-device authentication compatibility. The fixed scenarios include a 44-byte `07/01` candidate probe for validating the passive pending-reply, complete in-memory frame preparation, and simulated transaction path in the validated `r9` build.
