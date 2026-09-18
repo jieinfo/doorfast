@@ -55,7 +55,6 @@ void test_gvs_udp_sender_broadcasts_exact_station_scan_frame(void) {
     struct df_gvs_station_scan_action action = {0};
     struct df_gvs_udp_sender sender = {.fd = -1};
     struct sockaddr_in address;
-    socklen_t address_length = sizeof(address);
     struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
     uint8_t received[128];
     int broadcast = 0;
@@ -68,14 +67,13 @@ void test_gvs_udp_sender_broadcasts_exact_station_scan_frame(void) {
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_port = htons(8300U);
     TEST_ASSERT_INT_EQ(0, bind(receiver, (const struct sockaddr *)&address,
         sizeof(address)));
-    TEST_ASSERT_INT_EQ(0, getsockname(receiver, (struct sockaddr *)&address,
-        &address_length));
     TEST_ASSERT_INT_EQ(0, setsockopt(receiver, SOL_SOCKET, SO_RCVTIMEO,
         &timeout, sizeof(timeout)));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "0.0.0.0",
-        ntohs(address.sin_port), udp_sender_header_fields, NULL));
+        8301U, udp_sender_header_fields, NULL));
     TEST_ASSERT_INT_EQ(0, getsockopt(sender.fd, SOL_SOCKET, SO_BROADCAST,
         &broadcast, &broadcast_length));
     TEST_ASSERT_INT_EQ(1, broadcast != 0);

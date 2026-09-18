@@ -366,6 +366,7 @@ int df_gvs_udp_sender_emit_station_scan(struct df_gvs_udp_sender *sender,
         return DF_ERR_INVALID;
     }
     target = sender->peer;
+    target.sin_port = htons(8300U);
     target.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     written = sendto(sender->fd, frame, frame_length, 0,
         (const struct sockaddr *)&target, sizeof(target));
