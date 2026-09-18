@@ -19,6 +19,8 @@ struct df_media_session {
     bool active;
     bool viewer_active;
     uint64_t started_ms;
+    void (*stop_resources)(struct df_media_session *, void *context);
+    void *resource_context;
 };
 
 void df_media_session_reset(struct df_media_session *);

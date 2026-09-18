@@ -105,7 +105,7 @@ void test_media_session_manager_admits_dynamic_station_pool(void) {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
     struct manager_trace trace = {.available_kib = 4096U};
-    struct df_media_session_manager manager;
+    struct df_media_session_manager manager = {0};
     struct df_media_session_key first_key;
     const struct df_media_session *found;
     uint64_t first_generation = 0U;
@@ -174,7 +174,7 @@ void test_media_session_manager_rejects_admission_without_mutating_sessions(void
         .stop = manager_stop_resources,
         .context = &trace,
     };
-    struct df_media_session_manager manager;
+    struct df_media_session_manager manager = {0};
     struct df_media_session_key first_key;
     uint64_t first_generation = 0U;
     uint64_t generation = 88U;
@@ -231,7 +231,7 @@ void test_media_session_manager_commands_require_exact_key(void) {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
     struct manager_trace trace = {.available_kib = 4096U};
-    struct df_media_session_manager manager;
+    struct df_media_session_manager manager = {0};
     struct df_media_session_key key;
     uint64_t generation = 0U;
     uint64_t replacement_generation = 0U;
@@ -255,5 +255,130 @@ void test_media_session_manager_commands_require_exact_key(void) {
         &manager, "gate_main", DF_MEDIA_SESSION_CALL, 303U,
         &replacement_generation));
     TEST_ASSERT_INT_EQ(1, replacement_generation != generation);
+    df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_snapshots_cleanup_per_session(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace first_trace = {.available_kib = 4096U};
+    struct manager_trace second_trace = {.available_kib = 4096U};
+    const struct df_media_session_resource_hooks first_hooks = {
+        .start = manager_start_resources,
+        .stop = manager_stop_resources,
+        .context = &first_trace,
+    };
+    const struct df_media_session_resource_hooks second_hooks = {
+        .start = manager_start_resources,
+        .stop = manager_stop_resources,
+        .context = &second_trace,
+    };
+    struct df_media_session_manager manager = {0};
+    struct df_media_session_key first_key;
+    uint64_t first_generation = 0U;
+    uint64_t second_generation = 0U;
+
+    manager_fixture(&config, &callbacks, &first_trace);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    df_media_session_manager_set_resource_hooks(&manager, &first_hooks);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(
+        &manager, "gate_main", DF_MEDIA_SESSION_PREVIEW, 400U,
+        &first_generation));
+    df_media_session_manager_set_resource_hooks(&manager, &second_hooks);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(
+        &manager, "gate_side", DF_MEDIA_SESSION_PREVIEW, 401U,
+        &second_generation));
+    TEST_ASSERT_INT_EQ(1, first_trace.resource_starts);
+    TEST_ASSERT_INT_EQ(1, second_trace.resource_starts);
+
+    first_key.station_id = "gate_main";
+    first_key.generation = first_generation;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_STOP, &first_key, false, 402U));
+    TEST_ASSERT_INT_EQ(1, first_trace.resource_stops);
+    TEST_ASSERT_INT_EQ(0, second_trace.resource_stops);
+
+    df_media_session_manager_destroy(&manager);
+    TEST_ASSERT_INT_EQ(1, first_trace.resource_stops);
+    TEST_ASSERT_INT_EQ(1, second_trace.resource_stops);
+}
+
+void test_media_session_manager_rejects_reinit_without_losing_owner_state(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    const struct df_media_session_resource_hooks resource_hooks = {
+        .start = manager_start_resources,
+        .stop = manager_stop_resources,
+        .context = &trace,
+    };
+    struct df_media_session_manager manager = {0};
+    struct df_media_session_key key;
+    uint64_t generation = 0U;
+    uint64_t next_generation;
+
+    manager_fixture(&config, &callbacks, &trace);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    df_media_session_manager_set_resource_hooks(&manager, &resource_hooks);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(
+        &manager, "gate_main", DF_MEDIA_SESSION_PREVIEW, 500U, &generation));
+    next_generation = manager.next_generation;
+    key.station_id = "gate_main";
+    key.generation = generation;
+
+    config.max_encoders = 1U;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(2, df_media_session_manager_capacity(&manager));
+    TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
+    TEST_ASSERT_INT_EQ(next_generation, manager.next_generation);
+    TEST_ASSERT_INT_EQ(1,
+        df_media_session_manager_lookup(&manager, &key) != NULL);
+
+    df_media_session_manager_destroy(&manager);
+    TEST_ASSERT_INT_EQ(1, trace.resource_stops);
+}
+
+void test_media_session_manager_generation_limit_is_failure_atomic(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    const struct df_media_session_resource_hooks resource_hooks = {
+        .start = manager_start_resources,
+        .stop = manager_stop_resources,
+        .context = &trace,
+    };
+    struct df_media_session_manager manager = {0};
+    struct df_media_session_key key;
+    uint64_t first_generation = 0U;
+    uint64_t rejected_generation = 99U;
+    unsigned starts_before;
+    unsigned stops_before;
+
+    manager_fixture(&config, &callbacks, &trace);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    df_media_session_manager_set_resource_hooks(&manager, &resource_hooks);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(
+        &manager, "gate_main", DF_MEDIA_SESSION_PREVIEW, 600U,
+        &first_generation));
+    key.station_id = "gate_main";
+    key.generation = first_generation;
+    starts_before = trace.resource_starts;
+    stops_before = trace.resource_stops;
+    manager.next_generation = UINT64_MAX;
+
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_RESOURCE_EXHAUSTED,
+        df_media_session_manager_start(&manager, "gate_side",
+            DF_MEDIA_SESSION_PREVIEW, 601U, &rejected_generation));
+    TEST_ASSERT_INT_EQ(0, rejected_generation);
+    TEST_ASSERT_INT_EQ(starts_before, trace.resource_starts);
+    TEST_ASSERT_INT_EQ(stops_before, trace.resource_stops);
+    TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
+    TEST_ASSERT_INT_EQ(1,
+        df_media_session_manager_lookup(&manager, &key) != NULL);
+    TEST_ASSERT_INT_EQ(1, manager.next_generation == UINT64_MAX);
     df_media_session_manager_destroy(&manager);
 }

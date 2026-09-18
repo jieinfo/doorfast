@@ -33,6 +33,10 @@ struct df_media_session_manager {
     bool initialized;
 };
 
+/*
+ * Storage must be zero-initialized before its first init. An initialized
+ * manager rejects another init; destroy it before initializing it again.
+ */
 int df_media_session_manager_init(struct df_media_session_manager *,
     const struct df_media_module_config_v3 *,
     const struct df_media_module_callbacks_v3 *);

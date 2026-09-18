@@ -21,6 +21,12 @@ static void df_media_session_resource_stop_default(
     (void)context;
 }
 
+static void df_media_session_manager_stop_resources(
+    struct df_media_session *session) {
+    if (session != NULL && session->stop_resources != NULL)
+        session->stop_resources(session, session->resource_context);
+}
+
 static char *df_media_session_manager_copy_string(const char *source) {
     size_t length;
     char *copy;
@@ -137,7 +143,7 @@ int df_media_session_manager_init(struct df_media_session_manager *manager,
     size_t requested;
     size_t index;
 
-    if (manager == NULL) return DF_ERR_INVALID;
+    if (manager == NULL || manager->initialized) return DF_ERR_INVALID;
     memset(manager, 0, sizeof(*manager));
     if (df_media_module_config_v3_validate(config, callbacks) != DF_OK)
         return DF_ERR_INVALID;
@@ -177,8 +183,8 @@ void df_media_session_manager_destroy(struct df_media_session_manager *manager) 
         for (index = 0U; index < manager->capacity; index++) {
             if (manager->sessions[index].active ||
                 manager->sessions[index].reserved)
-                manager->resource_hooks.stop(&manager->sessions[index],
-                    manager->resource_hooks.context);
+                df_media_session_manager_stop_resources(
+                    &manager->sessions[index]);
             df_media_session_reset(&manager->sessions[index]);
         }
     }
@@ -209,6 +215,7 @@ int df_media_session_manager_start(struct df_media_session_manager *manager,
     const char *station_id, enum df_media_session_purpose purpose,
     uint64_t now_ms, uint64_t *generation) {
     const struct df_media_station_config_v3 *station;
+    struct df_media_session_resource_hooks resource_hooks;
     struct df_media_session *session;
     uint64_t available_kib;
     uint64_t proposed_generation;
@@ -253,16 +260,17 @@ int df_media_session_manager_start(struct df_media_session_manager *manager,
         now_ms);
     if (result != DF_OK) return DF_ERR_INVALID;
     proposed_generation = manager->next_generation + 1U;
-    if (manager->resource_hooks.start(session, proposed_generation,
-            manager->resource_hooks.context) != DF_OK) {
-        manager->resource_hooks.stop(session,
-            manager->resource_hooks.context);
+    resource_hooks = manager->resource_hooks;
+    session->stop_resources = resource_hooks.stop;
+    session->resource_context = resource_hooks.context;
+    if (resource_hooks.start(session, proposed_generation,
+            resource_hooks.context) != DF_OK) {
+        df_media_session_manager_stop_resources(session);
         df_media_session_reset(session);
         return DF_MEDIA_ERROR_ENCODER_FAILED;
     }
     if (df_media_session_activate(session, proposed_generation) != DF_OK) {
-        manager->resource_hooks.stop(session,
-            manager->resource_hooks.context);
+        df_media_session_manager_stop_resources(session);
         df_media_session_reset(session);
         return DF_MEDIA_ERROR_ENCODER_FAILED;
     }
@@ -291,8 +299,7 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
     if (session == NULL || session->generation != key->generation ||
         key->generation == 0U) return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     if (command == DF_MEDIA_MODULE_COMMAND_STOP) {
-        manager->resource_hooks.stop(session,
-            manager->resource_hooks.context);
+        df_media_session_manager_stop_resources(session);
         result = df_media_session_command(session, command, key, active,
             now_ms);
         if (result != DF_OK) return result;
