@@ -634,7 +634,8 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
             return DF_ERR_INVALID;
         }
     }
-    return df_config_validate(&runtime->config);
+    if (df_config_validate(&runtime->config) != DF_OK) return DF_ERR_INVALID;
+    return df_station_registry_parse(&runtime->stations, uci_text);
 }
 
 int df_runtime_config_load(const char *path, struct df_runtime_config *runtime) {
@@ -667,4 +668,10 @@ int df_runtime_config_load(const char *path, struct df_runtime_config *runtime) 
     result = df_runtime_config_parse(contents, runtime);
     free(contents);
     return result;
+}
+
+void df_runtime_config_destroy(struct df_runtime_config *runtime) {
+    if (runtime == NULL) return;
+    df_station_registry_destroy(&runtime->stations);
+    memset(runtime, 0, sizeof(*runtime));
 }

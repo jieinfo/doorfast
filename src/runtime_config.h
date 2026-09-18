@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "gvs_identity.h"
+#include "station_registry.h"
 
 #define DF_RUNTIME_BRAND_MAX 16
 #define DF_RUNTIME_INTERFACE_MAX 64
@@ -31,6 +32,7 @@ struct df_runtime_config {
     char gvs_local_address[DF_RUNTIME_ADDRESS_MAX];
     enum df_gvs_multicast_mode multicast_mode;
     char multicast_address[DF_GVS_IPV4_TEXT_SIZE];
+    struct df_station_registry stations;
     char indoor_ipaddr[DF_RUNTIME_IPV4_MAX];
     char indoor_netmask[DF_RUNTIME_IPV4_MAX];
     char uplink_interface[DF_RUNTIME_INTERFACE_MAX];
@@ -47,5 +49,6 @@ struct df_runtime_config {
 
 int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime);
 int df_runtime_config_load(const char *path, struct df_runtime_config *runtime);
+void df_runtime_config_destroy(struct df_runtime_config *runtime);
 
 #endif

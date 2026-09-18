@@ -255,8 +255,24 @@ void test_runtime_config_requires_valid_media_prerequisites(void) {
     TEST_ASSERT_INT_EQ(1, runtime.config.media.enabled);
     TEST_ASSERT_INT_EQ(8554, runtime.config.media.go2rtc_port);
     TEST_ASSERT_INT_EQ(0, strcmp("doorfast_preview", runtime.config.media.stream_name));
+    TEST_ASSERT_INT_EQ(1, runtime.stations.count);
+    df_runtime_config_destroy(&runtime);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_config_parse(secret_in_uci, &runtime));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_config_parse(secret_outside_main, &runtime));
+}
+
+void test_runtime_config_owns_named_station_registry(void) {
+    struct df_runtime_config runtime;
+    const struct df_station *station;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_load(
+        "tests/fixtures/doorfast-two-stations.conf", &runtime));
+    TEST_ASSERT_INT_EQ(DF_GVS_MULTICAST_CUSTOM, runtime.multicast_mode);
+    TEST_ASSERT_INT_EQ(0, strcmp("239.1.2.3", runtime.multicast_address));
+    TEST_ASSERT_INT_EQ(2, runtime.stations.count);
+    station = df_station_registry_find(&runtime.stations, "gate_main");
+    TEST_ASSERT_INT_EQ(1, station != NULL);
+    df_runtime_config_destroy(&runtime);
 }
