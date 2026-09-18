@@ -17,7 +17,7 @@ void test_runtime_config_parses_main_gvs_section(void) {
         "\toption sync_mini2_secretkey 'mini-two'\n"
         "\toption passive_only '1'\n"
         "\toption capture_promiscuous '0'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
     TEST_ASSERT_INT_EQ(1, runtime.config.enabled);
@@ -52,7 +52,7 @@ void test_runtime_config_selects_a_dedicated_host_interface(void) {
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption active_host '1'\n"
         "\toption indoor_netmask '255.0.0.0'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
     TEST_ASSERT_INT_EQ(0, strcmp("br-host", runtime.config.gvs_interface));
@@ -60,7 +60,7 @@ void test_runtime_config_selects_a_dedicated_host_interface(void) {
 
 void test_runtime_config_accepts_disabled_minimal_config(void) {
     const char input[] = "config gvs 'main'\n\toption enabled '0'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
     TEST_ASSERT_INT_EQ(0, runtime.config.enabled);
@@ -76,7 +76,7 @@ void test_runtime_config_keeps_auto_elevator_inert_in_passive_mode(void) {
         "\toption passive_only '1'\n"
         "\toption active_host '0'\n"
         "\toption call_elev '1'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
     TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
@@ -137,7 +137,7 @@ void test_runtime_config_rejects_ambiguous_or_unsafe_config(void) {
         "\toption enabled '0'\n"
         "\toption multicast_mode 'custom'\n"
         "\toption multicast_address '192.168.1.1'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(duplicate, &runtime));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(active, &runtime));
@@ -172,7 +172,7 @@ void test_runtime_config_ignores_legacy_elevator_direction(void) {
         "\toption indoor_netmask '255.0.0.0'\n"
         "\toption call_elev '1'\n"
         "\toption call_elev_direction 'down'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(input, &runtime));
     TEST_ASSERT_INT_EQ(1, runtime.config.call_elev);
@@ -207,7 +207,7 @@ void test_runtime_config_derives_active_host_ip_and_requires_netmask(void) {
         "\toption gvs_local_address 'IS:2-1-101-1'\n"
         "\toption active_host '1'\n"
         "\toption indoor_netmask '255.0.255.0'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(derived, &runtime));
     TEST_ASSERT_INT_EQ(0, strcmp(runtime.config.indoor_ipaddr, "10.5.65.0"));
@@ -248,7 +248,7 @@ void test_runtime_config_requires_valid_media_prerequisites(void) {
         "\toption enabled '0'\n"
         "config auxiliary 'main'\n"
         "\toption media_bearer_token 'must-not-be-accepted'\n";
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
 
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_config_parse(bad, &runtime));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(valid, &runtime));
@@ -264,7 +264,7 @@ void test_runtime_config_requires_valid_media_prerequisites(void) {
 }
 
 void test_runtime_config_owns_named_station_registry(void) {
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
     const struct df_station *station;
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_load(
@@ -274,5 +274,59 @@ void test_runtime_config_owns_named_station_registry(void) {
     TEST_ASSERT_INT_EQ(2, runtime.stations.count);
     station = df_station_registry_find(&runtime.stations, "gate_main");
     TEST_ASSERT_INT_EQ(1, station != NULL);
+    df_runtime_config_destroy(&runtime);
+}
+
+void test_runtime_config_successful_reload_replaces_owned_registry(void) {
+    const char replacement[] =
+        "config gvs 'main'\n"
+        "\toption enabled '0'\n"
+        "config station 'gate_replacement'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Replacement Gate'\n"
+        "\toption logical_address '32:02:01:00:04:00'\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_replacement'\n";
+    struct df_runtime_config runtime = {0};
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_load(
+        "tests/fixtures/doorfast-two-stations.conf", &runtime));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(replacement, &runtime));
+    TEST_ASSERT_INT_EQ(1, runtime.stations.count);
+    TEST_ASSERT_INT_EQ(1, df_station_registry_find(
+        &runtime.stations, "gate_replacement") != NULL);
+    TEST_ASSERT_INT_EQ(1,
+        df_station_registry_find(&runtime.stations, "gate_main") == NULL);
+    TEST_ASSERT_INT_EQ(1, runtime.config.brand == runtime.brand);
+    TEST_ASSERT_INT_EQ(1,
+        runtime.config.gvs_interface == runtime.gvs_interface);
+    TEST_ASSERT_INT_EQ(1,
+        runtime.config.media.stream_name == runtime.media_stream_name);
+    df_runtime_config_destroy(&runtime);
+}
+
+void test_runtime_config_failed_reload_preserves_owned_registry(void) {
+    const char invalid_replacement[] =
+        "config gvs 'main'\n"
+        "\toption enabled '0'\n"
+        "config station 'gate_invalid'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Invalid Gate'\n"
+        "\toption logical_address '32:02:01:00:04:00'\n"
+        "\toption stream_name 'doorfast_gate_invalid'\n";
+    struct df_runtime_config runtime = {0};
+    struct df_station *original_items;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_load(
+        "tests/fixtures/doorfast-two-stations.conf", &runtime));
+    original_items = runtime.stations.items;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_config_parse(invalid_replacement, &runtime));
+    TEST_ASSERT_INT_EQ(1, runtime.stations.items == original_items);
+    TEST_ASSERT_INT_EQ(2, runtime.stations.count);
+    TEST_ASSERT_INT_EQ(DF_GVS_MULTICAST_CUSTOM, runtime.multicast_mode);
+    TEST_ASSERT_INT_EQ(0, strcmp("239.1.2.3", runtime.multicast_address));
+    TEST_ASSERT_INT_EQ(1,
+        df_station_registry_find(&runtime.stations, "gate_main") != NULL);
     df_runtime_config_destroy(&runtime);
 }

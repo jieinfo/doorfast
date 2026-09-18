@@ -54,9 +54,7 @@
 #define DF_SEEN_MULTICAST_MODE (1ULL << 40)
 #define DF_SEEN_MULTICAST_ADDRESS (1ULL << 41)
 
-static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
-    memset(runtime, 0, sizeof(*runtime));
-    (void)snprintf(runtime->brand, sizeof(runtime->brand), "%s", "gvs");
+static void df_runtime_config_bind(struct df_runtime_config *runtime) {
     runtime->config.access_material = runtime->access_material;
     runtime->config.brand = runtime->brand;
     runtime->config.capture_interface = runtime->gvs_interface;
@@ -75,6 +73,12 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.media.rtsp_username = runtime->media_rtsp_username;
     runtime->config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
     runtime->config.media.relay_url = runtime->media_relay_url;
+}
+
+static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
+    memset(runtime, 0, sizeof(*runtime));
+    (void)snprintf(runtime->brand, sizeof(runtime->brand), "%s", "gvs");
+    df_runtime_config_bind(runtime);
     runtime->multicast_mode = DF_GVS_MULTICAST_AUTO;
     (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
                    "%s", "/etc/config/doorfast-sync");
@@ -551,7 +555,8 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
     return result;
 }
 
-int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime) {
+static int df_runtime_config_parse_into(const char *uci_text,
+                                        struct df_runtime_config *runtime) {
     const char *cursor;
     bool in_main = false;
     bool found_main = false;
@@ -636,6 +641,22 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
     }
     if (df_config_validate(&runtime->config) != DF_OK) return DF_ERR_INVALID;
     return df_station_registry_parse(&runtime->stations, uci_text);
+}
+
+int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime) {
+    struct df_runtime_config parsed = {0};
+    int result;
+
+    if (uci_text == NULL || runtime == NULL) return DF_ERR_INVALID;
+    result = df_runtime_config_parse_into(uci_text, &parsed);
+    if (result != DF_OK) {
+        df_runtime_config_destroy(&parsed);
+        return result;
+    }
+    df_station_registry_destroy(&runtime->stations);
+    *runtime = parsed;
+    df_runtime_config_bind(runtime);
+    return DF_OK;
 }
 
 int df_runtime_config_load(const char *path, struct df_runtime_config *runtime) {

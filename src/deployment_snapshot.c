@@ -218,11 +218,14 @@ static int df_read_config(const char *root, const char *name,
 
 static bool df_read_passive(const char *root) {
     char text[DF_SNAPSHOT_FILE_MAX];
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
+    bool passive;
 
     if (df_read_config(root, "doorfast", text, sizeof(text)) != DF_OK) return false;
-    return df_runtime_config_parse(text, &runtime) == DF_OK &&
-           runtime.config.passive_only;
+    if (df_runtime_config_parse(text, &runtime) != DF_OK) return false;
+    passive = runtime.config.passive_only;
+    df_runtime_config_destroy(&runtime);
+    return passive;
 }
 
 static void df_collect_addresses(const struct df_deployment_config *config,

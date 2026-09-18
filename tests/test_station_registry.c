@@ -50,33 +50,39 @@ void test_station_registry_rejects_duplicate_identity_fields(void) {
         "\toption enabled '1'\n"
         "\toption name 'Main Gate'\n"
         "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption route_preference 'discover_first'\n"
         "\toption stream_name 'doorfast_gate_main'\n"
         "config station 'gate_main'\n"
         "\toption enabled '1'\n"
         "\toption name 'Other Gate'\n"
         "\toption logical_address '32:02:01:00:03:00'\n"
+        "\toption route_preference 'discover_first'\n"
         "\toption stream_name 'doorfast_gate_other'\n";
     const char duplicate_address[] =
         "config station 'gate_main'\n"
         "\toption enabled '1'\n"
         "\toption name 'Main Gate'\n"
         "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption route_preference 'discover_first'\n"
         "\toption stream_name 'doorfast_gate_main'\n"
         "config station 'gate_other'\n"
         "\toption enabled '1'\n"
         "\toption name 'Other Gate'\n"
         "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption route_preference 'discover_first'\n"
         "\toption stream_name 'doorfast_gate_other'\n";
     const char duplicate_stream[] =
         "config station 'gate_main'\n"
         "\toption enabled '1'\n"
         "\toption name 'Main Gate'\n"
         "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption route_preference 'discover_first'\n"
         "\toption stream_name 'doorfast_gate'\n"
         "config station 'gate_other'\n"
         "\toption enabled '1'\n"
         "\toption name 'Other Gate'\n"
         "\toption logical_address '32:02:01:00:03:00'\n"
+        "\toption route_preference 'discover_first'\n"
         "\toption stream_name 'doorfast_gate'\n";
     struct df_station_registry registry = {0};
 
@@ -98,6 +104,21 @@ void test_station_registry_requires_ipv4_for_fixed_routes(void) {
         "\toption logical_address '32:02:01:00:02:00'\n"
         "\toption ipv4 ''\n"
         "\toption route_preference 'fixed'\n"
+        "\toption stream_name 'doorfast_gate_main'\n";
+    struct df_station_registry registry = {0};
+
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_station_registry_parse(&registry, input));
+    TEST_ASSERT_INT_EQ(0, registry.count);
+    df_station_registry_destroy(&registry);
+}
+
+void test_station_registry_requires_route_preference(void) {
+    const char input[] =
+        "config station 'gate_main'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Main Gate'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
         "\toption stream_name 'doorfast_gate_main'\n";
     struct df_station_registry registry = {0};
 
