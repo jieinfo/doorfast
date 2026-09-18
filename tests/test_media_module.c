@@ -1,8 +1,10 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "gvs_frame.h"
@@ -61,14 +63,14 @@ static int module_noop_control(const uint8_t destination[6],
     return DF_OK;
 }
 
-static int module_write_encoder_stub(char directory[], char program[],
-    size_t program_capacity) {
+static int module_write_program_stub(char directory[], char program[],
+    size_t program_capacity, const char *name) {
     static const char script[] = "#!/bin/sh\nIFS= read -r ignored || exit 0\n";
     int descriptor;
 
     if (mkdtemp(directory) == NULL ||
-        snprintf(program, program_capacity, "%s/encoder", directory) >=
-            (int)program_capacity)
+        name == NULL || snprintf(program, program_capacity, "%s/%s", directory,
+            name) >= (int)program_capacity)
         return DF_ERR_IO;
     descriptor = open(program, O_WRONLY | O_CREAT | O_EXCL, 0700);
     if (descriptor < 0 || write(descriptor, script, sizeof(script) - 1U) !=
@@ -79,6 +81,18 @@ static int module_write_encoder_stub(char directory[], char program[],
         return DF_ERR_IO;
     }
     return DF_OK;
+}
+
+static int module_write_encoder_stub(char directory[], char program[],
+    size_t program_capacity) {
+    return module_write_program_stub(directory, program, program_capacity,
+        "encoder");
+}
+
+static int module_write_ffmpeg_stub(char directory[], char program[],
+    size_t program_capacity) {
+    return module_write_program_stub(directory, program, program_capacity,
+        "ffmpeg");
 }
 
 static int module_send_relay(const char *url, const char *token,
@@ -232,6 +246,135 @@ void test_media_module_restarts_encoder_when_source_dimensions_change(void) {
     TEST_ASSERT_INT_EQ(360, module.encoder.source_width);
     TEST_ASSERT_INT_EQ(480, module.encoder.source_height);
     TEST_ASSERT_INT_EQ(1, module.encoder.pid != first_pid ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, setenv("PATH", original_path, 1));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
+    TEST_ASSERT_INT_EQ(0, unlink(credentials_path));
+    TEST_ASSERT_INT_EQ(0, unlink(encoder_program));
+    TEST_ASSERT_INT_EQ(0, rmdir(encoder_directory));
+}
+
+void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
+    const uint8_t jpeg[] = {0xff, 0xd8, 0x01, 0xff, 0xd9};
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t station[6] = {0x32, 2, 1, 0, 2, 0};
+    struct df_media_module module = {0};
+    struct module_trace trace = {0};
+    char credentials_path[] = "/tmp/doorfast-media-exit-XXXXXX";
+    char encoder_directory[] = "/tmp/doorfast-media-exit-encoder-XXXXXX";
+    char encoder_program[128];
+    char original_path[4096];
+    const char *path_value = getenv("PATH");
+    unsigned attempt;
+    const struct df_media_module_config_v1 config = {
+        .enabled = true,
+        .local = {0x61, 2, 1, 1, 1, 1},
+        .station = {0x32, 2, 1, 0, 2, 0},
+        .station_ipv4 = htonl(INADDR_LOOPBACK),
+        .go2rtc_host = "127.0.0.1",
+        .go2rtc_port = 8554,
+        .stream_name = "doorfast_preview",
+        .rtsp_username = "doorfast",
+        .credentials_path = credentials_path,
+        .encoder = DF_MEDIA_ENCODER_SOFTWARE,
+        .resolution = DF_MEDIA_RESOLUTION_SOURCE,
+        .fps = 10,
+        .bitrate_kbps = 800,
+        .profile = DF_MEDIA_PROFILE_BASELINE,
+        .relay_url = "http://ha.local",
+    };
+    const struct df_media_module_callbacks_v1 callbacks = {
+        .emit_control = module_noop_control,
+        .relay_send = module_send_relay,
+        .context = &trace,
+    };
+
+    TEST_ASSERT_INT_EQ(1, path_value != NULL &&
+        strlen(path_value) < sizeof(original_path));
+    if (path_value != NULL && strlen(path_value) < sizeof(original_path))
+        memcpy(original_path, path_value, strlen(path_value) + 1U);
+    else
+        original_path[0] = '\0';
+    TEST_ASSERT_INT_EQ(DF_OK, module_write_credentials(credentials_path));
+    TEST_ASSERT_INT_EQ(DF_OK, module_write_ffmpeg_stub(encoder_directory,
+        encoder_program, sizeof(encoder_program)));
+    TEST_ASSERT_INT_EQ(0, setenv("PATH", encoder_directory, 1));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(&module, &config,
+        &callbacks, 100U));
+    module.monitor.state = DF_GVS_MONITOR_PUBLISHING;
+    module.monitor.generation = 1U;
+    module.monitor.last_now_ms = 100U;
+    module.monitor.media_ready = true;
+    module.monitor.station_ipv4 = htonl(INADDR_LOOPBACK);
+    memcpy(module.monitor.local, local, sizeof(local));
+    memcpy(module.monitor.station, station, sizeof(station));
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_push_jpeg(&module, station,
+        local, htonl(INADDR_LOOPBACK), 1U, jpeg, sizeof(jpeg), 480U, 640U,
+        100U));
+    TEST_ASSERT_INT_EQ(1, module.encoder.running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, kill(module.encoder.pid, SIGKILL));
+    for (attempt = 0U; attempt < 100U && !module.encoder.encoder_exited;
+         ++attempt) {
+        struct timespec delay = {0, 1000000L};
+
+        (void)nanosleep(&delay, NULL);
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(
+            &module, 101U + attempt));
+    }
+
+    TEST_ASSERT_INT_EQ(1, module.encoder.encoder_exited ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_FAILED, module.monitor.state);
+    TEST_ASSERT_INT_EQ(0, strcmp("encoder_exited", module.failure));
+    TEST_ASSERT_INT_EQ(0, module.encoder.running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, (int)module.encoder.pid);
+    TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, (int)trace.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("monitor_failed", trace.entries[0]));
+    TEST_ASSERT_INT_EQ(1,
+        strstr(trace.last_json, "\"failure\":\"encoder_exited\"") != NULL ?
+            1 : 0);
+    TEST_ASSERT_INT_EQ(1, (int)module.monitor.generation);
+    TEST_ASSERT_INT_EQ(1,
+        strstr(trace.last_json, "\"generation\":1") != NULL ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 202U));
+    TEST_ASSERT_INT_EQ(1, (int)trace.count);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(&module, 203U));
+    module.monitor.state = DF_GVS_MONITOR_PUBLISHING;
+    module.monitor.last_now_ms = 203U;
+    module.monitor.media_ready = true;
+    module.monitor.station_ipv4 = htonl(INADDR_LOOPBACK);
+    memcpy(module.monitor.local, local, sizeof(local));
+    memcpy(module.monitor.station, station, sizeof(station));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_push_jpeg(&module, station,
+        local, htonl(INADDR_LOOPBACK), 2U, jpeg, sizeof(jpeg), 480U, 640U,
+        204U));
+    TEST_ASSERT_INT_EQ(1, module.encoder.running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, kill(module.encoder.pid, SIGKILL));
+    {
+        int write_status = DF_OK;
+
+        for (attempt = 0U; attempt < 100U && !module.encoder.encoder_exited;
+             ++attempt) {
+            write_status = df_media_module_push_jpeg(&module, station,
+                local, htonl(INADDR_LOOPBACK), 2U, jpeg, sizeof(jpeg),
+                480U, 640U, 205U + attempt);
+            if (module.encoder.encoder_exited) break;
+            {
+                struct timespec delay = {0, 1000000L};
+                (void)nanosleep(&delay, NULL);
+            }
+        }
+        TEST_ASSERT_INT_EQ(DF_ERR_IO, write_status);
+    }
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_FAILED, module.monitor.state);
+    TEST_ASSERT_INT_EQ(2, (int)module.monitor.generation);
+    TEST_ASSERT_INT_EQ(0, module.queue_initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 206U));
+    TEST_ASSERT_INT_EQ(2, (int)trace.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("monitor_failed", trace.entries[1]));
+    TEST_ASSERT_INT_EQ(1,
+        strstr(trace.last_json, "\"generation\":2") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, setenv("PATH", original_path, 1));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
     TEST_ASSERT_INT_EQ(0, unlink(credentials_path));

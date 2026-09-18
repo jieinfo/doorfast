@@ -135,6 +135,7 @@ void test_media_relay_accepts_http_and_redacts_event_payload(void);
 void test_media_relay_retries_bounded_and_rejects_other_schemes(void);
 void test_media_module_preempts_with_control_before_event(void);
 void test_media_module_restarts_encoder_when_source_dimensions_change(void);
+void test_media_module_encoder_exit_fails_generation_and_cleans_media(void);
 void test_media_module_clears_credentials_when_relay_initialization_fails(void);
 void test_media_module_rejects_stale_commands_and_status_has_no_secrets(void);
 void test_media_module_owns_config_loads_credentials_and_redacts_status(void);
@@ -316,6 +317,7 @@ int main(int argc, char **argv) {
     test_media_relay_retries_bounded_and_rejects_other_schemes();
     test_media_module_preempts_with_control_before_event();
     test_media_module_restarts_encoder_when_source_dimensions_change();
+    test_media_module_encoder_exit_fails_generation_and_cleans_media();
     test_media_module_clears_credentials_when_relay_initialization_fails();
     test_media_module_rejects_stale_commands_and_status_has_no_secrets();
     test_media_module_owns_config_loads_credentials_and_redacts_status();
