@@ -36,6 +36,29 @@ enum df_media_call_policy {
     DF_MEDIA_CALL_PRESERVE_PREVIEWS,
 };
 
+enum df_media_session_state_v3 {
+    DF_MEDIA_SESSION_IDLE = 0,
+    DF_MEDIA_SESSION_REQUESTING,
+    DF_MEDIA_SESSION_AWAITING_VIDEO,
+    DF_MEDIA_SESSION_PUBLISHING,
+    DF_MEDIA_SESSION_VIEWING,
+    DF_MEDIA_SESSION_STOPPING,
+    DF_MEDIA_SESSION_FAILED,
+    DF_MEDIA_SESSION_PREEMPTED,
+};
+
+enum df_media_error_v3 {
+    DF_MEDIA_ERROR_NONE = 0,
+    DF_MEDIA_ERROR_STATION_NOT_FOUND = 100,
+    DF_MEDIA_ERROR_STATION_DISABLED,
+    DF_MEDIA_ERROR_ROUTE_UNAVAILABLE,
+    DF_MEDIA_ERROR_CAPACITY_BUSY,
+    DF_MEDIA_ERROR_RESOURCE_EXHAUSTED,
+    DF_MEDIA_ERROR_ENCODER_FAILED,
+    DF_MEDIA_ERROR_GENERATION_MISMATCH,
+    DF_MEDIA_ERROR_SESSION_PREEMPTED,
+};
+
 struct df_media_station_config_v3 {
     const char *id;
     const char *stream_name;
@@ -72,9 +95,18 @@ struct df_media_session_key {
 
 struct df_media_session_status_v3 {
     char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    char stream_name[DF_MEDIA_MODULE_STREAM_MAX];
     uint64_t generation;
     enum df_media_session_purpose purpose;
+    enum df_media_session_state_v3 state;
+    enum df_media_error_v3 last_error;
     bool active;
+    bool ready;
+    bool viewer_active;
+    bool encoder_running;
+    uint64_t started_ms;
+    uint64_t status_revision;
+    unsigned queue_drops;
 };
 
 struct df_media_module_status_v3 {
@@ -87,6 +119,10 @@ struct df_media_module_status_v3 {
     size_t required_session_count;
     size_t session_count;
     struct df_media_session_status_v3 *sessions;
+    size_t configured_capacity;
+    size_t effective_capacity;
+    size_t active_encoders;
+    uint64_t status_revision;
 };
 
 struct df_media_module_config_v2 {
