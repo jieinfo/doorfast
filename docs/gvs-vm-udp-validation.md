@@ -45,3 +45,36 @@ after the recorder and Doorfast processes stop. It also compares routes and the
 network/firewall configuration hashes before and after cleanup.
 
 The r9 run used the short validation mode. The 60-second offline deadline and two-period takeover were previously verified with r4 and were not rerun for r9. The frame and transaction logs confirm receive-to-queue-to-frame-to-simulated-terminal flow; absence of transmission follows from the current source implementation, not from a dedicated outbound packet capture.
+
+## Active preview media acceptance
+
+The media acceptance runner is self-contained by default and uses a local RTSP
+ANNOUNCE/RECORD fixture plus a payload-blind fake FFmpeg process. It writes only
+redacted status, RTSP method/path metadata, and process counts to its output
+directory; credentials, SDP, JPEG fragments, RTP bytes, and APK contents are
+never included.
+
+```sh
+python3 -B tests/run_doorfast_vm_media.py
+```
+
+For an installed ImmortalWrt target, pass the existing SSH wrapper and the two
+APK paths:
+
+```sh
+python3 -B tests/run_doorfast_vm_media.py \
+  /absolute/path/to/vm/ssh.sh \
+  /absolute/path/to/doorfast.apk \
+  /absolute/path/to/doorfast-media.apk
+```
+
+No-argument mode performs the full synthetic fixture acceptance: generation 1
+reaches `publishing`, the local RTSP fixture sees `/doorfast_preview` with one
+producer, and an incoming-call preemption leaves media `idle` with no FFmpeg
+process. The three-argument VM mode installs both APKs, then performs a
+read-only installed-path check of Doorfast status, monitor status, FFmpeg
+process count, and unchanged network snapshots. It deliberately does not
+inject synthetic GVS/RTSP traffic into the VM, so its result is reported as an
+installed-path check rather than fixture acceptance. This is a transport and
+lifecycle fixture acceptance only. It does not verify a real door station, a
+physical installation, or live field video.
