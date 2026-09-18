@@ -70,6 +70,8 @@ struct df_config {
     const char *indoor_netmask;
     const char *uplink_interface;
     const char *sync_state_path;
+    const char *sync_mini1_secretkey;
+    const char *sync_mini2_secretkey;
     const char *access_material;
     bool passive_only;
     bool active_host;

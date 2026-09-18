@@ -141,9 +141,30 @@ static int df_media_module_start_encoder(struct df_media_module *module,
     config.profile = module->config.profile;
     config.width = width;
     config.height = height;
-    return df_media_encoder_start(&module->encoder, &config,
-                                 &module->credentials,
-                                 module->monitor.generation);
+    return module->start_encoder(&module->encoder, &config,
+        &module->credentials, module->monitor.generation);
+}
+
+static int df_media_module_read_available_memory(uint64_t *available_kib,
+    void *context) {
+    FILE *file;
+    char key[64];
+    char unit[16];
+    unsigned long long value;
+    (void)context;
+
+    if (available_kib == NULL) return DF_ERR_INVALID;
+    file = fopen("/proc/meminfo", "r");
+    if (file == NULL) return DF_ERR_IO;
+    while (fscanf(file, "%63s %llu %15s", key, &value, unit) == 3) {
+        if (strcmp(key, "MemAvailable:") == 0) {
+            (void)fclose(file);
+            *available_kib = (uint64_t)value;
+            return DF_OK;
+        }
+    }
+    (void)fclose(file);
+    return DF_ERR_IO;
 }
 
 static int df_media_module_copy(char *destination, size_t capacity,
@@ -186,8 +207,8 @@ static int df_media_module_select_encoder(struct df_media_module *module) {
 }
 
 int df_media_module_init(struct df_media_module *module,
-    const struct df_media_module_config_v1 *config,
-    const struct df_media_module_callbacks_v1 *callbacks, uint64_t now_ms) {
+    const struct df_media_module_config_v2 *config,
+    const struct df_media_module_callbacks_v2 *callbacks, uint64_t now_ms) {
     (void)now_ms;
     if (module == NULL || config == NULL || callbacks == NULL ||
         !config->enabled || df_gvs_station_validate(config->station) != DF_OK ||
@@ -220,6 +241,13 @@ int df_media_module_init(struct df_media_module *module,
         return DF_ERR_INVALID;
     }
     df_gvs_monitor_init(&module->monitor);
+    if (config->first_frame_timeout_s != 0U &&
+        df_gvs_monitor_set_first_frame_timeout(&module->monitor,
+            (uint64_t)config->first_frame_timeout_s * 1000U) != DF_OK) {
+        (void)df_media_module_destroy(module);
+        return DF_ERR_INVALID;
+    }
+    module->start_encoder = df_media_encoder_start;
     module->stop_encoder = df_media_encoder_stop;
     if (df_media_relay_init(&module->relay, module->relay_url,
             module->credentials.relay_token, callbacks->relay_send,
@@ -234,12 +262,28 @@ int df_media_module_init(struct df_media_module *module,
 
 int df_media_module_start(struct df_media_module *module, uint64_t now_ms) {
     uint32_t station_ipv4;
+    uint64_t available_kib;
+    uint64_t preview_duration_ms;
 
     if (module == NULL || !module->initialized ||
         (module->monitor.state != DF_GVS_MONITOR_IDLE &&
          module->monitor.state != DF_GVS_MONITOR_FAILED)) return DF_ERR_INVALID;
     if (module->monitor.state == DF_GVS_MONITOR_FAILED &&
         df_media_module_cleanup_media(module) != DF_OK) return DF_ERR_IO;
+    if (module->config.min_free_kib != 0U) {
+        df_media_module_available_memory_fn available_memory =
+            module->callbacks.available_memory == NULL ?
+                df_media_module_read_available_memory :
+                module->callbacks.available_memory;
+        if (available_memory(&available_kib, module->callbacks.context) != DF_OK ||
+            available_kib < module->config.min_free_kib) {
+            df_media_module_set_failure(module, "insufficient_memory");
+            return DF_ERR_IO;
+        }
+    }
+    preview_duration_ms = (uint64_t)module->config.preview_timeout_s * 1000U;
+    if (preview_duration_ms != 0U &&
+        now_ms > UINT64_MAX - preview_duration_ms) return DF_ERR_INVALID;
     station_ipv4 = module->config.station_ipv4;
     if (station_ipv4 == 0U && module->callbacks.resolve_route != NULL &&
         module->callbacks.resolve_route(module->config.station, now_ms,
@@ -248,6 +292,8 @@ int df_media_module_start(struct df_media_module *module, uint64_t now_ms) {
             module->config.local, module->config.station, station_ipv4,
             now_ms) != DF_OK) return DF_ERR_INVALID;
     df_media_module_set_failure(module, "");
+    module->preview_deadline_ms = preview_duration_ms == 0U ? 0U :
+        now_ms + preview_duration_ms;
     if (df_media_module_emit_event(module, "monitor_requested",
             module->monitor.generation, now_ms) != DF_OK) return DF_ERR_IO;
     return df_media_module_tick(module, now_ms);
@@ -286,6 +332,7 @@ int df_media_module_receive_control(struct df_media_module *module,
             module->monitor.generation, now_ms);
     }
     if (result.stopped) {
+        module->preview_deadline_ms = 0U;
         if (df_media_module_cleanup_media(module) != DF_OK)
             return df_media_module_report_cleanup_failure(module,
                 module->monitor.generation, now_ms);
@@ -377,6 +424,14 @@ int df_media_module_tick(struct df_media_module *module, uint64_t now_ms) {
     if (module == NULL || !module->initialized) return DF_ERR_INVALID;
     previous_state = module->monitor.state;
     generation = module->monitor.generation;
+    if (module->preview_deadline_ms != 0U &&
+        now_ms >= module->preview_deadline_ms &&
+        df_media_module_active(module->monitor.state) &&
+        module->monitor.state != DF_GVS_MONITOR_STOPPING) {
+        if (df_gvs_monitor_stop(&module->monitor, generation, now_ms) != DF_OK)
+            return DF_ERR_INVALID;
+        module->preview_deadline_ms = 0U;
+    }
     if (df_gvs_monitor_step(&module->monitor, now_ms, &action) != DF_OK)
         return DF_ERR_INVALID;
     if (action.send && df_media_module_emit_action(module, &action) != DF_OK) {
@@ -451,8 +506,8 @@ int df_media_module_destroy(struct df_media_module *module) {
 }
 
 static void *df_media_module_api_create(
-    const struct df_media_module_config_v1 *config,
-    const struct df_media_module_callbacks_v1 *callbacks) {
+    const struct df_media_module_config_v2 *config,
+    const struct df_media_module_callbacks_v2 *callbacks) {
     struct df_media_module *module = calloc(1U, sizeof(*module));
 
     if (module == NULL || df_media_module_init(module, config, callbacks, 0U) != DF_OK) {
@@ -506,9 +561,9 @@ static int df_media_module_api_status(const void *instance,
     return df_media_module_status(instance, status);
 }
 
-const struct df_media_module_api_v1 df_media_module_api_v1 = {
+const struct df_media_module_api_v2 df_media_module_api_v2 = {
     .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
-    .struct_size = sizeof(struct df_media_module_api_v1),
+    .struct_size = sizeof(struct df_media_module_api_v2),
     .create = df_media_module_api_create,
     .destroy = df_media_module_api_destroy,
     .start = df_media_module_api_start,

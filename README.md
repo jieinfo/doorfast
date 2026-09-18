@@ -6,7 +6,7 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的 GVS 可视门禁适配服务�
 
 > **现场边界：协议报文已成功提交或收到协议确认，不等于门锁、电梯、门口机或物业平台已实际执行。** 本文分别记录代码接线、测试、材料交叉验证和实体设备闭环，禁止用前三者代替实机结论。
 
-本文基于 2026-09-18 对 `origin/main@13666b4` 的全仓库复核，覆盖 `src/`、3 个 APK 配方、LuCI、init 脚本、CLI、HTTP/ubus/Unix 接口、全部测试和 CI。此前“主程序只构造并排队控制报文”的描述已经过时：呼叫、开锁、召梯、音频和视频主链路都已接入生产 UDP；在线身份维护仍有明确缺口，见“已知限制”。
+本文基于 2026-09-18 对完整代码和测试的复核，覆盖 `src/`、3 个 APK 配方、LuCI、init 脚本、CLI、HTTP/ubus/Unix 接口和 CI。此前“主程序只构造并排队控制报文”的描述已经过时：呼叫、在线维护、开锁、召梯、音频和视频主链路都已接入生产 UDP；尚未完成的实体设备验证见“已知限制和未完成项”。
 
 ## 安全和部署前提
 
@@ -55,15 +55,15 @@ flowchart LR
     daemon --> media --> ffmpeg --> go2rtc --> ha
 ```
 
-单次守护进程运行期间以 `generation` 隔离呼叫、控制和媒体。新来电、抢占、挂断或超时会使旧 generation 的操作失效，避免把旧按钮、旧音频或旧画面提交到新会话。守护进程重启后 generation 会从 1 重新计数；`runtime_id` 可区分不同运行实例，但当前普通 HTTP/ubus 控制请求尚未强制携带它，见“已知限制和未完成项”。
+单次守护进程运行期间以 `generation` 隔离呼叫、控制和媒体。新来电、抢占、挂断或超时会使旧 generation 的操作失效，避免把旧按钮、旧音频或旧画面提交到新会话。守护进程重启后 generation 会从 1 重新计数；接听、挂断、开锁和召梯同时强制匹配本次运行的 `runtime_id`，防止延迟请求碰撞到重启后的同号 generation。
 
 ## 软件包
 
 | APK | 当前版本 | 内容 | 架构 |
 |---|---|---|---|
-| `doorfast` | `0.1.0-r51` | 守护进程、记录器、事件 relay、PCM HTTP/CLI、CGI 桥、init/UCI、站点清单工具 | x86_64 |
-| `doorfast-media` | `0.1.0-r1` | 可选的 `/usr/lib/doorfast/media-v1.so`，由主守护进程 `dlopen()`；不安装独立服务 | x86_64 |
-| `luci-app-doorfast` | `0.1.0-r14` | 状态、媒体、自动化、部署、HA relay 和日志页面 | all |
+| `doorfast` | `0.1.0-r52` | 守护进程、记录器、事件 relay、PCM HTTP/CLI、CGI 桥、init/UCI、站点清单工具 | x86_64 |
+| `doorfast-media` | `0.1.0-r2` | 可选的 ABI v2 `/usr/lib/doorfast/media-v2.so`，由主守护进程 `dlopen()`；不安装独立服务 | x86_64 |
+| `luci-app-doorfast` | `0.1.0-r15` | 状态、媒体、自动化、部署、HA relay 和日志页面 | all |
 
 `doorfast-media` 中的 `.so` 是本项目为 ImmortalWrt 编译的原生共享模块，不是 Android APK 内提取的二进制。
 
@@ -93,8 +93,8 @@ GitHub Actions 使用校验过 SHA-256 的官方 ImmortalWrt 25.12.1 x86_64 SDK�
 | HA 事件 relay | HTTP/HTTPS、队列、重连、退避、令牌文件和轮询兜底 | 是 | 是 | 不适用 | 不适用 |
 | LuCI | 状态/媒体、来电自动化、部署配置、HA relay、内存日志 | 是 | 是 | 不适用 | 不适用 |
 | 透明串联取证 | 只读预检、轮转 PCAP、元数据、空间保护、前后站点清单比对 | 是 | 是 | 不适用 | 不适用 |
-| 在线 peer 回复 | `07/81` 可序列化，但生产 reply queue 仍写入内存 sender | 否 | 是 | 是 | 否 |
-| 周期同步 | `91/03` 可序列化并有测试，生产运行时没有调用发送 | 否 | 是 | 是 | 否 |
+| 在线 peer 回复 | 收到 `07/01` 后，经事务队列和运行时厂商头发送真实 `07/81` UDP | 是 | 是 | 是 | 否 |
+| 周期同步 | 维护者把已配置的厂商同步键按最多 20 项分片发送真实 `91/03` UDP；日志记录实际包数 | 是 | 是 | 是 | 否 |
 
 ### 已经接入真实 UDP 的控制路径
 
@@ -109,8 +109,10 @@ GitHub Actions 使用校验过 SHA-256 的官方 ImmortalWrt 25.12.1 x86_64 SDK�
 - 电梯状态查询 `08/03`、状态响应 `08/83`。
 - G.711 A-law 上行音频 UDP/8302。
 - 主动预览请求 `03/04` 和停止 `03/02`。
+- 在线 peer 回复 `07/81`。
+- 维护者周期同步 `91/03`；只有已填写现场确认值的同步键会进入报文。
 
-所有控制帧使用运行时厂商随机字段/变换字段。普通呼叫、开锁和召梯控制优先使用已观察到的 peer IPv4；该表项当前没有时间戳或过期机制，未命中时才根据目标逻辑身份推导 IPv4。主动预览使用另一张带时间戳的 station 路由表：抓包学习的地址只在 60 秒内有效，也可使用明确配置的门口机 IP 作为回退。`status` 中的 `physical_result_confirmed` 对开锁和召梯保持为 `false`，因为协议成功不能证明机械动作。
+所有控制帧使用运行时厂商随机字段/变换字段。普通呼叫、在线回复、开锁和召梯控制优先使用最近 60 秒内观察到的 peer IPv4；表项在 60 秒边界失效，未命中时根据目标逻辑身份推导 IPv4，新报文会刷新路由。主动预览使用独立的 station 路由表：抓包学习的地址同样只在 60 秒内有效，也可使用明确配置的门口机 IP 作为回退。`status` 中的 `physical_result_confirmed` 对开锁和召梯保持为 `false`，因为协议成功不能证明机械动作。
 
 ## 安装与启动
 
@@ -167,6 +169,8 @@ config gvs 'main'
 	option active_host '1'
 	option capture_promiscuous '0'
 	option access_material ''
+	option sync_mini1_secretkey ''
+	option sync_mini2_secretkey ''
 	option sync_state_path '/etc/config/doorfast-sync'
 ```
 
@@ -178,13 +182,14 @@ config gvs 'main'
 - init 脚本把 `IP/掩码` 临时添加到 `host_interface`，守护进程将 UDP sender 绑定到该 IP；停服时删除临时地址。
 - 守护进程按身份推导组播地址，加入对应 UDP/8300 组。
 - `access_material` 是直接开锁报文使用的 8 字节材料，以 16 个十六进制字符填写。留空时开锁控制不可用，不生成默认值。
+- `sync_mini1_secretkey` 和 `sync_mini2_secretkey` 是厂商材料确认的两个 Mini 同步键。它们属于站点敏感值，只能填写从原设备或物业配置获得的真实值；留空时不生成替代值，也不会把该键放入周期 `91/03`。
 - `uplink_interface` 仅标识可选的管理/上行接口，不改变门禁网口。
 
-当前现场已经完成门口机来电送达与 `03/81` 回执验证，门口机不再显示“无应答”，因此早期故障不再是未解决项。主机模式仍缺少完整在线身份维护：`07/81` peer reply 和 `91/03` 周期同步尚未接入生产发送。这两项影响冷启动、长时间在线和不同物业网络的兼容性，但不能再被描述成当前现场来电回执失败的原因。
+当前现场已经完成门口机来电送达与 `03/81` 回执验证，门口机不再显示“无应答”，因此早期故障不再是未解决项。`07/81` peer reply 和 `91/03` 周期同步已经接入生产发送，但新发送路径仍需在现场做冷启动、长时间在线和双向 PCAP 回归；代码接线不能代替物业系统认可的 L4 证据。
 
 ## 来电、控制和 generation
 
-`ubus call doorfast status` 是运行状态的权威入口。来电创建 generation；接听、挂断和开锁都要求提交当前 generation，同一守护进程运行期间的旧 generation 会被拒绝。召梯操作由服务生成独立 transaction ID。状态中的 16 位十六进制 `runtime_id` 标识本次守护进程运行，但普通控制接口当前不校验该字段，因此客户端在重启后必须丢弃缓存的 generation 并重新读取状态。
+`ubus call doorfast status` 是运行状态的权威入口。来电创建 generation；接听、挂断和开锁都要求提交当前 generation。接听、挂断、开锁和召梯还必须提交状态中的 16 位小写十六进制 `runtime_id`，并与当前守护进程运行实例完全一致。召梯操作由服务生成独立 transaction ID。Doorfast 重启后，客户端必须重新读取状态并丢弃旧 runtime 下的 generation 和事件高水位。
 
 常用 ubus 方法：
 
@@ -192,10 +197,10 @@ config gvs 'main'
 |---|---|---|
 | `status` | `{}` | 同步、呼叫、开锁、电梯、音频、视频和媒体状态 |
 | `logs` | `{}` | 最多 128 条内存日志；重启后清空 |
-| `answer` | `generation`、`primary_media_port`、`secondary_media_port`、`duration_seconds` | `queued=true` 只表示已进入发送事务 |
-| `hangup` | `generation`、`reason` | `queued=true` 只表示已进入发送事务 |
-| `unlock` | `generation` | `submitted=true` 只表示协议事务已提交 |
-| `call_elevator` | `direction=up|down` | 返回 transaction ID，不宣称电梯已动作 |
+| `answer` | `runtime_id`、`generation`、`primary_media_port`、`secondary_media_port`、`duration_seconds` | `queued=true` 只表示已进入发送事务 |
+| `hangup` | `runtime_id`、`generation`、`reason` | `queued=true` 只表示已进入发送事务 |
+| `unlock` | `runtime_id`、`generation` | `submitted=true` 只表示协议事务已提交 |
+| `call_elevator` | `runtime_id`、`direction=up|down` | 返回 transaction ID，不宣称电梯已动作 |
 | `monitor_start` | `{}` | 返回新的预览 generation 和 `queued` 状态 |
 | `monitor_stop` | `generation` | 只停止匹配的预览 |
 | `monitor_viewer` | `generation`、`active` | 更新当前 generation 的观看者状态 |
@@ -207,12 +212,16 @@ config gvs 'main'
 ```sh
 status="$(ubus call doorfast status)"
 generation="$(printf '%s' "$status" | jsonfilter -e '@.call.generation')"
+runtime_id="$(printf '%s' "$status" | jsonfilter -e '@.runtime_id')"
 
 ubus call doorfast answer \
-  "{\"generation\":$generation,\"primary_media_port\":8303,\"secondary_media_port\":8302,\"duration_seconds\":60}"
-ubus call doorfast unlock "{\"generation\":$generation}"
-ubus call doorfast call_elevator '{"direction":"up"}'
-ubus call doorfast hangup "{\"generation\":$generation,\"reason\":0}"
+  "{\"runtime_id\":\"$runtime_id\",\"generation\":$generation,\"primary_media_port\":8303,\"secondary_media_port\":8302,\"duration_seconds\":60}"
+ubus call doorfast unlock \
+  "{\"runtime_id\":\"$runtime_id\",\"generation\":$generation}"
+ubus call doorfast call_elevator \
+  "{\"runtime_id\":\"$runtime_id\",\"direction\":\"up\"}"
+ubus call doorfast hangup \
+  "{\"runtime_id\":\"$runtime_id\",\"generation\":$generation,\"reason\":0}"
 ```
 
 来电自动向上召梯位于 LuCI 的“来电自动化”页，配置保存在 `/etc/config/doorfast-automation`。默认关闭；启用后每个来电 generation 最多提交一次向上召梯。
@@ -260,7 +269,7 @@ doorfast-pcm-submit "$generation" < frame.pcm
 - UDP/8303 只接纳当前 generation 且来源/目标匹配的媒体，完成 JPEG 分片重组、结构校验和尺寸提取。
 - 最新 JPEG 默认发布到 `/tmp/doorfast-latest.jpg`；HTTP 读取时再次核对 generation、帧号和长度，避免读取到切换中的文件。
 
-这些路径已完成单元和 VM 验证，但真实扬声器播放、麦克风回声、时延、抖动及长时间稳定性尚未通过实体设备验收。
+上行 PCM → A-law → UDP/8302 已完成单元和 VM 验证；下行音频与通话视频目前由主机测试、HTTP fixture 和 PCAP 交叉验证覆盖，尚未完成整条 VM 媒体注入。真实扬声器播放、麦克风回声、时延、抖动及长时间稳定性尚未通过实体设备验收。
 
 ### 主动预览到 Home Assistant
 
@@ -298,17 +307,13 @@ Doorfast 需要访问 Home Assistant/go2rtc 的 `8554/TCP` 来发布 RTSP；HA W
 
 分辨率支持源尺寸、480x640、360x480 和 240x320；帧率支持 5、8、10、12、15 FPS；目标码率允许 256–2000 Kbps；Profile 支持 Baseline 和 Main。凭据保存在 `/etc/doorfast/media-credentials`，页面不会回显已保存值，修改后需重启 Doorfast 才进入运行模块。
 
-当前 ABI 只允许 1 条主动预览编码流。以下 UCI 字段已经解析并校验，但尚未传入运行媒体模块，当前修改它们不会改变运行行为：
+当前 ABI v2 只允许 1 条主动预览来源编码流，多名观看者由 go2rtc 共享该流。下列 LuCI/UCI 选项已传入媒体模块并实际影响运行行为：
 
-- `media_max_encoders`
-- `media_min_free_kib`
-- `media_preview_timeout`
-- `media_first_frame_timeout`
-- `media_publish_retries`
-- `media_overload_policy`
-- `media_diagnostics`
+- `media_min_free_kib`：发送预览请求前读取 `/proc/meminfo` 的 `MemAvailable`，不足时以 `insufficient_memory` 拒绝启动。
+- `media_preview_timeout`：单次预览达到总时限后进入停止状态并发送协议停止请求。
+- `media_first_frame_timeout`：门口机确认预览后等待首个 JPEG 帧的超时。
 
-当前实际监控常量为：请求间隔 1000 ms、最多 3 次请求、首帧超时 8000 ms、停止确认超时 1000 ms。文档和 LuCI 中存在配置项不代表它已经生效。
+旧配置中的 `media_max_encoders`、`media_overload_policy`、`media_diagnostics` 和 `media_publish_retries` 仍由解析器接受以兼容升级，但不再出现在默认 UCI 或 LuCI 中，也不改变运行行为。FFmpeg 子进程异常退出会让当前预览失败并回收资源，不会宣称已经执行发布重试。请求间隔 1000 ms、最多 3 次请求和停止确认超时 1000 ms 仍为固定协议常量。多来源并发需要未来的多会话 ABI，当前不能描述为可配置多路编码。
 
 ## Home Assistant 集成
 
@@ -525,14 +530,10 @@ python3 tests/run_doorfast_vm_media.py /absolute/path/to/vm/ssh.sh
 
 ### 在线身份维护
 
-这是当前最关键的主程序缺口：
-
-- `07/01`、`91/01` 和 `91/02` 能经 UDP presence emitter 序列化和发送。
-- presence emitter 对 `peer_online`、`peer_offline` 和 `periodic_sync` 动作当前直接返回成功而不发包，日志可能因此误报 `sent=1`。
-- 收到 peer probe 后生成的 `07/81` 进入 `gvs_reply_queue`，随后由 placeholder header 的 memory sender 处理，没有进入真实 UDP socket。
-- `91/03` 周期同步序列化器已经实现并有测试/模拟器覆盖，但生产运行时没有调用它。
-
-所以，呼叫、控制和媒体的主要发送链已经是生产 UDP，当前现场也已经完成门口机来电送达与 `03/81` 回执，门口机不再显示“无应答”。尚未完成的是完整冷启动上线、peer 身份回复和周期同步；这些属于在线身份维护与跨现场兼容性缺口，不能倒推为已经解决的来电回执仍然失败。
+- `07/01`、`91/01` 和 `91/02` 经 UDP presence emitter 发送；收到 `07/01` 后，reply queue 使用同一个运行时厂商头提供器和真实 UDP socket 发送 48 字节 `07/81`。
+- 主机模式启动时，只把非空的 `sync_mini1_secretkey`、`sync_mini2_secretkey` 配置加入同步 store。维护者的 `periodic_sync` 按每包最多 20 项构造并发送 `91/03`；空 store、`peer_online` 和 `peer_offline` 属于零包动作，不会伪造同步键值。
+- `sync_action` 日志中的 `sent` 只在实际发出至少一个 UDP 包时为 1，并同时记录 `packets=N`，不再把零包动作记作已发送。
+- 上述生产路径已有本地 UDP 和序列化测试，但尚未取得现场物业系统冷启动认可、周期在线维持及双向 PCAP 的 L4 证据。
 
 ### 实体设备闭环
 
@@ -549,7 +550,7 @@ python3 tests/run_doorfast_vm_media.py /absolute/path/to/vm/ssh.sh
 ### 媒体资源策略
 
 - 当前 ABI 只有一个 station、monitor 和 encoder，因此只支持 1 条来源流，`effective_capacity` 固定为模块可用时的 1。多个 HA 观看者由 go2rtc 共享这条编码流，不需要为每名观看者各启动一个编码器。
-- 资源阈值、最大编码器数、预览时限、发布重试、过载策略和诊断开关已由 UCI/LuCI 读取，但尚未接入 ABI，因此这些选项目前不会改变媒体模块行为。
+- 最低可用内存、预览总时限和首帧超时已经进入 ABI v2 并由 LuCI 配置。旧的最大编码器数、过载策略、诊断开关和发布重试次数仅为解析兼容，不影响运行。
 - `media_max_encoders > 1` 只有在未来支持多个门口机或多个并行媒体会话时才有实际含义；这需要把单 station/monitor/encoder 模型改成多会话 ABI，不能仅靠传入一个数值实现。
 - 编码器和 go2rtc 端到端失败处理已测试，但未在真实门口机视频流上调优。
 
@@ -558,32 +559,24 @@ python3 tests/run_doorfast_vm_media.py /absolute/path/to/vm/ssh.sh
 - LuCI 不包含控制按钮；控制入口属于 HA/受控 API。
 - HTTP CGI 没有独立用户认证，网络访问控制由 OpenWrt/uhttpd 和部署拓扑承担。
 - 普通 status、控制和快照 CGI 路由尚未强制校验 HTTP method；只有 PCM 与 monitor 路由执行 method 检查。
-- generation 在进程重启后从 1 重新计数。普通 HTTP/ubus 控制尚未绑定 `runtime_id`，忽略运行实例变化的客户端可能把延迟请求碰撞到重启后的同号 generation。
-- 普通控制学习到的 peer IPv4 没有时间戳和过期机制；网络地址变化后可能继续使用旧路由，直到表项被替换。主动预览的独立路由已有 60 秒新鲜度限制。
+- generation 在进程重启后从 1 重新计数；普通控制已经强制匹配 `runtime_id`。旧版客户端若不提交该字段会被拒绝，必须升级配套 HA 集成。
+- 普通控制学习到的 peer IPv4 与主动预览路由都执行 60 秒新鲜度限制；普通路由失效后回退到逻辑身份推导地址，因此现场仍需验证地址变化时的实际可达性。
 - 内存日志容量为 128，重启即丢失；页面不会提供长期审计存储。
 - HTTP/ubus 返回的是接收、排队、提交或协议状态，永不代表实体动作已确认。
 
 ## 下一步开发顺序
 
-该顺序按性质和依赖关系排列，不把已经通过的现场来电回执重新列为开发任务。代码事实与后续设计选择分别说明：
+本轮 P0 在线发送、P1 控制可靠性和 P2 媒体配置一致性已经完成代码接线与自动化测试。后续按证据缺口推进：
 
-### P0：在线协议缺口
-
-1. 把 `07/81` peer reply 接到真实 UDP sender，并替换 placeholder header。依据：`src/runtime_service.c` 的 reply queue 当前调用 `df_gvs_memory_send_attempt()`。
-2. 把 `91/03` 周期同步接入生产 runtime，修正 no-op 动作的 `sent` 日志语义。依据：`src/gvs_udp_sender.c` 对 `DF_GVS_PRESENCE_PERIODIC_SYNC` 直接返回成功而不发包，`src/runtime_service.c` 随后仍可记录 `sent=1`。
-
-### P1：控制可靠性加固
-
-3. 让普通控制请求携带并强制匹配 `runtime_id`，同时为普通 peer 路由加入新鲜度和失效策略。代码事实：`src/runtime_ubus.c` 的 answer、hangup、unlock 和 elevator policy 没有 `runtime_id`；`src/gvs_udp_sender.h` 的 `df_gvs_observed_route` 没有时间戳。该项用于防止进程重启后的同号 generation 竞态和地址变化后的陈旧路由，不是当前来电回执或在线协议的阻断原因。
-
-### P2：媒体配置一致性
-
-4. 对尚未接入 ABI 的媒体资源选项逐项落地或从 LuCI 移除，避免展示无效配置。当前单门口机模型继续保持一条来源编码流，多名观看者由 go2rtc 共享；如果以后确认需要多个门口机或多个并行来源，再设计多会话 ABI，并让 `media_max_encoders` 成为真实的并发上限。当前代码不能被描述为已经具备可配置多路并发。
+1. 在 ImmortalWrt VM 安装同一次 CI 生成的 `doorfast r52`、`doorfast-media r2` 和 `luci-app-doorfast r15`，验证升级、ABI v2 加载、ubus 参数拒绝、零包 `sent=0 packets=0` 与真实 UDP 发包。
+2. 现场抓取冷启动和至少两个同步周期的双向 PCAP，确认 `07/01 → 07/81`、`91/01`/`91/02` 与分片 `91/03` 被物业系统接受，并核对源 IP、目标 IP、端口和厂商头。
+3. 使用新版 `doorfastforha` 依次验证 Doorfast 重启、runtime 切换、来电、接听、挂断、开锁和向上/向下召梯，分别记录协议提交、协议确认和实体结果。
+4. 验证主动预览、通话视频和双向音频，再根据实体流量调整内存阈值、超时、码率、缓冲和回声处理；确认可靠的异步发布重启策略前不重新暴露发布重试选项。
 
 ## 后续现场回归和验收
 
 - 来电送达与 `03/81` 回执已经在当前现场完成，门口机不再显示“无应答”，不再作为待解决问题。
-- `07/81` 和 `91/03` 生产发送完成后，重新执行“冷启动 → 长时间在线 → 来电 → 应答 → 挂断”双向抓包，目的是确认新在线维护代码没有造成回归，并验证不同冷启动条件，不是再次解决“无应答”。
+- 针对新接入的 `07/81` 和 `91/03` 生产发送，重新执行“冷启动 → 长时间在线 → 来电 → 应答 → 挂断”双向抓包，目的是确认在线维护代码没有造成回归，并验证不同冷启动条件，不是再次解决“无应答”。
 - 分别验证开锁、向上/向下召梯和电梯状态，分开记录协议确认与实体结果。
 - 验证主动预览、通话视频和双向音频，再根据实测调整超时、码率、缓冲和回声处理。
 - `doorfastforha` PR #22 已完成原生 WebRTC camera、monitor generation、viewer 生命周期和断线清理；剩余工作是在目标 Home Assistant 与实体门口机上完成整套控制、视频和音频验收，而不是继续实现同一套 WebRTC 契约。

@@ -13,7 +13,7 @@
 #include "media_frame_queue.h"
 #include "media_relay.h"
 
-#define DF_MEDIA_MODULE_ABI_VERSION 1U
+#define DF_MEDIA_MODULE_ABI_VERSION 2U
 #define DF_MEDIA_MODULE_STATE_MAX 24U
 #define DF_MEDIA_MODULE_FAILURE_MAX 96U
 #define DF_MEDIA_MODULE_HOST_MAX 64U
@@ -25,7 +25,7 @@ enum df_media_module_command {
     DF_MEDIA_MODULE_COMMAND_VIEWER,
 };
 
-struct df_media_module_config_v1 {
+struct df_media_module_config_v2 {
     bool enabled;
     uint8_t local[6];
     uint8_t station[6];
@@ -40,6 +40,9 @@ struct df_media_module_config_v1 {
     uint8_t fps;
     uint16_t bitrate_kbps;
     enum df_media_profile profile;
+    uint32_t min_free_kib;
+    uint16_t preview_timeout_s;
+    uint8_t first_frame_timeout_s;
     const char *relay_url;
 };
 
@@ -51,11 +54,17 @@ typedef int (*df_media_module_resolve_route_fn)(const uint8_t peer[6],
     uint64_t now_ms, uint32_t *ipv4, void *context);
 typedef int (*df_media_module_encoder_stop_fn)(
     struct df_media_encoder_process *, unsigned timeout_ms);
+typedef int (*df_media_module_encoder_start_fn)(
+    struct df_media_encoder_process *, const struct df_media_encoder_config *,
+    const struct df_media_credentials *, uint64_t generation);
+typedef int (*df_media_module_available_memory_fn)(uint64_t *available_kib,
+    void *context);
 
-struct df_media_module_callbacks_v1 {
+struct df_media_module_callbacks_v2 {
     df_media_module_emit_control_fn emit_control;
     df_media_module_resolve_route_fn resolve_route;
     df_media_relay_send_fn relay_send;
+    df_media_module_available_memory_fn available_memory;
     void *context;
 };
 
@@ -72,8 +81,8 @@ struct df_media_module_status {
 };
 
 struct df_media_module {
-    struct df_media_module_config_v1 config;
-    struct df_media_module_callbacks_v1 callbacks;
+    struct df_media_module_config_v2 config;
+    struct df_media_module_callbacks_v2 callbacks;
     struct df_gvs_monitor monitor;
     struct df_media_frame_queue queue;
     struct df_media_encoder_process encoder;
@@ -84,16 +93,18 @@ struct df_media_module {
     char rtsp_username[DF_MEDIA_MODULE_USERNAME_MAX];
     char credentials_path[256];
     char relay_url[DF_MEDIA_RELAY_URL_MAX];
+    df_media_module_encoder_start_fn start_encoder;
     df_media_module_encoder_stop_fn stop_encoder;
     bool queue_initialized;
     bool initialized;
     uint64_t status_revision;
+    uint64_t preview_deadline_ms;
     char failure[DF_MEDIA_MODULE_FAILURE_MAX];
 };
 
 int df_media_module_init(struct df_media_module *,
-    const struct df_media_module_config_v1 *,
-    const struct df_media_module_callbacks_v1 *, uint64_t now_ms);
+    const struct df_media_module_config_v2 *,
+    const struct df_media_module_callbacks_v2 *, uint64_t now_ms);
 int df_media_module_start(struct df_media_module *, uint64_t now_ms);
 int df_media_module_command(struct df_media_module *,
     enum df_media_module_command, uint64_t generation, bool active,
@@ -110,11 +121,11 @@ int df_media_module_status(const struct df_media_module *,
     struct df_media_module_status *);
 int df_media_module_destroy(struct df_media_module *);
 
-struct df_media_module_api_v1 {
+struct df_media_module_api_v2 {
     uint32_t abi_version;
     uint32_t struct_size;
-    void *(*create)(const struct df_media_module_config_v1 *,
-                    const struct df_media_module_callbacks_v1 *);
+    void *(*create)(const struct df_media_module_config_v2 *,
+                    const struct df_media_module_callbacks_v2 *);
     void (*destroy)(void *);
     int (*start)(void *, uint64_t);
     int (*command)(void *, enum df_media_module_command, uint64_t, bool,
@@ -129,6 +140,6 @@ struct df_media_module_api_v1 {
     int (*status)(const void *, struct df_media_module_status *);
 };
 
-extern const struct df_media_module_api_v1 df_media_module_api_v1;
+extern const struct df_media_module_api_v2 df_media_module_api_v2;
 
 #endif

@@ -48,6 +48,8 @@
 #define DF_SEEN_MEDIA_OVERLOAD_POLICY (1ULL << 35)
 #define DF_SEEN_MEDIA_DIAGNOSTICS (1ULL << 36)
 #define DF_SEEN_MEDIA_RELAY_URL (1ULL << 37)
+#define DF_SEEN_SYNC_MINI1_SECRETKEY (1ULL << 38)
+#define DF_SEEN_SYNC_MINI2_SECRETKEY (1ULL << 39)
 
 static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     memset(runtime, 0, sizeof(*runtime));
@@ -61,6 +63,8 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.indoor_netmask = runtime->indoor_netmask;
     runtime->config.uplink_interface = runtime->uplink_interface;
     runtime->config.sync_state_path = runtime->sync_state_path;
+    runtime->config.sync_mini1_secretkey = runtime->sync_mini1_secretkey;
+    runtime->config.sync_mini2_secretkey = runtime->sync_mini2_secretkey;
     runtime->config.media.station_address = runtime->media_station_address;
     runtime->config.media.station_ipv4 = runtime->media_station_ipv4;
     runtime->config.media.go2rtc_host = runtime->media_go2rtc_host;
@@ -84,7 +88,9 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.media.min_free_kib = 393216U;
     runtime->config.media.preview_timeout_s = 120U;
     runtime->config.media.first_frame_timeout_s = 8U;
-    runtime->config.media.publish_retries = 3U;
+    /* Kept only as a legacy parser field; production publication failures
+     * are reported asynchronously and are not retried by this option. */
+    runtime->config.media.publish_retries = 0U;
     runtime->config.media.overload_policy = DF_MEDIA_OVERLOAD_REJECT_NEW;
     runtime->config.media.diagnostics = true;
     (void)snprintf(runtime->media_stream_name, sizeof(runtime->media_stream_name),
@@ -329,6 +335,18 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_copy_option(runtime->sync_state_path,
                               sizeof(runtime->sync_state_path), value);
+    }
+    if (strcmp(name, "sync_mini1_secretkey") == 0) {
+        option = DF_SEEN_SYNC_MINI1_SECRETKEY;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->sync_mini1_secretkey,
+                              sizeof(runtime->sync_mini1_secretkey), value);
+    }
+    if (strcmp(name, "sync_mini2_secretkey") == 0) {
+        option = DF_SEEN_SYNC_MINI2_SECRETKEY;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->sync_mini2_secretkey,
+                              sizeof(runtime->sync_mini2_secretkey), value);
     }
     if (strcmp(name, "passive_only") == 0) {
         option = DF_SEEN_PASSIVE_ONLY;

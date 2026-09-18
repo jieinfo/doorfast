@@ -92,7 +92,7 @@ static int runtime_media_fake_control(void *instance,
 void test_runtime_media_builds_module_config_without_guessing_route(void) {
     const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
     struct df_runtime_config runtime = {0};
-    struct df_media_module_config_v1 output;
+    struct df_media_module_config_v2 output;
     uint32_t loopback = 0;
 
     runtime.config.media.enabled = true;
@@ -103,12 +103,18 @@ void test_runtime_media_builds_module_config_without_guessing_route(void) {
     runtime.config.media.rtsp_username = "doorfast";
     runtime.config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
     runtime.config.media.relay_url = "";
+    runtime.config.media.min_free_kib = 262144U;
+    runtime.config.media.preview_timeout_s = 90U;
+    runtime.config.media.first_frame_timeout_s = 6U;
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_build_module_config(
         &runtime, local, &output));
     TEST_ASSERT_INT_EQ(0, (int)output.station_ipv4);
     TEST_ASSERT_INT_EQ(0, memcmp(local, output.local, sizeof(output.local)));
     TEST_ASSERT_INT_EQ(0, memcmp((const uint8_t[]){0x32, 2, 1, 0, 2, 0},
                                  output.station, sizeof(output.station)));
+    TEST_ASSERT_INT_EQ(262144, (int)output.min_free_kib);
+    TEST_ASSERT_INT_EQ(90, (int)output.preview_timeout_s);
+    TEST_ASSERT_INT_EQ(6, (int)output.first_frame_timeout_s);
 
     runtime.config.media.station_ipv4 = "127.0.0.1";
     TEST_ASSERT_INT_EQ(1, inet_pton(AF_INET, "127.0.0.1", &loopback));
@@ -125,7 +131,7 @@ void test_runtime_media_preempts_before_incoming_call_state_changes(void) {
     struct df_gvs_session session = {0};
     struct df_gvs_deadline deadline = {0};
     struct runtime_media_trace trace = {.session = &session};
-    const struct df_media_module_api_v1 api = {
+    const struct df_media_module_api_v2 api = {
         .receive_control = runtime_media_fake_control,
         .preempt = runtime_media_fake_preempt,
     };

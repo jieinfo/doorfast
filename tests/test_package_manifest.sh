@@ -4,7 +4,7 @@ set -eu
 test -f package/doorfast/Makefile
 test -f package/doorfast-media/Makefile
 grep -Fq 'DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libcurl +ca-bundle +libx264' package/doorfast-media/Makefile
-grep -Fq '/usr/lib/doorfast/media-v1.so' package/doorfast-media/Makefile
+grep -Fq '/usr/lib/doorfast/media-v2.so' package/doorfast-media/Makefile
 test "$(grep -Ec '^\s*\$\(INSTALL_(BIN|DATA|CONF)\)' package/doorfast-media/Makefile)" -eq 1
 ! find package/doorfast-media -name '*init*' -print -quit | grep .
 grep -Fq -- '-fPIC -shared' package/doorfast-media/Makefile
@@ -43,7 +43,7 @@ test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/rel
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
-grep -q 'PKG_RELEASE:=14' package/luci-app-doorfast/Makefile
+grep -q 'PKG_RELEASE:=15' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
 grep -q 'preview media configuration' package/luci-app-doorfast/Makefile
 grep -Fq 'deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js' package/luci-app-doorfast/Makefile
@@ -107,11 +107,14 @@ grep -F "option indoor_ipaddr ''" package/doorfast/files/doorfast.config
 grep -F "option indoor_netmask ''" package/doorfast/files/doorfast.config
 grep -F "option uplink_interface ''" package/doorfast/files/doorfast.config
 grep -F "option sync_state_path '/etc/config/doorfast-sync'" package/doorfast/files/doorfast.config
+grep -F "option sync_mini1_secretkey ''" package/doorfast/files/doorfast.config
+grep -F "option sync_mini2_secretkey ''" package/doorfast/files/doorfast.config
 grep -F "option passive_only '1'" package/doorfast/files/doorfast.config
 grep -F "option media_enabled '0'" package/doorfast/files/doorfast.config
 grep -F "option media_go2rtc_port '8554'" package/doorfast/files/doorfast.config
 ! grep -Fq 'media_rtsp_password' package/doorfast/files/doorfast.config
 ! grep -Fq 'media_relay_token' package/doorfast/files/doorfast.config
+! grep -Fq 'media_publish_retries' package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-automation.config
 grep -F "config automation 'main'" package/doorfast/files/doorfast-automation.config
 ! grep -Fq 'option call_elev' package/doorfast/files/doorfast-automation.config
@@ -127,7 +130,8 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=51' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=52' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=2' package/doorfast-media/Makefile
 grep -Fq "option token ''" package/doorfast/files/doorfast-events.config
 grep -Fq 'store_token "$token" "$token_file"' package/doorfast/files/doorfast-event-relay.init
 grep -Fq 'http://*) ;;' package/doorfast/files/doorfast-event-relay.init

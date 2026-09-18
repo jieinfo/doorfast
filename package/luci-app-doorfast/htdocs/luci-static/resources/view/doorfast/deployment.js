@@ -99,6 +99,20 @@ return view.extend({
         option.description = '仅接受 16 位十六进制材料；留空不会生成默认值。';
         option.validate = validateAccessMaterial;
 
+        option = section.option(form.Value, 'sync_mini1_secretkey',
+            'Mini 1 同步密钥（可选）');
+        option.password = true;
+        option.rmempty = true;
+        option.depends('active_host', '1');
+        option.description = '厂商同步键 sync_mini1_secretkey；仅在有现场确认值时填写，填写后进入周期 91/03。';
+
+        option = section.option(form.Value, 'sync_mini2_secretkey',
+            'Mini 2 同步密钥（可选）');
+        option.password = true;
+        option.rmempty = true;
+        option.depends('active_host', '1');
+        option.description = '厂商同步键 sync_mini2_secretkey；仅在有现场确认值时填写，填写后进入周期 91/03。';
+
         section = map.section(form.NamedSection, 'main', 'gvs', '可选上行配置');
         option = section.option(form.Value, 'uplink_interface', '上行接口（可选）');
         option.rmempty = true;

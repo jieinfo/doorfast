@@ -89,7 +89,15 @@ def main():
     def status():
         return rpc(token, 'doorfast', 'status', {})
 
+    initial_status = status()
+    runtime_id = initial_status.get('runtime_id')
+    if (not isinstance(runtime_id, str) or len(runtime_id) != 16 or
+            any(character not in '0123456789abcdef'
+                for character in runtime_id)):
+        raise RuntimeError(f"Invalid runtime_id in status: {initial_status}")
+
     invalid_answer = {
+        'runtime_id': runtime_id,
         'generation': 1,
         'primary_media_port': 8303,
         'secondary_media_port': 8302,
@@ -97,6 +105,9 @@ def main():
     }
     rpc(token, 'doorfast', 'answer', invalid_answer, expected_code=2)
     rpc(token, 'doorfast', 'answer', {}, expected_code=2)
+    invalid_answer['runtime_id'] = '0000000000000000'
+    rpc(token, 'doorfast', 'answer', invalid_answer, expected_code=2)
+    invalid_answer['runtime_id'] = runtime_id
     invalid_answer['generation'] = '1'
     rpc(token, 'doorfast', 'answer', invalid_answer, expected_code=2)
     invalid_answer['generation'] = 1
@@ -111,6 +122,7 @@ def main():
                  'ringing' else None))
     generation = ringing['call']['generation']
     request = json.dumps({
+        'runtime_id': runtime_id,
         'generation': generation,
         'primary_media_port': 8303,
         'secondary_media_port': 8302,
@@ -133,6 +145,7 @@ def main():
         raise RuntimeError(f"Unexpected expired answer: {answer_expired}")
 
     hangup = rpc(token, 'doorfast', 'hangup', {
+        'runtime_id': runtime_id,
         'generation': generation,
         'reason': 1,
     })

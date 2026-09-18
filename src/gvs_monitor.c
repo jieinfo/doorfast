@@ -44,13 +44,24 @@ static void df_gvs_monitor_fail(struct df_gvs_monitor *monitor,
 void df_gvs_monitor_init(struct df_gvs_monitor *monitor) {
     if (monitor != NULL) {
         memset(monitor, 0, sizeof(*monitor));
+        monitor->first_frame_timeout_ms =
+            DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS;
     }
+}
+
+int df_gvs_monitor_set_first_frame_timeout(struct df_gvs_monitor *monitor,
+    uint64_t timeout_ms) {
+    if (monitor == NULL || timeout_ms == 0U ||
+        df_gvs_monitor_active(monitor->state)) return DF_ERR_INVALID;
+    monitor->first_frame_timeout_ms = timeout_ms;
+    return DF_OK;
 }
 
 int df_gvs_monitor_start(struct df_gvs_monitor *monitor,
     const uint8_t local[6], const uint8_t station[6], uint32_t station_ipv4,
     uint64_t now_ms) {
     uint64_t generation;
+    uint64_t first_frame_timeout_ms;
 
     if (monitor == NULL || !df_gvs_monitor_nonzero(local) ||
         df_gvs_station_validate(station) != DF_OK || station_ipv4 == 0U ||
@@ -61,7 +72,11 @@ int df_gvs_monitor_start(struct df_gvs_monitor *monitor,
         return DF_ERR_INVALID;
     }
     generation = monitor->generation + 1U;
+    first_frame_timeout_ms = monitor->first_frame_timeout_ms == 0U ?
+        DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS :
+        monitor->first_frame_timeout_ms;
     memset(monitor, 0, sizeof(*monitor));
+    monitor->first_frame_timeout_ms = first_frame_timeout_ms;
     monitor->state = DF_GVS_MONITOR_REQUESTING;
     memcpy(monitor->local, local, sizeof(monitor->local));
     memcpy(monitor->station, station, sizeof(monitor->station));
@@ -163,14 +178,14 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         if (frame->payload_length != sizeof(df_gvs_monitor_confirmation) ||
             frame->payload == NULL || memcmp(frame->payload,
                 df_gvs_monitor_confirmation, sizeof(df_gvs_monitor_confirmation)) != 0 ||
-            now_ms > UINT64_MAX - DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS) {
+            now_ms > UINT64_MAX - monitor->first_frame_timeout_ms) {
             return DF_ERR_INVALID;
         }
         monitor->last_now_ms = now_ms;
         monitor->state = DF_GVS_MONITOR_AWAITING_VIDEO;
         monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
         monitor->first_frame_deadline_ms =
-            now_ms + DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS;
+            now_ms + monitor->first_frame_timeout_ms;
         result->confirmed = true;
         return DF_OK;
     }

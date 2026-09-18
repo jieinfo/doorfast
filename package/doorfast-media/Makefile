@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast-media
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -41,12 +41,12 @@ define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE \
 		-std=c17 -Wall -Wextra -Werror -pedantic -fPIC -shared \
 		-Wl,-z,defs -I$(PKG_BUILD_DIR)/src $(DF_MEDIA_SOURCES) -lcurl \
-		-o $(PKG_BUILD_DIR)/media-v1.so
+		-o $(PKG_BUILD_DIR)/media-v2.so
 endef
 
 define Package/doorfast-media/install
 	$(INSTALL_DIR) $(1)/usr/lib/doorfast
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/media-v1.so $(1)/usr/lib/doorfast/media-v1.so
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/media-v2.so $(1)/usr/lib/doorfast/media-v2.so
 endef
 
 $(eval $(call BuildPackage,doorfast-media))

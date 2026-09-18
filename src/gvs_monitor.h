@@ -59,12 +59,15 @@ struct df_gvs_monitor {
     uint64_t last_now_ms;
     uint64_t next_action_ms;
     uint64_t first_frame_deadline_ms;
+    uint64_t first_frame_timeout_ms;
     unsigned request_attempts;
     bool media_ready;
     bool stop_sent;
 };
 
 void df_gvs_monitor_init(struct df_gvs_monitor *);
+int df_gvs_monitor_set_first_frame_timeout(struct df_gvs_monitor *,
+    uint64_t timeout_ms);
 int df_gvs_monitor_start(struct df_gvs_monitor *, const uint8_t local[6],
     const uint8_t station[6], uint32_t station_ipv4, uint64_t now_ms);
 int df_gvs_monitor_step(struct df_gvs_monitor *, uint64_t now_ms,
