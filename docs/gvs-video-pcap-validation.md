@@ -1,5 +1,7 @@
 # GVS video PCAP validation
 
+> **Evidence appendix:** This file preserves the captured-video validation record. It does not define current features, configuration, or project status; the repository root `README.md` is authoritative.
+
 Doorfast cross-checks the vendor-delivered `Snippet/012-video-business.md`
 layout against the five authorized captures under the local `mt8157` data set.
 The captures contain 56,759 UDP/8303 packets. Of those, 26,773 contain a
