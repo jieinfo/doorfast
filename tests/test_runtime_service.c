@@ -17,16 +17,37 @@ struct delay_trace {
 struct station_scan_trace {
     struct df_gvs_station_scan_action actions[3];
     size_t count;
+    size_t attempts;
+    bool fail_first;
+};
+
+struct station_scan_wait_trace {
+    struct df_gvs_station_scan *scan;
+    struct station_scan_trace *emissions;
+    uint64_t now_ms;
 };
 
 static int record_station_scan(
     const struct df_gvs_station_scan_action *action, void *context) {
     struct station_scan_trace *trace = context;
 
-    if (action == NULL || trace == NULL || trace->count >= 3U)
+    if (action == NULL || trace == NULL || trace->attempts >= 4U)
         return DF_ERR_INVALID;
+    trace->attempts++;
+    if (trace->fail_first && trace->attempts == 1U)
+        return DF_ERR_IO;
+    if (trace->count >= 3U) return DF_ERR_INVALID;
     trace->actions[trace->count++] = *action;
     return DF_OK;
+}
+
+static int pump_station_scan_slice(unsigned delay_ms, void *context) {
+    struct station_scan_wait_trace *trace = context;
+
+    if (trace == NULL) return DF_ERR_INVALID;
+    trace->now_ms += delay_ms;
+    return df_runtime_station_scan_service(true, trace->scan, trace->now_ms,
+        record_station_scan, trace->emissions);
 }
 
 static int record_delay_slice(unsigned delay_ms, void *context) {
@@ -95,6 +116,50 @@ void test_runtime_delay_rejects_invalid_input_and_stops_on_failure(void) {
         DF_ERR_IO,
         df_runtime_pump_delay(500, 250, record_delay_slice, &trace));
     TEST_ASSERT_INT_EQ(2, (int)trace.count);
+}
+
+void test_runtime_retry_wait_slices_keep_station_scan_progressing(void) {
+    const uint8_t identity[6] = {0x61, 0x02, 0x01, 1, 1, 1};
+    struct df_gvs_station_scan scan = {0};
+    struct station_scan_trace emissions = {0};
+    struct station_scan_wait_trace wait = {
+        .scan = &scan,
+        .emissions = &emissions,
+        .now_ms = 1000U,
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_gvs_station_scan_start(&scan, identity, wait.now_ms));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_service(true, &scan,
+        wait.now_ms, record_station_scan, &emissions));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_pump_delay(
+        1000U, 250U, pump_station_scan_slice, &wait));
+    TEST_ASSERT_INT_EQ(3, (int)emissions.count);
+    TEST_ASSERT_INT_EQ(3, (int)emissions.attempts);
+    TEST_ASSERT_INT_EQ(0, scan.active ? 1 : 0);
+}
+
+void test_runtime_station_scan_retries_failed_emit_without_consuming_frame(void) {
+    const uint8_t identity[6] = {0x61, 0x02, 0x01, 1, 1, 1};
+    struct df_gvs_station_scan scan = {0};
+    struct station_scan_trace emissions = {.fail_first = true};
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_gvs_station_scan_start(&scan, identity, 1000U));
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_runtime_station_scan_tick(
+        &scan, 1000U, record_station_scan, &emissions));
+    TEST_ASSERT_INT_EQ(0, (int)scan.emitted);
+    TEST_ASSERT_INT_EQ(1, scan.active ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_tick(
+        &scan, 1001U, record_station_scan, &emissions));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_tick(
+        &scan, 1500U, record_station_scan, &emissions));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_scan_tick(
+        &scan, 2000U, record_station_scan, &emissions));
+    TEST_ASSERT_INT_EQ(4, (int)emissions.attempts);
+    TEST_ASSERT_INT_EQ(3, (int)emissions.count);
+    TEST_ASSERT_INT_EQ(3, (int)scan.emitted);
+    TEST_ASSERT_INT_EQ(0, scan.active ? 1 : 0);
 }
 
 struct runtime_media_trace {

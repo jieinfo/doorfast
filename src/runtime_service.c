@@ -230,6 +230,10 @@ struct df_runtime_wait_context {
     struct df_runtime_ubus *ubus;
     bool ubus_started;
     struct df_event_stream *event_stream;
+    struct df_gvs_station_scan *station_scan;
+    bool station_scan_enabled;
+    df_runtime_station_scan_emit_fn station_scan_emit;
+    void *station_scan_context;
 };
 
 int df_runtime_pump_delay(unsigned delay_ms, unsigned max_slice_ms,
@@ -253,27 +257,48 @@ int df_runtime_pump_delay(unsigned delay_ms, unsigned max_slice_ms,
 
 int df_runtime_station_scan_tick(struct df_gvs_station_scan *scan,
     uint64_t now_ms, df_runtime_station_scan_emit_fn emit, void *context) {
+    struct df_gvs_station_scan previous;
     struct df_gvs_station_scan_action action;
     int due;
 
     if (scan == NULL || emit == NULL) return DF_ERR_INVALID;
+    previous = *scan;
     due = df_gvs_station_scan_next(scan, now_ms, &action);
     if (due < 0) return DF_ERR_INVALID;
     if (due == 0) return DF_OK;
-    return emit(&action, context) == DF_OK ? DF_OK : DF_ERR_IO;
+    if (emit(&action, context) != DF_OK) {
+        *scan = previous;
+        scan->last_now_ms = now_ms;
+        return DF_ERR_IO;
+    }
+    return DF_OK;
+}
+
+int df_runtime_station_scan_service(bool enabled,
+    struct df_gvs_station_scan *scan, uint64_t now_ms,
+    df_runtime_station_scan_emit_fn emit, void *context) {
+    if (!enabled) return DF_OK;
+    return df_runtime_station_scan_tick(scan, now_ms, emit, context);
 }
 
 static int df_runtime_wait_and_pump(unsigned delay_ms, void *context) {
     struct df_runtime_wait_context *wait = context;
+    uint64_t now_ms;
     struct timespec duration = {
         .tv_sec = (time_t)(delay_ms / 1000U),
         .tv_nsec = (long)(delay_ms % 1000U) * 1000000L,
     };
 
     (void)nanosleep(&duration, NULL);
+    now_ms = df_monotonic_ms();
     if (wait != NULL && wait->ubus_started &&
-        df_runtime_ubus_process(wait->ubus, df_monotonic_ms()) != DF_OK) {
+        df_runtime_ubus_process(wait->ubus, now_ms) != DF_OK) {
         (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
+    }
+    if (wait != NULL && df_runtime_station_scan_service(
+            wait->station_scan_enabled, wait->station_scan, now_ms,
+            wait->station_scan_emit, wait->station_scan_context) != DF_OK) {
+        (void)fputs("doorfast: event=station_scan_send_failed\n", stderr);
     }
     if (wait != NULL && wait->event_stream != NULL) {
         (void)df_event_stream_process(wait->event_stream);
@@ -448,20 +473,6 @@ static int df_runtime_station_scan_emit(
     return df_gvs_udp_sender_emit_station_scan(context, action);
 }
 
-static bool df_runtime_station_configured(
-    const struct df_station_registry *registry,
-    const uint8_t logical_address[6]) {
-    size_t index;
-
-    if (registry == NULL || logical_address == NULL) return false;
-    for (index = 0U; index < registry->count; index++) {
-        if (memcmp(registry->items[index].logical_address,
-                logical_address, 6U) == 0)
-            return true;
-    }
-    return false;
-}
-
 static int df_runtime_media_resolve_route(const uint8_t peer[6], uint64_t now_ms,
     uint32_t *ipv4, void *context) {
     return df_gvs_udp_sender_resolve_preview_route(context, peer, now_ms,
@@ -490,7 +501,6 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_elevator_query elevator_query = {0};
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
     struct df_gvs_station_discovery station_discovery = {0};
-    struct df_gvs_station_routes station_routes = {0};
     struct df_gvs_station_scan station_scan = {0};
     struct df_gvs_multicast multicast = {.fd = -1};
     struct df_gvs_udp_presence_context presence_context = {0};
@@ -508,6 +518,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_runtime_wait_context wait_context = {
         .ubus = &ubus,
         .event_stream = &event_stream,
+        .station_scan = &station_scan,
+        .station_scan_enabled = runtime != NULL && runtime->config.active_host,
+        .station_scan_emit = df_runtime_station_scan_emit,
+        .station_scan_context = &udp_sender,
     };
     uint8_t identity[6];
     char derived_multicast_group[DF_GVS_IPV4_TEXT_SIZE];
@@ -683,7 +697,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_ubus_bind_media(&ubus, &media_module,
             DF_MEDIA_CREDENTIALS_PATH) == DF_OK &&
         df_runtime_ubus_bind_stations(&ubus, &runtime->stations,
-            &station_discovery, &station_routes, &station_scan, identity,
+            &station_discovery, &station_scan, identity,
             runtime->config.active_host) == DF_OK) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
@@ -748,8 +762,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             status = DF_ERR_IO;
             goto done;
         }
-        if (runtime->config.active_host &&
-            df_runtime_station_scan_tick(&station_scan, now_ms,
+        if (df_runtime_station_scan_service(runtime->config.active_host,
+                &station_scan, now_ms,
                 df_runtime_station_scan_emit, &udp_sender) != DF_OK) {
             (void)fputs("doorfast: event=station_scan_send_failed\n", stderr);
         }
@@ -1120,10 +1134,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 struct df_event station_event;
 
                 if (df_gvs_frame_parse(payload, payload_length, &station_frame,
-                        &station_event) == DF_OK &&
-                    df_runtime_station_configured(
-                        &runtime->stations, station_frame.source))
-                    (void)df_gvs_station_routes_observe(&station_routes,
+                        &station_event) == DF_OK)
+                    (void)df_runtime_ubus_station_route_observe(&ubus,
                         station_frame.source, control_source_ipv4, now_ms, true);
                 continue;
             }

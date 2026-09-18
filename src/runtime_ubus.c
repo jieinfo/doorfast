@@ -7,6 +7,14 @@
 #include <string.h>
 #include <unistd.h>
 
+#define DF_RUNTIME_STATION_ROUTE_MAX_AGE_MS 60000U
+
+struct df_runtime_station_route_entry {
+    uint32_t ipv4;
+    uint64_t discovery_ms;
+    bool valid;
+};
+
 #define DF_RUNTIME_UBUS_RECONNECT_MS 5000U
 
 static bool df_runtime_ubus_log_safe(const char *message) {
@@ -127,13 +135,14 @@ static bool df_runtime_station_is_configured(
 int df_runtime_ubus_bind_stations(struct df_runtime_ubus *service,
     const struct df_station_registry *registry,
     const struct df_gvs_station_discovery *discovery,
-    const struct df_gvs_station_routes *routes, struct df_gvs_station_scan *scan,
+    struct df_gvs_station_scan *scan,
     const uint8_t identity[6], bool scan_enabled) {
     struct df_gvs_station_scan validation;
     struct df_station_snapshot_entry *entries = NULL;
+    struct df_runtime_station_route_entry *route_entries = NULL;
 
     if (service == NULL || !service->started || registry == NULL ||
-        discovery == NULL || routes == NULL || scan == NULL || identity == NULL ||
+        discovery == NULL || scan == NULL || identity == NULL ||
         service->stations_bound ||
         (registry->count > 0U && registry->items == NULL) ||
         df_gvs_station_scan_start(
@@ -142,16 +151,57 @@ int df_runtime_ubus_bind_stations(struct df_runtime_ubus *service,
     if (registry->count > 0U) {
         entries = calloc(registry->count, sizeof(*entries));
         if (entries == NULL) return DF_ERR_IO;
+        route_entries = calloc(registry->count, sizeof(*route_entries));
+        if (route_entries == NULL) {
+            free(entries);
+            return DF_ERR_IO;
+        }
     }
     service->station_registry = registry;
     service->station_discovery = discovery;
-    service->station_routes = routes;
+    service->station_route_entries = route_entries;
     service->station_scan = scan;
     service->station_snapshot_entries = entries;
     memcpy(service->station_identity, identity, sizeof(service->station_identity));
     service->station_scan_enabled = scan_enabled;
     service->stations_bound = true;
     return DF_OK;
+}
+
+int df_runtime_ubus_station_route_observe(struct df_runtime_ubus *service,
+    const uint8_t logical_address[6], uint32_t ipv4, uint64_t now_ms,
+    bool discovery_reply) {
+    size_t index;
+
+    if (service == NULL || !service->started || !service->stations_bound ||
+        logical_address == NULL || ipv4 == 0U || !discovery_reply)
+        return DF_ERR_INVALID;
+    for (index = 0U; index < service->station_registry->count; index++) {
+        struct df_runtime_station_route_entry *route =
+            &service->station_route_entries[index];
+
+        if (memcmp(service->station_registry->items[index].logical_address,
+                logical_address, 6U) != 0)
+            continue;
+        if (route->valid && now_ms < route->discovery_ms)
+            return DF_ERR_INVALID;
+        route->ipv4 = ipv4;
+        route->discovery_ms = now_ms;
+        route->valid = true;
+        return DF_OK;
+    }
+    return DF_ERR_INVALID;
+}
+
+static bool df_runtime_station_route_fresh(
+    const struct df_runtime_ubus *service, size_t index, uint64_t now_ms) {
+    const struct df_runtime_station_route_entry *route;
+
+    if (service == NULL || index >= service->station_registry->count)
+        return false;
+    route = &service->station_route_entries[index];
+    return route->valid && now_ms >= route->discovery_ms &&
+        now_ms - route->discovery_ms < DF_RUNTIME_STATION_ROUTE_MAX_AGE_MS;
 }
 
 int df_runtime_ubus_station_list(struct df_runtime_ubus *service,
@@ -168,13 +218,10 @@ int df_runtime_ubus_station_list(struct df_runtime_ubus *service,
             df_runtime_station_candidate_find(
                 service->station_discovery, station->logical_address);
         struct df_station_snapshot_entry entry = {0};
-        uint32_t observed_ipv4 = 0U;
-        bool observed_fresh = df_gvs_station_routes_lookup(
-            service->station_routes, station->logical_address,
-            service->last_now_ms, 60000U, &observed_ipv4) == DF_OK;
+        bool observed_fresh = df_runtime_station_route_fresh(
+            service, index, service->last_now_ms);
         const char *route_source = "none";
 
-        (void)observed_ipv4;
         if (snprintf(entry.id, sizeof(entry.id), "%s", station->id) < 0 ||
             snprintf(entry.name, sizeof(entry.name), "%s", station->name) < 0 ||
             snprintf(entry.stream_name, sizeof(entry.stream_name), "%s",
@@ -1648,6 +1695,7 @@ void df_runtime_ubus_stop(struct df_runtime_ubus *service) {
     df_runtime_ubus_platform_stop(service);
 #endif
     free(service->station_snapshot_entries);
+    free(service->station_route_entries);
     memset(service, 0, sizeof(*service));
 }
 

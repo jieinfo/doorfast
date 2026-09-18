@@ -13,7 +13,6 @@
 #include "gvs_call_control.h"
 #include "gvs_audio_buffer.h"
 #include "gvs_audio_tx.h"
-#include "gvs_station.h"
 #include "gvs_station_discovery.h"
 #include "gvs_video_frame_cache.h"
 #include "media_credentials.h"
@@ -116,6 +115,8 @@ struct df_station_candidate_snapshot {
     size_t count;
 };
 
+struct df_runtime_station_route_entry;
+
 struct df_runtime_ubus {
     df_runtime_status_provider_fn provide_status;
     void *status_context;
@@ -148,7 +149,7 @@ struct df_runtime_ubus {
     uint64_t log_sequence;
     const struct df_station_registry *station_registry;
     const struct df_gvs_station_discovery *station_discovery;
-    const struct df_gvs_station_routes *station_routes;
+    struct df_runtime_station_route_entry *station_route_entries;
     struct df_gvs_station_scan *station_scan;
     struct df_station_snapshot_entry *station_snapshot_entries;
     struct df_station_candidate_snapshot_entry station_candidate_entries[
@@ -214,8 +215,11 @@ int df_runtime_ubus_log_get(const struct df_runtime_ubus *, size_t,
 int df_runtime_ubus_bind_stations(struct df_runtime_ubus *,
     const struct df_station_registry *,
     const struct df_gvs_station_discovery *,
-    const struct df_gvs_station_routes *, struct df_gvs_station_scan *,
+    struct df_gvs_station_scan *,
     const uint8_t identity[6], bool scan_enabled);
+int df_runtime_ubus_station_route_observe(struct df_runtime_ubus *,
+    const uint8_t logical_address[6], uint32_t ipv4, uint64_t now_ms,
+    bool discovery_reply);
 int df_runtime_ubus_station_list(struct df_runtime_ubus *,
     struct df_station_snapshot *);
 int df_runtime_ubus_station_candidates(struct df_runtime_ubus *,

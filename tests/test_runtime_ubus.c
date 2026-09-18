@@ -105,7 +105,6 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     struct df_runtime_ubus service = {0};
     struct df_station_registry registry = {0};
     struct df_gvs_station_discovery discovery = {0};
-    struct df_gvs_station_routes routes = {0};
     struct df_gvs_station_scan scan = {0};
     struct df_station_snapshot stations = {0};
     struct df_station_candidate_snapshot candidates = {0};
@@ -123,7 +122,7 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     TEST_ASSERT_INT_EQ(DF_OK,
         df_station_registry_parse(&registry, station_config));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_stations(&service,
-        &registry, &discovery, &routes, &scan, identity, true));
+        &registry, &discovery, &scan, identity, true));
     memcpy(service.runtime_id, "0123456789abcdef", sizeof(service.runtime_id));
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_station_list(&service, &stations));
@@ -156,7 +155,7 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     discovery.candidates[0].reply_count = 2U;
     discovery.candidates[0].valid = true;
     discovery.count = 1U;
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_station_routes_observe(&routes,
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_station_route_observe(&service,
         station_address, observed_ipv4.s_addr, 100U, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 60099U));
     TEST_ASSERT_INT_EQ(DF_OK,
@@ -225,6 +224,89 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     df_runtime_ubus_stop(&service);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_ubus_process(&service, 12));
+}
+
+void test_runtime_ubus_keeps_routes_for_more_than_four_configured_stations(void) {
+    static const char station_config[] =
+        "config station 'gate_1'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 1'\n"
+        "\toption logical_address '32:02:01:00:01:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_1'\n"
+        "config station 'gate_2'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 2'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_2'\n"
+        "config station 'gate_3'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 3'\n"
+        "\toption logical_address '32:02:01:00:03:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_3'\n"
+        "config station 'gate_4'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 4'\n"
+        "\toption logical_address '32:02:01:00:04:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_4'\n"
+        "config station 'gate_5'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 5'\n"
+        "\toption logical_address '32:02:01:00:05:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_5'\n";
+    const uint8_t identity[6] = {0x61, 0x02, 0x01, 1, 1, 1};
+    struct df_runtime_ubus service = {0};
+    struct df_station_registry registry = {0};
+    struct df_gvs_station_discovery discovery = {0};
+    struct df_gvs_station_scan scan = {0};
+    struct df_station_snapshot stations = {0};
+    struct in_addr observed_ipv4;
+    unsigned calls = 0;
+    size_t index;
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_station_registry_parse(&registry, station_config));
+    TEST_ASSERT_INT_EQ(5, (int)registry.count);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_stations(&service,
+        &registry, &discovery, &scan, identity, true));
+    TEST_ASSERT_INT_EQ(1, inet_pton(AF_INET, "10.2.1.20", &observed_ipv4));
+    for (index = 0U; index < registry.count; index++) {
+        memcpy(discovery.candidates[index].logical_address,
+            registry.items[index].logical_address, 6U);
+        discovery.candidates[index].ipv4 = observed_ipv4.s_addr;
+        discovery.candidates[index].first_seen_ms = 100U;
+        discovery.candidates[index].last_seen_ms = 100U;
+        discovery.candidates[index].reply_count = 1U;
+        discovery.candidates[index].valid = true;
+        discovery.count++;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_station_route_observe(&service,
+            registry.items[index].logical_address, observed_ipv4.s_addr,
+            100U, true));
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 60099U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(5, (int)stations.count);
+    for (index = 0U; index < stations.count; index++) {
+        TEST_ASSERT_INT_EQ(0,
+            strcmp("discovered", stations.stations[index].route_source));
+        TEST_ASSERT_INT_EQ(1, stations.stations[index].route_fresh);
+        TEST_ASSERT_INT_EQ(1, stations.stations[index].monitorable);
+    }
+
+    df_runtime_ubus_stop(&service);
+    df_station_registry_destroy(&registry);
 }
 
 void test_runtime_ubus_keeps_bounded_redacted_event_log(void) {

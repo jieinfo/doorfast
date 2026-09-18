@@ -18,6 +18,9 @@ int df_runtime_pump_delay(unsigned delay_ms, unsigned max_slice_ms,
                           void *context);
 int df_runtime_station_scan_tick(struct df_gvs_station_scan *, uint64_t now_ms,
     df_runtime_station_scan_emit_fn, void *context);
+int df_runtime_station_scan_service(bool enabled,
+    struct df_gvs_station_scan *, uint64_t now_ms,
+    df_runtime_station_scan_emit_fn, void *context);
 int df_runtime_sync_configure(struct df_gvs_runtime_sync *,
     const struct df_runtime_config *);
 int df_runtime_media_build_module_config(const struct df_runtime_config *,
