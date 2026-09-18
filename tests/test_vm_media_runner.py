@@ -13,6 +13,7 @@ class VmMediaRunnerTest(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.ssh = self.root / "ssh.sh"
         self.marker = self.root / "route-snapshot-seen"
+        self.firewall_counter = self.root / "firewall-counter"
         self.core_apk = self.root / "doorfast.apk"
         self.media_apk = self.root / "doorfast-media.apk"
         self.core_apk.write_bytes(b"core-apk-fixture")
@@ -44,8 +45,14 @@ class VmMediaRunnerTest(unittest.TestCase):
                         printf '[]\n'
                     fi
                     ;;
-                *"nft -j list ruleset") printf '{"nftables":[]}\n' ;;
-                *"ss -H -lntup") exit 0 ;;
+                *"nft -j list ruleset")
+                    count=0
+                    [ ! -r "$DOORFAST_FAKE_FIREWALL_COUNTER" ] || read -r count <"$DOORFAST_FAKE_FIREWALL_COUNTER"
+                    count=$((count + 1))
+                    printf '%s\n' "$count" >"$DOORFAST_FAKE_FIREWALL_COUNTER"
+                    printf '{"nftables":[{"counter":{"packets":%s,"bytes":%s}}]}\n' "$count" "$count"
+                    ;;
+                *"for table in tcp tcp6 udp udp6"*) printf 'tcp 0100007F:0050 0A\n' ;;
                 *) printf 'unexpected command: %s\n' "$command_text" >&2; exit 64 ;;
             esac
         """))
@@ -58,6 +65,7 @@ class VmMediaRunnerTest(unittest.TestCase):
         environment = os.environ.copy()
         environment.update({
             "DOORFAST_FAKE_MARKER": str(self.marker),
+            "DOORFAST_FAKE_FIREWALL_COUNTER": str(self.firewall_counter),
             **environment_overrides,
         })
         return subprocess.run(

@@ -79,9 +79,11 @@ reaches `publishing`, the local RTSP fixture sees `/doorfast_preview` with one
 producer, and an incoming-call preemption leaves media `idle` with no FFmpeg
 process. The three-argument VM mode installs both APKs, then performs a
 read-only installed-path check of Doorfast status, monitor status, FFmpeg
-process count, and unchanged network snapshots; any missing snapshot tool or
-state difference fails the run. It deliberately does not
-inject synthetic GVS/RTSP traffic into the VM, so its result is reported as an
-installed-path check rather than fixture acceptance. This is a transport and
+process count, and unchanged network snapshots. Listener state comes from the
+base system's `/proc/net` tables, and volatile nftables counters are removed
+before comparison; any missing required snapshot source or stable state
+difference fails the run. It deliberately does not inject synthetic GVS/RTSP
+traffic into the VM, so its result is reported as an installed-path check
+rather than fixture acceptance. This is a transport and
 lifecycle fixture acceptance only. It does not verify a real door station, a
 physical installation, or live field video.

@@ -133,14 +133,41 @@ def _remote_snapshot(ssh: Path) -> dict[str, str]:
         "rules": "ip -j rule show",
         "routes": "ip -j route show table all",
         "firewall": "nft -j list ruleset",
-        "listeners": "ss -H -lntup",
+        "listeners": (
+            "for table in tcp tcp6 udp udp6; do "
+            "[ -r /proc/net/$table ] || continue; "
+            "awk -v protocol=$table 'NR > 1 { "
+            "if ((protocol == \"tcp\" || protocol == \"tcp6\") && $4 != \"0A\") next; "
+            "print protocol, $2, $4 }' /proc/net/$table; "
+            "done | sort"
+        ),
     }
+    volatile = {
+        "packets", "bytes", "expires", "used", "age", "cacheinfo",
+        "valid_life_time", "preferred_life_time",
+    }
+
+    def stable(value):
+        if isinstance(value, dict):
+            return {key: stable(item) for key, item in value.items()
+                    if key not in volatile}
+        if isinstance(value, list):
+            return [stable(item) for item in value]
+        return value
+
     snapshot = {}
     for name, command in commands.items():
         result = _remote(ssh, command)
         if result.returncode:
             raise RuntimeError(f"VM {name} snapshot failed")
-        snapshot[name] = result.stdout
+        if name == "listeners":
+            snapshot[name] = result.stdout
+        else:
+            try:
+                snapshot[name] = json.dumps(
+                    stable(json.loads(result.stdout)), sort_keys=True)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"VM {name} snapshot was not valid JSON") from error
     return snapshot
 
 
