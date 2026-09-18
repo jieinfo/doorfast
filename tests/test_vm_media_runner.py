@@ -14,6 +14,7 @@ class VmMediaRunnerTest(unittest.TestCase):
         self.ssh = self.root / "ssh.sh"
         self.marker = self.root / "route-snapshot-seen"
         self.firewall_counter = self.root / "firewall-counter"
+        self.station_scan_counter = self.root / "station-scan-counter"
         self.core_apk = self.root / "doorfast.apk"
         self.media_apk = self.root / "doorfast-media.apk"
         self.core_apk.write_bytes(b"core-apk-fixture")
@@ -25,7 +26,7 @@ class VmMediaRunnerTest(unittest.TestCase):
                 *"command -v apk"*) exit 0 ;;
                 *"mktemp -d /tmp/doorfast-media-vm"*) cat >/dev/null; exit 0 ;;
                 *"ubus call doorfast status"*)
-                    printf '%s\n' '{"running":true,"media":{"installed":true,"available":true,"state":"idle","generation":0,"encoder_running":false}}'
+                    printf '%s\n' '{"running":true,"runtime_id":"0123456789abcdef","media":{"installed":true,"available":true,"state":"idle","generation":0,"encoder_running":false}}'
                     ;;
                 *"ubus call doorfast monitor_status"*)
                     if [ "${DOORFAST_FAKE_UNAVAILABLE:-0}" = 1 ]; then
@@ -35,6 +36,23 @@ class VmMediaRunnerTest(unittest.TestCase):
                     fi
                     printf '{"installed":true,"available":%s,"state":"idle","generation":0,"encoder_running":false}\n' "$available"
                     ;;
+                *"ubus call doorfast station_scan"*)
+                    count=0
+                    [ ! -r "$DOORFAST_FAKE_STATION_SCAN_COUNTER" ] || read -r count <"$DOORFAST_FAKE_STATION_SCAN_COUNTER"
+                    count=$((count + 1))
+                    printf '%s\n' "$count" >"$DOORFAST_FAKE_STATION_SCAN_COUNTER"
+                    printf '%s\n' '{"runtime_id":"0123456789abcdef","scheduled":true}'
+                    ;;
+                *"ubus call doorfast station_candidates"*)
+                    printf '%s\n' '{"runtime_id":"0123456789abcdef","candidates":[{"logical_address":"32:02:01:00:02:00","ipv4":"10.2.1.20","first_seen_ms":100,"last_seen_ms":200,"reply_count":3,"configured":true},{"logical_address":"32:02:01:00:03:00","ipv4":"10.2.1.30","first_seen_ms":110,"last_seen_ms":210,"reply_count":2,"configured":true},{"logical_address":"32:02:01:00:04:00","ipv4":"10.2.1.40","first_seen_ms":120,"last_seen_ms":220,"reply_count":1,"configured":false}]}'
+                    ;;
+                *"ubus call doorfast stations"*)
+                    printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":7,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"discovered","route_fresh":true,"monitorable":true,"last_seen_ms":200},{"id":"gate_service","name":"Service Gate","logical_address":"32:02:01:00:03:00","enabled":true,"stream_name":"doorfast_gate_service","route_source":"configured","route_fresh":true,"monitorable":true,"last_seen_ms":210}]}'
+                    ;;
+                *"uci -q get doorfast.main.gvs_local_address"*) printf '%s\n' 'IS:2-1-101-1' ;;
+                *"uci -q get doorfast.main.multicast_mode"*) printf '%s\n' 'auto' ;;
+                *"uci -q get doorfast.main.multicast_address"*) printf '\n' ;;
+                *"uci export network") printf '%s\n' "package 'network'" ;;
                 *"count=0; for comm in /proc/"*) printf '0\n' ;;
                 *"ip -j rule show") printf '[]\n' ;;
                 *"ip -j route show table all")
@@ -66,6 +84,7 @@ class VmMediaRunnerTest(unittest.TestCase):
         environment.update({
             "DOORFAST_FAKE_MARKER": str(self.marker),
             "DOORFAST_FAKE_FIREWALL_COUNTER": str(self.firewall_counter),
+            "DOORFAST_FAKE_STATION_SCAN_COUNTER": str(self.station_scan_counter),
             **environment_overrides,
         })
         return subprocess.run(
@@ -74,6 +93,17 @@ class VmMediaRunnerTest(unittest.TestCase):
                 str(self.ssh), str(self.core_apk), str(self.media_apk),
                 "--output-dir", str(self.root / "output"),
             ],
+            text=True,
+            capture_output=True,
+            env=environment,
+        )
+
+    def run_station_runner(self):
+        environment = os.environ.copy()
+        environment["DOORFAST_FAKE_STATION_SCAN_COUNTER"] = str(self.station_scan_counter)
+        return subprocess.run(
+            ["python3", "-B", "tests/run_doorfast_vm_stations.py", str(self.ssh),
+             "--output-dir", str(self.root / "stations-output")],
             text=True,
             capture_output=True,
             env=environment,
@@ -101,6 +131,22 @@ class VmMediaRunnerTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertIn("network, firewall, or listener state changed", result.stderr)
+
+    def test_vm_station_runner_validates_discovery_and_configured_routes(self):
+        result = self.run_station_runner()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual("vm-software-acceptance", summary["acceptance"])
+        self.assertEqual(3, summary["scan_sent"])
+        self.assertEqual(3, summary["candidate_count"])
+        self.assertEqual(2, summary["configured_station_count"])
+        self.assertEqual(7, summary["configured_revision"])
+        self.assertEqual("unconfirmed", summary["physical_registration"])
+        report = json.loads((self.root / "stations-output" / "stations.json").read_text())
+        self.assertEqual("238.0.201.129", report["multicast"]["derived_group"])
+        self.assertEqual(report["multicast"]["derived_group"], report["multicast"]["effective_group"])
+        self.assertTrue(all(row["route_fresh"] for row in report["configured_stations"]))
 
 
 if __name__ == "__main__":
