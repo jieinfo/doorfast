@@ -16,7 +16,12 @@ function Flag() {}
 function Value() {}
 function ListValue() {}
 
-const saveOrder = [];
+let transactionLog = [];
+let uciFailure = null;
+let credentialFailure = null;
+let applyFailure = null;
+let rpcCalls = [];
+let notifications = [];
 
 class Map {
     constructor(config) {
@@ -51,12 +56,17 @@ class Map {
     }
 
     save(callback) {
-        saveOrder.push('uci');
-        return Promise.resolve(callback()).then(() => {
-            this.options.forEach(option => {
-                option.formvalue = () => option.disabled;
+        transactionLog.push('parse');
+        return Promise.resolve()
+            .then(callback)
+            .then(() => {
+                transactionLog.push('uci');
+                if (uciFailure !== null)
+                    throw uciFailure;
+                this.options.forEach(option => {
+                    option.formvalue = () => option.disabled;
+                });
             });
-        });
     }
 
     reset() {
@@ -66,29 +76,55 @@ class Map {
 
 const form = {Map, NamedSection, Flag, Value, ListValue};
 const rpcDeclarations = [];
-const rpcCalls = [];
 const rpc = {
     declare: declaration => {
         rpcDeclarations.push(declaration);
         return (...args) => {
-            saveOrder.push(declaration.method);
             rpcCalls.push({method: declaration.method, args});
             if (declaration.method === 'status')
                 return Promise.resolve({media: {installed: true}});
+            transactionLog.push(declaration.method);
+            if (credentialFailure !== null)
+                return Promise.reject(credentialFailure);
             return Promise.resolve({});
         };
     }
 };
-const ui = {changes: {apply: () => {
-    saveOrder.push('apply');
-    return Promise.resolve();
-}}};
+const ui = {
+    changes: {apply: () => {
+        transactionLog.push('apply');
+        return applyFailure === null
+            ? Promise.resolve() : Promise.reject(applyFailure);
+    }},
+    addNotification: (title, body, level) => {
+        notifications.push({title, body, level});
+    }
+};
 const view = {extend: value => value};
-const E = () => ({});
+const E = (tag, attrs, children) => ({tag, attrs, children});
 const media = new Function('form', 'rpc', 'ui', 'view', 'E', source)(
     form, rpc, ui, view, E);
 
-const page = {...media};
+function resetTransaction() {
+    transactionLog = [];
+    rpcCalls = [];
+    notifications = [];
+    uciFailure = null;
+    credentialFailure = null;
+    applyFailure = null;
+}
+
+async function renderPage(values) {
+    const page = {...media};
+
+    await page.render({media: {installed: true}});
+    const byName = name => page.mediaMap.options.find(option =>
+        option.optionName === name);
+    Object.entries(values ?? {}).forEach(([name, value]) => {
+        byName(name).formvalue = () => value;
+    });
+    return {page, byName};
+}
 
 (async () => {
     for (const unavailablePayload of [
@@ -98,12 +134,12 @@ const page = {...media};
         await unavailablePage.render(unavailablePayload);
         assert.equal(unavailablePage.mediaMap, null);
     }
-    await page.render({media: {installed: true}});
-    const byName = name => page.mediaMap.options.find(option =>
-        option.optionName === name);
 
-    assert.equal(page.mediaMap.config, 'doorfast');
-    assert.deepEqual(page.mediaMap.options.map(option => option.optionName), [
+    let rendered = await renderPage();
+    const byName = rendered.byName;
+    assert.equal(rendered.page.mediaMap.config, 'doorfast');
+    assert.deepEqual(rendered.page.mediaMap.options.map(
+        option => option.optionName), [
         'media_enabled', 'media_station_address', 'media_station_ipv4',
         'media_go2rtc_host', 'media_go2rtc_port', 'media_stream_name',
         'media_rtsp_username', 'media_encoder', 'media_resolution',
@@ -143,14 +179,72 @@ const page = {...media};
         'rtsp_password', 'relay_token', 'clear_rtsp_password',
         'clear_relay_token'
     ]);
-    page.rtspPassword.formvalue = () => 'new-password';
-    page.relayToken.formvalue = () => '';
-    page.clearRtspPassword.formvalue = () => '0';
-    page.clearRelayToken.formvalue = () => '1';
-    await page.saveMedia(true);
+
+    resetTransaction();
+    rendered = await renderPage({
+        _media_rtsp_password: 'new-password',
+        _media_clear_relay_token: '1'
+    });
+    await rendered.page.saveMedia(true);
     assert.deepEqual(rpcCalls.find(call => call.method === 'media_credentials'), {
         method: 'media_credentials',
         args: ['new-password', '', false, true]
     });
-    assert.deepEqual(saveOrder.slice(-3), ['uci', 'media_credentials', 'apply']);
+    assert.deepEqual(transactionLog,
+        ['parse', 'uci', 'media_credentials', 'apply']);
+
+    resetTransaction();
+    rendered = await renderPage();
+    await rendered.page.saveMedia(true);
+    assert.equal(rpcCalls.some(call => call.method === 'media_credentials'), false);
+    assert.deepEqual(transactionLog, ['parse', 'uci', 'apply']);
+
+    resetTransaction();
+    rendered = await renderPage({_media_clear_rtsp_password: '1'});
+    await rendered.page.saveMedia(false);
+    assert.deepEqual(rpcCalls.at(-1), {
+        method: 'media_credentials', args: ['', '', true, false]
+    });
+    assert.deepEqual(transactionLog, ['parse', 'uci', 'media_credentials']);
+
+    resetTransaction();
+    rendered = await renderPage({_media_clear_relay_token: '1'});
+    await rendered.page.saveMedia(false);
+    assert.deepEqual(rpcCalls.at(-1), {
+        method: 'media_credentials', args: ['', '', false, true]
+    });
+
+    for (const conflict of [
+        {
+            _media_rtsp_password: 'new-password',
+            _media_clear_rtsp_password: '1'
+        },
+        {
+            _media_relay_token: 'new-token',
+            _media_clear_relay_token: '1'
+        }
+    ]) {
+        resetTransaction();
+        rendered = await renderPage(conflict);
+        await assert.rejects(rendered.page.saveMedia(true), /不能同时填写并清除/);
+        assert.deepEqual(transactionLog, []);
+        assert.equal(rpcCalls.length, 0);
+    }
+
+    resetTransaction();
+    rendered = await renderPage({_media_rtsp_password: 'new-password'});
+    uciFailure = new Error('UCI save failed');
+    await assert.rejects(rendered.page.saveMedia(true), /UCI save failed/);
+    assert.deepEqual(transactionLog, ['parse', 'uci']);
+    assert.equal(rpcCalls.length, 0);
+
+    resetTransaction();
+    rendered = await renderPage({_media_relay_token: 'new-token'});
+    credentialFailure = new Error('credential write failed');
+    await assert.rejects(rendered.page.saveMedia(true), /credential write failed/);
+    assert.deepEqual(transactionLog, ['parse', 'uci', 'media_credentials']);
+    assert.equal(transactionLog.includes('apply'), false);
+    assert.equal(notifications.at(-1).level, 'danger');
+    assert.match(JSON.stringify(notifications.at(-1).body),
+        /credential write failed/);
 })();

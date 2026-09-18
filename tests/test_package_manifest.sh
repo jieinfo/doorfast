@@ -119,6 +119,10 @@ grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/work
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
 grep -q 'sh tests/test_site_inventory.sh' .github/workflows/build-apk.yml
+grep -Fq 'node tests/test_luci_media.js' .github/workflows/build-apk.yml
+grep -Fq 'node tests/test_luci_deployment.js' .github/workflows/build-apk.yml
+grep -Fq 'node tests/test_luci_stations.js' .github/workflows/build-apk.yml
+! grep -Fq 'node tests/test_luci_media_view.js' .github/workflows/build-apk.yml
 grep -Fq -- "-name 'doorfast-[0-9]*.apk'" .github/workflows/build-apk.yml
 ! grep -q 'bin/packages/\*\*/\*.apk' .github/workflows/build-apk.yml
 grep -q 'config_load doorfast' package/doorfast/files/doorfast.init

@@ -32,6 +32,18 @@ return view.extend({
                 return '门禁材料只能包含十六进制字符。';
             return true;
         };
+        var validateMulticastAddress = function(sectionId, value) {
+            var parts = value.split('.');
+
+            if (parts.length !== 4 || parts.some(function(part) {
+                return !/^(?:0|[1-9][0-9]{0,2})$/.test(part) ||
+                    Number(part) > 255;
+            }))
+                return '必须填写有效的 IPv4 地址。';
+            if (Number(parts[0]) < 224 || Number(parts[0]) > 239)
+                return '自定义地址必须位于 224.0.0.0/4 IPv4 组播范围。';
+            return true;
+        };
 
         option = section.option(form.Flag, 'enabled', '启用 Doorfast');
         option.default = option.disabled;
@@ -104,6 +116,7 @@ return view.extend({
         option.rmempty = false;
         option.depends({active_host: '1', multicast_mode: 'custom'});
         option.description = '自定义模式必须填写有效的 IPv4 组播地址。';
+        option.validate = validateMulticastAddress;
 
         option = section.option(form.Value, 'access_material', '门禁材料（可选）');
         option.datatype = 'hexstring';

@@ -39,10 +39,54 @@ function validateLogicalAddress(sectionId, value) {
     return true;
 }
 
+function validateStationName(sectionId, value) {
+    if (!/^[\x20-\x7e]{1,64}$/.test(value))
+        return '名称必须是 1 到 64 个可打印 ASCII 字符。';
+    return true;
+}
+
 function validateStreamName(sectionId, value) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(value))
         return '流名称只能包含 ASCII 字母、数字、下划线或连字符，且长度不超过 64。';
     return true;
+}
+
+function validateStationIpv4(value, fixed) {
+    var parts;
+
+    if (value === '')
+        return fixed ? '固定路由必须填写 IPv4 地址。' : true;
+    parts = value.split('.');
+    if (parts.length !== 4 || parts.some(function(part) {
+        return !/^(?:0|[1-9][0-9]{0,2})$/.test(part) || Number(part) > 255;
+    }) || Number(parts[0]) === 0 || Number(parts[0]) === 127 ||
+        Number(parts[0]) >= 224)
+        return '必须填写可用的单播 IPv4 地址。';
+    return true;
+}
+
+function optionValue(map, option, sectionId, name) {
+    var value = option.formvalue(sectionId);
+
+    if (typeof value !== 'string')
+        value = map.data.get(map.config, sectionId, name);
+    return typeof value === 'string' ? value : '';
+}
+
+function validateUniqueValue(map, option, sectionId, name, value,
+    normalize, label) {
+    var expected = normalize(value);
+    var duplicate = map.data.sections(map.config, 'station').some(function(row) {
+        var otherId = row['.name'];
+        var otherValue;
+
+        if (otherId === sectionId)
+            return false;
+        otherValue = optionValue(map, option, otherId, name);
+        return otherValue !== '' && normalize(otherValue) === expected;
+    });
+
+    return duplicate ? label + '不能重复。' : true;
 }
 
 function errorText(error) {
@@ -68,6 +112,10 @@ return view.extend({
         var section = map.section(form.GridSection, 'station', '已配置门口机');
         var originalHandleAdd = section.handleAdd;
         var option;
+        var logicalAddressOption;
+        var ipv4Option;
+        var routePreferenceOption;
+        var streamNameOption;
 
         section.anonymous = false;
         section.addremove = true;
@@ -81,6 +129,12 @@ return view.extend({
                     'warning');
                 return null;
             }
+            if (map.data.get(map.config, name) !== null) {
+                ui.addNotification('门口机 ID 已存在', E('p', {}, [
+                    '该门口机 ID 已存在，请使用新的 ID。'
+                ]), 'warning');
+                return null;
+            }
             return originalHandleAdd.call(this, event, name);
         };
 
@@ -90,26 +144,51 @@ return view.extend({
 
         option = section.option(form.Value, 'name', '名称');
         option.rmempty = false;
+        option.validate = validateStationName;
 
-        option = section.option(form.Value, 'logical_address', '逻辑地址');
-        option.placeholder = '32:02:01:00:02:00';
-        option.rmempty = false;
-        option.validate = validateLogicalAddress;
+        logicalAddressOption = section.option(
+            form.Value, 'logical_address', '逻辑地址');
+        logicalAddressOption.placeholder = '32:02:01:00:02:00';
+        logicalAddressOption.rmempty = false;
+        logicalAddressOption.validate = function(sectionId, value) {
+            var validation = validateLogicalAddress(sectionId, value);
 
-        option = section.option(form.Value, 'ipv4', 'IPv4 地址');
-        option.datatype = 'ip4addr';
-        option.rmempty = true;
+            if (validation !== true)
+                return validation;
+            return validateUniqueValue(map, logicalAddressOption, sectionId,
+                'logical_address', value, function(current) {
+                    return current.toLowerCase();
+                }, '逻辑地址');
+        };
 
-        option = section.option(form.ListValue, 'route_preference', '路由偏好');
-        option.value('discover_first', '优先发现');
-        option.value('fixed', '固定地址');
-        option.default = 'discover_first';
-        option.rmempty = false;
+        ipv4Option = section.option(form.Value, 'ipv4', 'IPv4 地址');
+        ipv4Option.datatype = 'ip4addr';
+        ipv4Option.rmempty = true;
 
-        option = section.option(form.Value, 'stream_name', '流名称');
-        option.placeholder = 'doorfast_gate_main';
-        option.rmempty = false;
-        option.validate = validateStreamName;
+        routePreferenceOption = section.option(
+            form.ListValue, 'route_preference', '路由偏好');
+        routePreferenceOption.value('discover_first', '优先发现');
+        routePreferenceOption.value('fixed', '固定地址');
+        routePreferenceOption.default = 'discover_first';
+        routePreferenceOption.rmempty = false;
+        ipv4Option.validate = function(sectionId, value) {
+            return validateStationIpv4(value,
+                optionValue(map, routePreferenceOption, sectionId,
+                    'route_preference') === 'fixed');
+        };
+
+        streamNameOption = section.option(form.Value, 'stream_name', '流名称');
+        streamNameOption.placeholder = 'doorfast_gate_main';
+        streamNameOption.rmempty = false;
+        streamNameOption.validate = function(sectionId, value) {
+            var validation = validateStreamName(sectionId, value);
+
+            if (validation !== true)
+                return validation;
+            return validateUniqueValue(map, streamNameOption, sectionId,
+                'stream_name', value, function(current) { return current; },
+                '流名称');
+        };
 
         this.stationMap = map;
         this.stationSection = section;
@@ -192,6 +271,12 @@ return view.extend({
                 'warning');
             return Promise.resolve();
         }
+        if (this.stationMap.data.get('doorfast', stationId) !== null) {
+            ui.addNotification('门口机 ID 已存在', E('p', {}, [
+                '该门口机 ID 已存在，请使用新的 ID。'
+            ]), 'warning');
+            return Promise.resolve();
+        }
         sectionId = this.stationMap.data.add('doorfast', 'station', stationId);
         values = {
             enabled: '1',
@@ -202,8 +287,8 @@ return view.extend({
             stream_name: 'doorfast_' + stationId
         };
         Object.keys(values).forEach(function(name) {
-            uci.set('doorfast', sectionId, name, values[name]);
-        });
+            this.stationMap.data.set('doorfast', sectionId, name, values[name]);
+        }, this);
         this.stationMap.addedSection = sectionId;
         return this.stationSection.renderMoreOptionsModal(sectionId);
     },
@@ -214,7 +299,10 @@ return view.extend({
         var candidates = data && data[1] ? data[1] : {candidates: []};
 
         this.candidateNode = E('div', {}, [this.renderCandidates(candidates)]);
-        poll.add(function() { return self.refreshCandidates(); }, 5);
+        if (this.candidatePoll === undefined) {
+            this.candidatePoll = function() { return self.refreshCandidates(); };
+            poll.add(this.candidatePoll, 5);
+        }
         return map.render().then(function(mapNode) {
             return E('div', {}, [
                 mapNode,

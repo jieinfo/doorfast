@@ -22,7 +22,9 @@ jobs:
       - run: python3 -B -m unittest tests/test_compare_doorfast_site.py
       - run: node tests/test_luci_status.js
       - run: node tests/test_luci_settings.js
-      - run: node tests/test_luci_media_view.js
+      - run: node tests/test_luci_media.js
+      - run: node tests/test_luci_deployment.js
+      - run: node tests/test_luci_stations.js
       - run: node tests/js/test_media_status.mjs
       - run: sh tests/test_main_cli.sh
       - run: sh tests/test_recorder_cli.sh

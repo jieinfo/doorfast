@@ -73,7 +73,10 @@ return view.extend({
         this.lastStatus = payload;
         this.statusNode = E('div', {});
         this.renderCurrent(payload, false);
-        poll.add(function() { return self.refreshStatus(); }, 5);
+        if (this.statusPoll === undefined) {
+            this.statusPoll = function() { return self.refreshStatus(); };
+            poll.add(this.statusPoll, 5);
+        }
         return E('div', {}, [
             E('h2', {}, ['Doorfast']),
             E('p', {}, ['Doorfast 运行状态。接听、挂断、开锁与召梯由 Home Assistant 提供。']),

@@ -240,36 +240,56 @@ return view.extend({
         return callStatus().catch(function() { return null; });
     },
 
-    mediaCredentialsRequest: function() {
+    captureMediaCredentials: function() {
         var rtspPassword;
         var relayToken;
         var clearRtspPassword;
         var clearRelayToken;
 
-        if (this.mediaMap === null)
-            return Promise.resolve();
         rtspPassword = fieldValue(this.rtspPassword);
         relayToken = fieldValue(this.relayToken);
         clearRtspPassword = flagValue(this.clearRtspPassword);
         clearRelayToken = flagValue(this.clearRelayToken);
         if (rtspPassword !== '' && clearRtspPassword)
-            return Promise.reject(new Error('不能同时填写并清除 RTSP 密码。'));
+            throw new Error('不能同时填写并清除 RTSP 密码。');
         if (relayToken !== '' && clearRelayToken)
-            return Promise.reject(new Error('不能同时填写并清除媒体 relay 令牌。'));
-        if (rtspPassword === '' && relayToken === '' &&
-            !clearRtspPassword && !clearRelayToken)
+            throw new Error('不能同时填写并清除媒体 relay 令牌。');
+        return {
+            rtspPassword: rtspPassword,
+            relayToken: relayToken,
+            clearRtspPassword: clearRtspPassword,
+            clearRelayToken: clearRelayToken,
+            changed: rtspPassword !== '' || relayToken !== '' ||
+                clearRtspPassword || clearRelayToken
+        };
+    },
+
+    mediaCredentialsRequest: function(credentials) {
+        if (!credentials.changed)
             return Promise.resolve();
-        return callMediaCredentials(rtspPassword, relayToken,
-            clearRtspPassword, clearRelayToken);
+        return callMediaCredentials(credentials.rtspPassword,
+            credentials.relayToken, credentials.clearRtspPassword,
+            credentials.clearRelayToken);
     },
 
     saveMedia: function(apply) {
         var self = this;
+        var credentials;
 
         if (this.mediaMap === null)
             return Promise.resolve();
-        return this.mediaMap.save(function() {
-            return self.mediaCredentialsRequest();
+        try {
+            credentials = this.captureMediaCredentials();
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return this.mediaMap.save().then(function() {
+            return self.mediaCredentialsRequest(credentials).catch(function(error) {
+                ui.addNotification('媒体凭据保存失败', E('p', {}, [
+                    error && error.message ? error.message : String(error)
+                ]), 'danger');
+                return Promise.reject(error);
+            });
         }).then(function() {
             return apply ? ui.changes.apply() : null;
         });

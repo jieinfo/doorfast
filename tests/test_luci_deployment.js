@@ -98,4 +98,16 @@ assert.equal(byName('multicast_address', host).datatype, 'ip4addr');
 assert.deepEqual(byName('multicast_address', host).dependency, {
     active_host: '1', multicast_mode: 'custom'
 });
+assert.equal(byName('multicast_address', host).validate(
+    'main', '224.0.0.0'), true);
+assert.equal(byName('multicast_address', host).validate(
+    'main', '239.255.255.255'), true);
+assert.match(byName('multicast_address', host).validate(
+    'main', '223.255.255.255'), /组播/);
+assert.match(byName('multicast_address', host).validate(
+    'main', '240.0.0.0'), /组播/);
+assert.match(byName('multicast_address', host).validate(
+    'main', '192.168.1.1'), /组播/);
+assert.match(byName('multicast_address', host).validate(
+    'main', '239.1.2'), /IPv4/);
 assert.doesNotMatch(source, /require rpc|rpc\.declare|form\.Button/);
