@@ -130,10 +130,10 @@ def _remote(ssh: Path, command: str) -> subprocess.CompletedProcess:
 
 def _remote_snapshot(ssh: Path) -> dict[str, str]:
     commands = {
-        "rules": "ip -j rule show 2>/dev/null || true",
-        "routes": "ip -j route show table all 2>/dev/null || true",
-        "firewall": "nft -j list ruleset 2>/dev/null || true",
-        "listeners": "ss -H -lntup 2>/dev/null || true",
+        "rules": "ip -j rule show",
+        "routes": "ip -j route show table all",
+        "firewall": "nft -j list ruleset",
+        "listeners": "ss -H -lntup",
     }
     snapshot = {}
     for name, command in commands.items():
@@ -190,6 +190,15 @@ def _remote_media_check(ssh: Path, output: Path, before_network: dict[str, str])
     monitor_redacted = _redacted_media_status(monitor, "monitor_status")
     if process_count < 0:
         raise RuntimeError("VM FFmpeg process count was invalid")
+    for checked in (status_redacted, monitor_redacted):
+        if not checked["installed"]:
+            raise RuntimeError(f"VM {checked['source']} did not report the media APK installed")
+        if not checked["available"]:
+            raise RuntimeError(
+                f"VM {checked['source']} did not report the media module available; "
+                "enable and configure media before running VM acceptance")
+    if before_network != after_network:
+        raise RuntimeError("VM network, firewall, or listener state changed during read-only checks")
     report = {
         "mode": "vm-installed-path",
         "fixture": "not-run; no synthetic GVS/RTSP injection on VM",
@@ -197,7 +206,7 @@ def _remote_media_check(ssh: Path, output: Path, before_network: dict[str, str])
         "monitor_status": monitor_redacted,
         "process_count": {"ffmpeg": process_count},
         "cleanup": "not-exercised; no safe remote preemption without a VM fixture",
-        "network_unchanged": before_network == after_network,
+        "network_unchanged": True,
     }
     _write_json(output / "vm.json", report)
     return report
@@ -228,6 +237,14 @@ else
     exit 127
 fi
 test -x /usr/sbin/doorfast
+test -r /usr/lib/doorfast/media-v1.so
+/etc/init.d/doorfast restart
+i=0
+while ! ubus -t 1 call doorfast status '{}' >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -lt 50 ] || exit 1
+    sleep 0.1
+done
 '''
     child = subprocess.Popen([str(ssh), remote_script], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -252,14 +269,7 @@ def _run_vm(ssh: Path, doorfast_apk: Path, media_apk: Path, output: Path) -> dic
     _vm_install(ssh, doorfast_apk, media_apk)
     before_network = _remote_snapshot(ssh)
     vm = _remote_media_check(ssh, output, before_network)
-    return {
-        "mode": "vm-installed-path",
-        "status": {"media": vm["status"]},
-        "status_after_preemption": {"media": vm["status"]},
-        "rtsp": {"announced_path": None, "max_producer_count": 0},
-        "process_count": {"after": vm["process_count"]["ffmpeg"]},
-        "vm": vm,
-    }
+    return {"mode": "vm-installed-path", "vm": vm}
 
 
 def main(argv=None) -> int:
@@ -284,14 +294,28 @@ def main(argv=None) -> int:
             failures[case] = case_result["status"]["media"]["failure"]
         _write_json(output / "failure-cases.json", failures)
     # stdout is intentionally a short, redacted summary; inspect JSON files for details.
-    print(json.dumps({"acceptance": "pass" if not all(provided) else "installed-path-check",
-                      "output_dir": str(output), "mode": result.get("mode", "local-fixture"),
-                      "state": result["status_after_preemption"]["media"]["state"],
-                      "rtsp_path": result["rtsp"]["announced_path"],
-                      "producer_count": result["rtsp"]["max_producer_count"],
-                      "ffmpeg_after_preemption": result["process_count"]["after"],
-                      "failure_cases": sorted(failures)},
-                     sort_keys=True))
+    if all(provided):
+        summary = {
+            "acceptance": "installed-path-check",
+            "output_dir": str(output),
+            "mode": result["mode"],
+            "state": result["vm"]["status"]["state"],
+            "ffmpeg_process_count": result["vm"]["process_count"]["ffmpeg"],
+            "fixture": "not-run",
+            "preemption": "not-run",
+        }
+    else:
+        summary = {
+            "acceptance": "pass",
+            "output_dir": str(output),
+            "mode": "local-fixture",
+            "state": result["status_after_preemption"]["media"]["state"],
+            "rtsp_path": result["rtsp"]["announced_path"],
+            "producer_count": result["rtsp"]["max_producer_count"],
+            "ffmpeg_after_preemption": result["process_count"]["after"],
+            "failure_cases": sorted(failures),
+        }
+    print(json.dumps(summary, sort_keys=True))
     return 0
 
 

@@ -68,12 +68,19 @@ python3 -B tests/run_doorfast_vm_media.py \
   /absolute/path/to/doorfast-media.apk
 ```
 
+Before running VM mode, configure the isolated target with a valid enabled
+Doorfast service and `media_enabled=1`. The runner installs both development
+APKs with `apk add --allow-untrusted` (falling back to `opkg` only for older
+images), restarts Doorfast, waits for its ubus object, and requires both status
+methods to report the media module installed and available.
+
 No-argument mode performs the full synthetic fixture acceptance: generation 1
 reaches `publishing`, the local RTSP fixture sees `/doorfast_preview` with one
 producer, and an incoming-call preemption leaves media `idle` with no FFmpeg
 process. The three-argument VM mode installs both APKs, then performs a
 read-only installed-path check of Doorfast status, monitor status, FFmpeg
-process count, and unchanged network snapshots. It deliberately does not
+process count, and unchanged network snapshots; any missing snapshot tool or
+state difference fails the run. It deliberately does not
 inject synthetic GVS/RTSP traffic into the VM, so its result is reported as an
 installed-path check rather than fixture acceptance. This is a transport and
 lifecycle fixture acceptance only. It does not verify a real door station, a
