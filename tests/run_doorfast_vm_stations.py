@@ -11,6 +11,7 @@ scan response so the acceptance can verify the complete three-frame burst.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
 from pathlib import Path
@@ -29,10 +30,30 @@ def valid_runtime_id(value: object) -> bool:
             value == value.lower() and set(value) <= RUNTIME_ID_CHARS)
 
 
+def redacted_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
+def redact_candidate(value: dict) -> dict:
+    return {
+        "logical_address_hash": redacted_hash(value["logical_address"]),
+        "ipv4_hash": redacted_hash(value["ipv4"]),
+        "first_seen_ms": value["first_seen_ms"],
+        "last_seen_ms": value["last_seen_ms"],
+        "reply_count": value["reply_count"],
+        "configured": value["configured"],
+    }
+
+
 def redact_station(value: dict) -> dict:
-    fields = ("id", "logical_address", "route_source", "route_fresh",
-              "monitorable", "last_seen_ms")
-    return {field: value.get(field) for field in fields}
+    return {
+        "id": value["id"],
+        "logical_address_hash": redacted_hash(value["logical_address"]),
+        "route_source": value["route_source"],
+        "route_fresh": value["route_fresh"],
+        "monitorable": value["monitorable"],
+        "last_seen_ms": value.get("last_seen_ms"),
+    }
 
 
 def remote(ssh: Path, command: str) -> str:
@@ -116,7 +137,7 @@ def run(ssh: Path, output: Path) -> dict:
     response = remote_json(ssh, "ubus call doorfast station_scan '{}'")
     if response.get("runtime_id") != runtime_id or response.get("scheduled") is not True:
         raise RuntimeError(f"station scan response mismatch: {response!r}")
-    scan_sent = response.get("frames_sent")
+    scan_sent = response.get("frames_sent", response.get("frames_scheduled"))
     if not isinstance(scan_sent, int) or scan_sent != 3:
         raise RuntimeError("station scan did not report all three emitted frames")
     candidates = remote_json(ssh, "ubus call doorfast station_candidates '{}'")
@@ -142,7 +163,7 @@ def run(ssh: Path, output: Path) -> dict:
         for field in CANDIDATE_FIELDS:
             if field not in candidate:
                 raise RuntimeError(f"candidate is missing {field}")
-        redacted_candidates.append({field: candidate[field] for field in CANDIDATE_FIELDS})
+        redacted_candidates.append(redact_candidate(candidate))
         (configured_candidates if candidate["configured"] else unconfigured_candidates).append(candidate)
     if len(configured_candidates) != 2 or len(unconfigured_candidates) != 1:
         raise RuntimeError("candidate/configured separation is invalid")

@@ -737,6 +737,7 @@ static int df_runtime_ubus_station_scan_handler(
     blobmsg_add_string(&platform->response, "runtime_id",
         platform->owner->runtime_id);
     blobmsg_add_u8(&platform->response, "scheduled", true);
+    blobmsg_add_u32(&platform->response, "frames_scheduled", 3U);
     result = ubus_send_reply(context, request, platform->response.head);
     blob_buf_free(&platform->response);
     return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;

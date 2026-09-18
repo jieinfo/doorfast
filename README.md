@@ -561,7 +561,7 @@ python3 tests/run_doorfast_vm_stations.py /absolute/path/to/vm/ssh.sh
 
 ### 主动发现的软件验收
 
-- VM/fake-SSH 验收已经证明三次 `07/06` 扫描请求、三条候选、两条已配置站点、`runtime_id`/revision 以及 60 秒路由新鲜度字段能够稳定读取。
+- VM/fake-SSH 验收已经证明一次扫描生命周期的三帧 `07/06` 计划/发送计数、三条候选、两条已配置站点、`runtime_id`/revision 以及 60 秒路由新鲜度字段能够稳定读取；真实 VM 返回计划帧数，fake fixture 额外暴露已发送帧数。
 - 验收同时比较扫描前后的网络 UCI，确认发现接口不会修改网络配置；组播验收记录 GVS 身份推导地址和最终生效地址。
 - fake fixture、软件 VM 或回放数据都不能证明物业系统接受身份注册，也不能证明实体门口机、门锁或电梯动作。
 

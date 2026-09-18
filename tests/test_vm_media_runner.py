@@ -153,7 +153,7 @@ class VmMediaRunnerTest(unittest.TestCase):
         self.assertNotIn("name", report["configured_stations"][0])
         self.assertNotIn("stream_name", report["configured_stations"][0])
         self.assertEqual(
-            {"logical_address", "ipv4", "first_seen_ms", "last_seen_ms",
+            {"logical_address_hash", "ipv4_hash", "first_seen_ms", "last_seen_ms",
              "reply_count", "configured"},
             set(report["candidates"][0]),
         )
