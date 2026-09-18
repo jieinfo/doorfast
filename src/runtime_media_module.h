@@ -8,22 +8,22 @@
 #include "doorfast.h"
 #include "media_module.h"
 
-#define DF_RUNTIME_MEDIA_MODULE_PATH "/usr/lib/doorfast/media-v1.so"
+#define DF_RUNTIME_MEDIA_MODULE_PATH "/usr/lib/doorfast/media-v2.so"
 
 struct df_runtime_media_module {
     void *handle;
-    const struct df_media_module_api_v1 *api;
+    const struct df_media_module_api_v2 *api;
     void *instance;
     bool available;
 };
 
 int df_runtime_media_module_start(struct df_runtime_media_module *,
-    const struct df_media_module_config_v1 *,
-    const struct df_media_module_callbacks_v1 *);
+    const struct df_media_module_config_v2 *,
+    const struct df_media_module_callbacks_v2 *);
 int df_runtime_media_module_start_with_api(struct df_runtime_media_module *,
-    const struct df_media_module_api_v1 *,
-    const struct df_media_module_config_v1 *,
-    const struct df_media_module_callbacks_v1 *);
+    const struct df_media_module_api_v2 *,
+    const struct df_media_module_config_v2 *,
+    const struct df_media_module_callbacks_v2 *);
 int df_runtime_media_module_request_start(struct df_runtime_media_module *,
     uint64_t now_ms);
 int df_runtime_media_module_command(struct df_runtime_media_module *,

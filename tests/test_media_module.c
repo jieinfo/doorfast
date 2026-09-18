@@ -15,7 +15,16 @@ struct module_trace {
     char entries[8][32];
     char last_json[512];
     unsigned count;
+    uint64_t available_memory_kib;
 };
+
+static int module_available_memory(uint64_t *available_kib, void *context) {
+    struct module_trace *trace = context;
+
+    if (available_kib == NULL || trace == NULL) return DF_ERR_INVALID;
+    *available_kib = trace->available_memory_kib;
+    return DF_OK;
+}
 
 static int module_write_credentials(char path[]) {
     static const char contents[] =
@@ -142,11 +151,65 @@ static void module_set_running_media(struct df_media_module *module,
     module->encoder.input_fd = -1;
 }
 
+void test_media_module_applies_resource_and_timeout_config(void) {
+    struct df_media_module module = {0};
+    struct module_trace trace = {.available_memory_kib = 131071U};
+    char path[] = "/tmp/doorfast-media-limits-XXXXXX";
+    const struct df_media_module_config_v2 config = {
+        .enabled = true,
+        .local = {0x61, 2, 1, 1, 1, 1},
+        .station = {0x32, 2, 1, 0, 2, 0},
+        .station_ipv4 = htonl(INADDR_LOOPBACK),
+        .go2rtc_host = "127.0.0.1",
+        .go2rtc_port = 8554U,
+        .stream_name = "doorfast_preview",
+        .rtsp_username = "doorfast",
+        .credentials_path = path,
+        .encoder = DF_MEDIA_ENCODER_SOFTWARE,
+        .resolution = DF_MEDIA_RESOLUTION_SOURCE,
+        .fps = 10U,
+        .bitrate_kbps = 800U,
+        .profile = DF_MEDIA_PROFILE_BASELINE,
+        .min_free_kib = 131072U,
+        .preview_timeout_s = 15U,
+        .first_frame_timeout_s = 2U,
+        .relay_url = "",
+    };
+    const struct df_media_module_callbacks_v2 callbacks = {
+        .emit_control = module_emit_control,
+        .available_memory = module_available_memory,
+        .context = &trace,
+    };
+
+    TEST_ASSERT_INT_EQ(DF_OK, module_write_credentials(path));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(
+        &module, &config, &callbacks, 100U));
+    TEST_ASSERT_INT_EQ(2000, (int)module.monitor.first_frame_timeout_ms);
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_media_module_start(&module, 100U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_IDLE, module.monitor.state);
+    TEST_ASSERT_INT_EQ(0, (int)trace.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("insufficient_memory", module.failure));
+
+    trace.available_memory_kib = 131072U;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(&module, 100U));
+    TEST_ASSERT_INT_EQ(1, (int)trace.count);
+    module.monitor.state = DF_GVS_MONITOR_PUBLISHING;
+    module.monitor.media_ready = true;
+    module.monitor.last_now_ms = 100U;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 15099U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, module.monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 15100U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, module.monitor.state);
+    TEST_ASSERT_INT_EQ(2, (int)trace.count);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
+    TEST_ASSERT_INT_EQ(0, unlink(path));
+}
+
 void test_media_module_preempts_with_control_before_event(void) {
     struct df_media_module module = {0};
     struct module_trace trace = {0};
     char path[] = "/tmp/doorfast-media-preempt-XXXXXX";
-    struct df_media_module_config_v1 config = {
+    struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -154,7 +217,7 @@ void test_media_module_preempts_with_control_before_event(void) {
         .relay_url = "http://ha.local",
         .credentials_path = path,
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
         .relay_send = module_send_relay,
         .context = &trace,
@@ -188,7 +251,7 @@ void test_media_module_restarts_encoder_when_source_dimensions_change(void) {
     char original_path[4096];
     const char *path_value = getenv("PATH");
     pid_t first_pid;
-    const struct df_media_module_config_v1 config = {
+    const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -205,7 +268,7 @@ void test_media_module_restarts_encoder_when_source_dimensions_change(void) {
         .profile = DF_MEDIA_PROFILE_BASELINE,
         .relay_url = "",
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
         .context = &trace,
     };
@@ -265,7 +328,7 @@ void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
     char original_path[4096];
     const char *path_value = getenv("PATH");
     unsigned attempt;
-    const struct df_media_module_config_v1 config = {
+    const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -282,7 +345,7 @@ void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
         .profile = DF_MEDIA_PROFILE_BASELINE,
         .relay_url = "http://ha.local",
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
         .relay_send = module_send_relay,
         .context = &trace,
@@ -385,7 +448,7 @@ void test_media_module_encoder_exit_fails_generation_and_cleans_media(void) {
 void test_media_module_clears_credentials_when_relay_initialization_fails(void) {
     struct df_media_module module = {0};
     char path[] = "/tmp/doorfast-media-relay-failure-XXXXXX";
-    const struct df_media_module_config_v1 config = {
+    const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -393,7 +456,7 @@ void test_media_module_clears_credentials_when_relay_initialization_fails(void) 
         .credentials_path = path,
         .relay_url = "ftp://invalid.example",
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
     };
 
@@ -411,7 +474,7 @@ void test_media_module_rejects_stale_commands_and_status_has_no_secrets(void) {
     struct df_media_module_status status = {0};
     struct module_trace trace = {0};
     char path[] = "/tmp/doorfast-media-status-XXXXXX";
-    struct df_media_module_config_v1 config = {
+    struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -419,7 +482,7 @@ void test_media_module_rejects_stale_commands_and_status_has_no_secrets(void) {
         .relay_url = "http://ha.local",
         .credentials_path = path,
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
         .relay_send = module_send_relay,
         .context = &trace,
@@ -451,7 +514,7 @@ void test_media_module_owns_config_loads_credentials_and_redacts_status(void) {
     const char contents[] =
         "rtsp_password=rtsp-secret\nrelay_token=relay-secret\n";
     int descriptor = mkstemp(path);
-    struct df_media_module_config_v1 config = {
+    struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -468,7 +531,7 @@ void test_media_module_owns_config_loads_credentials_and_redacts_status(void) {
         .profile = DF_MEDIA_PROFILE_BASELINE,
         .relay_url = relay_url,
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
         .relay_send = module_send_relay,
         .context = &trace,
@@ -503,7 +566,7 @@ void test_media_module_owns_config_loads_credentials_and_redacts_status(void) {
 void test_media_module_restarts_after_failure_with_new_generation(void) {
     struct df_media_module module = {0};
     struct module_trace trace = {0};
-    const struct df_media_module_config_v1 config = {
+    const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -511,7 +574,7 @@ void test_media_module_restarts_after_failure_with_new_generation(void) {
         .relay_url = "",
         .credentials_path = "/tmp/doorfast-media-module-missing",
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_emit_control,
         .context = &trace,
     };
@@ -542,7 +605,7 @@ void test_media_module_stop_ack_cleans_local_media(void) {
         .opcode = 0x82U,
     };
     char path[] = "/tmp/doorfast-media-stop-ack-XXXXXX";
-    const struct df_media_module_config_v1 config = {
+    const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -550,7 +613,7 @@ void test_media_module_stop_ack_cleans_local_media(void) {
         .credentials_path = path,
         .relay_url = "http://ha.local",
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
         .relay_send = module_send_relay,
         .context = &trace,
@@ -580,7 +643,7 @@ void test_media_module_stop_timeout_cleans_local_media(void) {
     struct df_media_module module = {0};
     struct module_trace trace = {0};
     char path[] = "/tmp/doorfast-media-stop-timeout-XXXXXX";
-    const struct df_media_module_config_v1 config = {
+    const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -588,7 +651,7 @@ void test_media_module_stop_timeout_cleans_local_media(void) {
         .credentials_path = path,
         .relay_url = "http://ha.local",
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
         .relay_send = module_send_relay,
         .context = &trace,
@@ -628,7 +691,7 @@ void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void) {
         .opcode = 0x82U,
     };
     char path[] = "/tmp/doorfast-media-stop-failure-XXXXXX";
-    const struct df_media_module_config_v1 config = {
+    const struct df_media_module_config_v2 config = {
         .enabled = true,
         .local = {0x61, 2, 1, 1, 1, 1},
         .station = {0x32, 2, 1, 0, 2, 0},
@@ -636,7 +699,7 @@ void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void) {
         .credentials_path = path,
         .relay_url = "http://ha.local",
     };
-    const struct df_media_module_callbacks_v1 callbacks = {
+    const struct df_media_module_callbacks_v2 callbacks = {
         .emit_control = module_noop_control,
         .relay_send = module_send_relay,
         .context = &trace,

@@ -34,6 +34,7 @@ typedef int (*df_runtime_call_status_provider_fn)(
 
 struct df_runtime_call_request {
     enum df_gvs_call_command_type type;
+    char runtime_id[DF_RUNTIME_ID_HEX_LENGTH + 1U];
     uint64_t session_generation;
     uint16_t primary_media_port;
     uint16_t secondary_media_port;
@@ -124,11 +125,12 @@ void df_runtime_ubus_stop(struct df_runtime_ubus *service);
 int df_runtime_ubus_bind_access(struct df_runtime_ubus *,
     struct df_gvs_access_control *, const struct df_gvs_session *,
     const uint8_t [6]);
-int df_runtime_ubus_unlock(struct df_runtime_ubus *, uint64_t);
+int df_runtime_ubus_unlock(struct df_runtime_ubus *, const char *runtime_id,
+    uint64_t);
 int df_runtime_ubus_bind_elevator(struct df_runtime_ubus *,
     struct df_gvs_elevator_control *, const uint8_t [6]);
 int df_runtime_ubus_call_elevator(struct df_runtime_ubus *,
-    enum df_gvs_elevator_direction, uint64_t *);
+    const char *runtime_id, enum df_gvs_elevator_direction, uint64_t *);
 int df_runtime_ubus_update_elevator_status(struct df_runtime_ubus *,
     const struct df_gvs_elevator_status *, uint64_t);
 int df_runtime_ubus_read_elevator_status(struct df_runtime_ubus *,

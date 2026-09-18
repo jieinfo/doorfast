@@ -143,14 +143,20 @@ static int df_runtime_sync_action(
     }
     if (udp != NULL) {
         if (df_gvs_udp_presence_emit(action, udp) != DF_OK) {
-            (void)printf("doorfast: event=sync_action action=%s round=%u sent=0\n",
-                         df_sync_action_name(action->type), action->round);
+            (void)printf(
+                "doorfast: event=sync_action action=%s round=%u sent=%u "
+                "packets=%zu\n",
+                df_sync_action_name(action->type), action->round,
+                udp->emitted_packets > 0U ? 1U : 0U,
+                udp->emitted_packets);
             return DF_ERR_IO;
         }
     }
-    (void)printf("doorfast: event=sync_action action=%s round=%u sent=%u\n",
-                 df_sync_action_name(action->type), action->round,
-                 udp != NULL ? 1U : 0U);
+    (void)printf(
+        "doorfast: event=sync_action action=%s round=%u sent=%u packets=%zu\n",
+        df_sync_action_name(action->type), action->round,
+        udp != NULL && udp->emitted_packets > 0U ? 1U : 0U,
+        udp != NULL ? udp->emitted_packets : 0U);
     return DF_OK;
 }
 
@@ -179,16 +185,17 @@ static const char *df_runtime_send_event_name(
     }
 }
 
-static void df_runtime_send_log(const struct df_gvs_send_trace *trace) {
+static void df_runtime_send_log(const struct df_gvs_send_trace *trace,
+                                const char *mode) {
     size_t index;
 
     for (index = 0; trace != NULL && index < trace->count; index++) {
         (void)printf(
             "doorfast: event=peer_reply_tx state=%s attempt=%u "
-            "timed_out=%u mode=simulated\n",
+            "timed_out=%u mode=%s\n",
             df_runtime_send_event_name(trace->events[index].type),
             trace->events[index].attempt,
-            trace->events[index].timed_out ? 1U : 0U);
+            trace->events[index].timed_out ? 1U : 0U, mode);
     }
 }
 
@@ -277,6 +284,31 @@ static int df_runtime_status_provider(
     return df_gvs_runtime_sync_status(context, status);
 }
 
+int df_runtime_sync_configure(struct df_gvs_runtime_sync *sync,
+    const struct df_runtime_config *runtime) {
+    const struct {
+        const char *key;
+        const char *value;
+    } adapters[] = {
+        {"sync_mini1_secretkey", runtime == NULL ? NULL :
+            runtime->config.sync_mini1_secretkey},
+        {"sync_mini2_secretkey", runtime == NULL ? NULL :
+            runtime->config.sync_mini2_secretkey},
+    };
+    size_t index;
+
+    if (sync == NULL || runtime == NULL) return DF_ERR_INVALID;
+    if (!runtime->config.active_host) return DF_OK;
+    for (index = 0U; index < DF_ARRAY_LEN(adapters); index++) {
+        if (adapters[index].value == NULL || adapters[index].value[0] == '\0')
+            continue;
+        if (df_gvs_sync_adapter_enable(&sync->adapters, &sync->store,
+                adapters[index].key, adapters[index].value) != DF_OK)
+            return DF_ERR_INVALID;
+    }
+    return DF_OK;
+}
+
 struct df_runtime_call_binding {
     struct df_gvs_call_control *control;
     struct df_gvs_session *session;
@@ -317,7 +349,7 @@ static int df_runtime_call_submit(
 }
 
 int df_runtime_media_build_module_config(const struct df_runtime_config *runtime,
-    const uint8_t local[6], struct df_media_module_config_v1 *output) {
+    const uint8_t local[6], struct df_media_module_config_v2 *output) {
     const struct df_media_config *media;
 
     if (runtime == NULL || local == NULL || output == NULL ||
@@ -341,6 +373,9 @@ int df_runtime_media_build_module_config(const struct df_runtime_config *runtime
     output->fps = media->fps;
     output->bitrate_kbps = media->bitrate_kbps;
     output->profile = media->profile;
+    output->min_free_kib = media->min_free_kib;
+    output->preview_timeout_s = media->preview_timeout_s;
+    output->first_frame_timeout_s = media->first_frame_timeout_s;
     output->relay_url = media->relay_url;
     return DF_OK;
 }
@@ -451,6 +486,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     uint64_t logged_frame_generation = 0;
     uint64_t auto_elevator_generation = 0;
     uint64_t last_audio_export_ms = 0;
+    df_gvs_send_attempt_fn reply_send_attempt = df_gvs_memory_send_attempt;
+    void *reply_send_context = &memory_sender;
+    const char *reply_send_mode = "simulated";
     enum df_gvs_elevator_control_state logged_elevator_state =
         DF_GVS_ELEVATOR_CONTROL_IDLE;
     int status;
@@ -510,6 +548,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                                   started_ms) != DF_OK) {
         return DF_ERR_IO;
     }
+    if (df_runtime_sync_configure(&sync, runtime) != DF_OK) {
+        df_gvs_runtime_sync_stop(&sync);
+        return DF_ERR_INVALID;
+    }
     if (!runtime->config.passive_only || runtime->config.active_host) {
         if (df_gvs_udp_sender_open(&udp_sender, runtime->config.indoor_ipaddr, 8300,
                 df_gvs_vendor_header_fields, NULL) != DF_OK) {
@@ -521,6 +563,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             df_gvs_udp_send_attempt, &udp_sender);
         presence_context.sender = &udp_sender;
         presence_context.source = identity;
+        presence_context.store = &sync.store;
+        reply_send_attempt = df_gvs_udp_peer_reply_send_attempt;
+        reply_send_context = &presence_context;
+        reply_send_mode = "udp";
         if (df_gvs_multicast_open(&multicast, identity,
                                   runtime->config.indoor_ipaddr) != DF_OK) {
             df_gvs_udp_sender_close(&udp_sender);
@@ -529,8 +575,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
     }
     if (runtime->config.media.enabled) {
-        struct df_media_module_config_v1 media_config;
-        const struct df_media_module_callbacks_v1 media_callbacks = {
+        struct df_media_module_config_v2 media_config;
+        const struct df_media_module_callbacks_v2 media_callbacks = {
             .emit_control = df_runtime_media_emit_control,
             .resolve_route = df_runtime_media_resolve_route,
             .context = &udp_sender,
@@ -640,6 +686,11 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
 
         now_ms = df_monotonic_ms();
+        if (udp_sender.fd >= 0 &&
+            df_gvs_udp_sender_advance(&udp_sender, now_ms) != DF_OK) {
+            status = DF_ERR_IO;
+            goto done;
+        }
         if (wait_context.ubus_started &&
             df_runtime_ubus_process(&ubus, now_ms) != DF_OK) {
             (void)fputs("doorfast: event=ubus_process_failed\n", stderr);
@@ -682,16 +733,17 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (df_gvs_send_transaction_step(
                 &send_transaction, &reply_queue, now_ms,
-                df_gvs_memory_send_attempt, &memory_sender,
+                reply_send_attempt, reply_send_context,
                 &send_trace) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
         }
-        if (memory_sender.record.generation != logged_frame_generation) {
+        if (reply_send_attempt == df_gvs_memory_send_attempt &&
+            memory_sender.record.generation != logged_frame_generation) {
             df_runtime_memory_frame_log(&memory_sender.record);
             logged_frame_generation = memory_sender.record.generation;
         }
-        df_runtime_send_log(&send_trace);
+        df_runtime_send_log(&send_trace, reply_send_mode);
         presence_context.sync_version = sync.presence.sync_version;
         if (df_gvs_runtime_sync_tick(&sync, now_ms, df_runtime_sync_action,
                                      runtime->config.passive_only &&
@@ -996,7 +1048,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             if ((!runtime->config.passive_only || runtime->config.active_host) &&
                 payload_length >= DF_GVS_CONTROL_HEADER_SIZE)
                 (void)df_gvs_udp_sender_observe_peer(&udp_sender, packet,
-                    packet_length, identity);
+                    packet_length, identity, now_ms);
             if (media_module.available)
                 (void)df_gvs_udp_sender_observe_preview_route(&udp_sender,
                     packet, packet_length, identity, now_ms);
@@ -1151,6 +1203,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     session.generation != auto_elevator_generation) {
                     uint64_t transaction_id = 0;
                     if (df_runtime_ubus_call_elevator(&ubus,
+                            ubus.runtime_id,
                             DF_GVS_ELEVATOR_UP,
                             &transaction_id) == DF_OK) {
                         auto_elevator_generation = session.generation;

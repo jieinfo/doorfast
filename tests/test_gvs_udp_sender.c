@@ -12,8 +12,14 @@
 #include "gvs_pcm_ingress.h"
 #include "gvs_pcm_pump.h"
 #include "gvs_serialize.h"
+#include "gvs_sync.h"
+#include "gvs_runtime_sync.h"
 #include "gvs_udp_sender.h"
+#include "runtime_service.h"
 #include "test.h"
+
+static size_t udp_sender_packet(uint8_t *, size_t, const uint8_t [6],
+    const uint8_t [6], const uint8_t [4]);
 
 static int udp_sender_header_fields(
     const struct df_gvs_header_request *request,
@@ -56,10 +62,142 @@ void test_gvs_udp_presence_treats_unsendable_presence_actions_as_local_only(void
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "127.0.0.1",
         8300, udp_sender_header_fields, NULL));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_presence_emit(&action, &context));
+    TEST_ASSERT_INT_EQ(0, (int)context.emitted_packets);
     action.type = DF_GVS_PRESENCE_PERIODIC_SYNC;
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_presence_emit(&action, &context));
+    TEST_ASSERT_INT_EQ(0, (int)context.emitted_packets);
     TEST_ASSERT_INT_EQ(0, (int)sender.failed);
     df_gvs_udp_sender_close(&sender);
+}
+
+void test_gvs_udp_sender_transmits_peer_reply_with_runtime_header(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t peer[6] = {0x61, 2, 1, 1, 1, 2};
+    const uint8_t loopback[4] = {127, 0, 0, 1};
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    struct df_gvs_udp_presence_context context = {
+        .sender = &sender,
+        .source = local,
+    };
+    const struct df_gvs_reply_queue_entry entry = {
+        .reply = {
+            .target = {0x61, 2, 1, 1, 1, 2},
+            .request_data = {0x12, 0x34},
+        },
+    };
+    struct sockaddr_in address;
+    socklen_t address_length = sizeof(address);
+    struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
+    uint8_t packet[128];
+    uint8_t received[128];
+    size_t packet_length;
+    int receiver;
+    ssize_t received_length;
+
+    receiver = socket(AF_INET, SOCK_DGRAM, 0);
+    TEST_ASSERT_INT_EQ(1, receiver >= 0);
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    TEST_ASSERT_INT_EQ(0, bind(receiver, (const struct sockaddr *)&address,
+                               sizeof(address)));
+    TEST_ASSERT_INT_EQ(0, getsockname(receiver, (struct sockaddr *)&address,
+                                      &address_length));
+    TEST_ASSERT_INT_EQ(0, setsockopt(receiver, SOL_SOCKET, SO_RCVTIMEO,
+                                     &timeout, sizeof(timeout)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "0.0.0.0",
+        ntohs(address.sin_port), udp_sender_header_fields, NULL));
+    packet_length = udp_sender_packet(packet, sizeof(packet), local, peer,
+                                      loopback);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
+        &sender, packet, packet_length, local, 100U));
+
+    TEST_ASSERT_INT_EQ(DF_GVS_SEND_ATTEMPT_SUCCESS,
+        df_gvs_udp_peer_reply_send_attempt(&entry, 1U, 7U, &context));
+    received_length = recv(receiver, received, sizeof(received), 0);
+    TEST_ASSERT_INT_EQ(48, (int)received_length);
+    TEST_ASSERT_INT_EQ(0, memcmp(received + 10U, peer, sizeof(peer)));
+    TEST_ASSERT_INT_EQ(0, memcmp(received + 16U, local, sizeof(local)));
+    TEST_ASSERT_INT_EQ(0x07, received[38]);
+    TEST_ASSERT_INT_EQ(0x81, received[39]);
+    TEST_ASSERT_INT_EQ(0x12, received[42]);
+    TEST_ASSERT_INT_EQ(0x34, received[43]);
+    TEST_ASSERT_INT_EQ(0x31, received[22]);
+    TEST_ASSERT_INT_EQ(0x41, received[30]);
+    TEST_ASSERT_INT_EQ(1, (int)sender.sent);
+    df_gvs_udp_sender_close(&sender);
+    close(receiver);
+}
+
+void test_gvs_udp_sender_transmits_periodic_sync_and_counts_packets(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t peer[6] = {0x61, 2, 1, 1, 1, 2};
+    const uint8_t loopback[4] = {127, 0, 0, 1};
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    struct df_gvs_runtime_sync sync;
+    struct df_runtime_config runtime = {0};
+    struct df_gvs_udp_presence_context context = {
+        .sender = &sender,
+        .source = local,
+        .sync_version = 9U,
+        .store = &sync.store,
+    };
+    struct df_gvs_presence_action action = {
+        .type = DF_GVS_PRESENCE_PERIODIC_SYNC,
+        .target = {0x61, 2, 1, 1, 1, 2},
+    };
+    struct sockaddr_in address;
+    socklen_t address_length = sizeof(address);
+    struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
+    uint8_t packet[128];
+    uint8_t received[DF_GVS_SYNC_MAX_PACKET_SIZE];
+    size_t packet_length;
+    int receiver;
+    ssize_t received_length;
+
+    receiver = socket(AF_INET, SOCK_DGRAM, 0);
+    TEST_ASSERT_INT_EQ(1, receiver >= 0);
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    TEST_ASSERT_INT_EQ(0, bind(receiver, (const struct sockaddr *)&address,
+                               sizeof(address)));
+    TEST_ASSERT_INT_EQ(0, getsockname(receiver, (struct sockaddr *)&address,
+                                      &address_length));
+    TEST_ASSERT_INT_EQ(0, setsockopt(receiver, SOL_SOCKET, SO_RCVTIMEO,
+                                     &timeout, sizeof(timeout)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "0.0.0.0",
+        ntohs(address.sin_port), udp_sender_header_fields, NULL));
+    packet_length = udp_sender_packet(packet, sizeof(packet), local, peer,
+                                      loopback);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
+        &sender, packet, packet_length, local, 100U));
+    runtime.config.active_host = true;
+    runtime.config.sync_mini1_secretkey = "mini-one";
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_runtime_sync_start(
+        &sync, local, 9U, 0U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_sync_configure(&sync, &runtime));
+    TEST_ASSERT_INT_EQ(1, (int)sync.store.count);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_presence_emit(&action, &context));
+    TEST_ASSERT_INT_EQ(1, (int)context.emitted_packets);
+    memset(received, 0, sizeof(received));
+    received_length = recv(receiver, received, sizeof(received), 0);
+    TEST_ASSERT_INT_EQ(1, received_length > 42 ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x91, received[38]);
+    TEST_ASSERT_INT_EQ(0x03, received[39]);
+    TEST_ASSERT_INT_EQ(9, received[42]);
+    TEST_ASSERT_INT_EQ(0, received[43]);
+    TEST_ASSERT_INT_EQ(1, strstr((const char *)received + 44,
+        "\"KEY\":\"sync_mini1_secretkey\",\"VALUE\":\"mini-one\"") != NULL);
+    TEST_ASSERT_INT_EQ(1, (int)sender.sent);
+
+    df_gvs_sync_store_init(&sync.store);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_presence_emit(&action, &context));
+    TEST_ASSERT_INT_EQ(0, (int)context.emitted_packets);
+    TEST_ASSERT_INT_EQ(1, (int)sender.sent);
+    df_gvs_udp_sender_close(&sender);
+    close(receiver);
 }
 
 static size_t udp_sender_packet(uint8_t *packet, size_t capacity,
@@ -184,11 +322,11 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void) {
                                       door, loopback);
     TEST_ASSERT_INT_EQ(1, packet_length > 0);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_udp_sender_observe_peer(
-        &sender, packet, packet_length, local));
+        &sender, packet, packet_length, local, 100U));
     packet_length = udp_sender_packet(packet, sizeof(packet), local, door,
                                       loopback);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
-        &sender, packet, packet_length, local));
+        &sender, packet, packet_length, local, 100U));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_incoming_reply_prepare(
         &observed, &session, 7, local, 8303, &incoming_reply));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_incoming_reply_emit(
@@ -220,6 +358,37 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void) {
     }
     df_gvs_udp_sender_close(&sender);
     close(receiver);
+}
+
+void test_gvs_udp_sender_expires_and_refreshes_observed_peer_route(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t door[6] = {0x32, 2, 1, 0, 1, 0};
+    const uint8_t loopback[4] = {127, 0, 0, 1};
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    uint8_t packet[128];
+    size_t packet_length;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "0.0.0.0",
+        8300U, udp_sender_header_fields, NULL));
+    packet_length = udp_sender_packet(packet, sizeof(packet), local, door,
+                                      loopback);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
+        &sender, packet, packet_length, local, 100U));
+    TEST_ASSERT_INT_EQ(1, sender.observed_routes[0].valid);
+    TEST_ASSERT_INT_EQ(100, (int)sender.observed_routes[0].observed_ms);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_advance(
+        &sender, 100U + DF_GVS_OBSERVED_ROUTE_MAX_AGE_MS - 1U));
+    TEST_ASSERT_INT_EQ(1, sender.observed_routes[0].valid);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_advance(
+        &sender, 100U + DF_GVS_OBSERVED_ROUTE_MAX_AGE_MS));
+    TEST_ASSERT_INT_EQ(0, sender.observed_routes[0].valid);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
+        &sender, packet, packet_length, local,
+        101U + DF_GVS_OBSERVED_ROUTE_MAX_AGE_MS));
+    TEST_ASSERT_INT_EQ(1, sender.observed_routes[1].valid);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_udp_sender_advance(
+        &sender, DF_GVS_OBSERVED_ROUTE_MAX_AGE_MS));
+    df_gvs_udp_sender_close(&sender);
 }
 
 void test_gvs_udp_sender_emits_exact_control_to_configured_route(void) {
@@ -320,7 +489,7 @@ void test_gvs_udp_sender_emits_elevator_request_to_observed_route(void) {
     packet_length = udp_sender_packet(packet, sizeof(packet), local, elevator,
                                       loopback);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
-        &sender, packet, packet_length, local));
+        &sender, packet, packet_length, local, 100U));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_elevator_prepare_call(
         local, DF_GVS_ELEVATOR_DOWN, &request));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_elevator_emit(&request, &sender));
@@ -375,7 +544,7 @@ void test_gvs_udp_sender_emits_audio_to_observed_peer_port(void)
     packet_length = udp_sender_packet(packet, sizeof(packet), local, door,
                                       loopback);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
-        &sender, packet, packet_length, local));
+        &sender, packet, packet_length, local, 100U));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_init(
         &tx, 400, df_gvs_udp_audio_emit, &sender));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_audio_tx_start(
@@ -443,7 +612,7 @@ void test_gvs_local_pcm_reaches_observed_peer_audio_route(void)
     control_length = udp_sender_packet(control_packet, sizeof(control_packet),
                                        local, door, loopback);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_peer(
-        &sender, control_packet, control_length, local));
+        &sender, control_packet, control_length, local, 5000U));
 
     (void)snprintf(path, sizeof(path), "/tmp/doorfast-e2e-%ld.sock",
                    (long)getpid());

@@ -79,6 +79,21 @@ static bool df_media_text_is_valid(const char *text, size_t maximum_length) {
     return true;
 }
 
+static bool df_sync_value_is_valid(const char *text) {
+    size_t index;
+    size_t length;
+
+    if (text == NULL || text[0] == '\0') return true;
+    length = strlen(text);
+    if (length >= 256U) return false;
+    for (index = 0U; index < length; index++) {
+        unsigned char value = (unsigned char)text[index];
+
+        if (value < 0x20U || value > 0x7eU) return false;
+    }
+    return true;
+}
+
 static bool df_media_host_is_valid(const char *host) {
     size_t index;
     size_t length;
@@ -246,6 +261,9 @@ int df_config_validate(const struct df_config *config) {
     if (config->access_material != NULL && config->access_material[0] != '\0' &&
         (strlen(config->access_material) != 16U ||
          strspn(config->access_material, "0123456789abcdefABCDEF") != 16U))
+        return DF_ERR_INVALID;
+    if (!df_sync_value_is_valid(config->sync_mini1_secretkey) ||
+        !df_sync_value_is_valid(config->sync_mini2_secretkey))
         return DF_ERR_INVALID;
     if ((config->indoor_ipaddr != NULL && config->indoor_ipaddr[0] != '\0' &&
          !df_ipv4_is_valid(config->indoor_ipaddr)) ||

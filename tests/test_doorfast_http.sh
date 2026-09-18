@@ -105,10 +105,10 @@ run_method() {
     printf '%s' "$2" | sh package/doorfast/files/doorfast-http.sh)
 }
 run /api/v1/status ''
-run /api/v1/unlock '{"generation":7}'
-run /api/v1/answer '{"generation":7,"primary_media_port":8303}'
-run /api/v1/hangup '{"generation":7,"reason":"ha"}'
-run /api/v1/call_elevator '{"direction":"up"}'
+run /api/v1/unlock '{"runtime_id":"0123456789abcdef","generation":7}'
+run /api/v1/answer '{"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}'
+run /api/v1/hangup '{"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}'
+run /api/v1/call_elevator '{"runtime_id":"0123456789abcdef","direction":"up"}'
 run_method /api/v1/monitor/start '' POST >"$workspace/monitor-start"
 run_method /api/v1/monitor/stop \
   '{"generation":7}' POST >"$workspace/monitor-stop"
@@ -299,10 +299,10 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-unavailable"
 grep -aFq 'Status: 404 Not Found' "$workspace/audio-unavailable"
 grep -Fxq 'call doorfast status' "$trace"
-grep -Fxq 'call doorfast unlock {"generation":7}' "$trace"
-grep -Fxq 'call doorfast answer {"generation":7,"primary_media_port":8303}' "$trace"
-grep -Fxq 'call doorfast hangup {"generation":7,"reason":"ha"}' "$trace"
-grep -Fxq 'call doorfast call_elevator {"direction":"up"}' "$trace"
+grep -Fxq 'call doorfast unlock {"runtime_id":"0123456789abcdef","generation":7}' "$trace"
+grep -Fxq 'call doorfast answer {"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}' "$trace"
+grep -Fxq 'call doorfast hangup {"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}' "$trace"
+grep -Fxq 'call doorfast call_elevator {"runtime_id":"0123456789abcdef","direction":"up"}' "$trace"
 trace_lines="$(wc -l <"$trace" | tr -d ' ')"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   PATH_INFO=/api/v1/unknown sh package/doorfast/files/doorfast-http.sh \

@@ -127,10 +127,15 @@ const page = {...dashboard};
         'main', 'https://ha.local'), /协议/);
     assert.deepEqual(byName('media_fps').values.map(value => value[0]),
         ['5', '8', '10', '12', '15']);
+    assert.equal(byName('media_min_free_kib').validate(
+        'main', '393216'), true);
+    assert.equal(byName('media_preview_timeout').validate(
+        'main', '120'), true);
+    assert.equal(byName('media_first_frame_timeout').validate(
+        'main', '8'), true);
     [
-        'media_max_encoders', 'media_min_free_kib', 'media_preview_timeout',
-        'media_first_frame_timeout', 'media_publish_retries',
-        'media_overload_policy', 'media_diagnostics'
+        'media_max_encoders', 'media_overload_policy', 'media_diagnostics',
+        'media_publish_retries'
     ].forEach(name => assert.equal(byName(name), undefined));
     assert.equal(byName('_media_rtsp_password').password, true);
     assert.equal(byName('_media_rtsp_password').cfgvalue('main'), '');

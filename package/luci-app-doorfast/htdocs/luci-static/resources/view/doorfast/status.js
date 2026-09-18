@@ -176,7 +176,7 @@ function buildMediaMap(page) {
     option.validate = validateIdentifier;
 
     option = addMediaOption(section, form.ListValue, 'media_encoder', 'H.264 编码器',
-        '自动选择依次尝试 QSV、VAAPI 和软件编码；明确选择的不可用编码器会拒绝启动。');
+        '自动模式按设备探测结果选择一次 QSV、VAAPI 或软件编码；已选编码器启动失败时当前预览会失败。');
     option.value('auto', '自动');
     option.value('software', '软件 libx264');
     option.value('vaapi', 'VAAPI');
@@ -202,6 +202,21 @@ function buildMediaMap(page) {
         '默认 Baseline 便于浏览器兼容。');
     option.value('baseline', 'Baseline');
     option.value('main', 'Main');
+
+    option = addMediaOption(section, form.Value, 'media_min_free_kib', '最低可用内存（KiB）',
+        '可用内存低于此值时拒绝启动预览编码，允许 131072 到 1048576。');
+    option.validate = integerInRange(131072, 1048576, '最低可用内存');
+    option.datatype = 'uinteger';
+
+    option = addMediaOption(section, form.Value, 'media_preview_timeout', '预览最长时长（秒）',
+        '达到时限后主动发送停止预览请求，允许 15 到 600。');
+    option.validate = integerInRange(15, 600, '预览最长时长');
+    option.datatype = 'uinteger';
+
+    option = addMediaOption(section, form.Value, 'media_first_frame_timeout', '首帧超时（秒）',
+        '确认预览后等待首个 JPEG 帧的最长时间，允许 2 到 30。');
+    option.validate = integerInRange(2, 30, '首帧超时');
+    option.datatype = 'uinteger';
 
     option = addMediaOption(section, form.Value, 'media_relay_url', '媒体事件 relay 地址（可选）',
         '填写 http:// 或 https:// 的主机地址，可带端口和 HA 事件入口路径，但不能包含 query 或 fragment。relay 令牌单独保存。');

@@ -81,6 +81,7 @@ static const char *df_media_relay_failure_name(const char *failure) {
         "first_frame_timeout", "source_mismatch", "encoder_unavailable",
         "encoder_exited", "rtsp_publish_failed", "call_preempted",
         "stop_timeout", "control_send_failed", "monitor_failed",
+        "insufficient_memory",
     };
     size_t index;
 

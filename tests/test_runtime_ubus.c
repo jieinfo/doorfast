@@ -82,9 +82,9 @@ static int media_status(const void *instance,
     return DF_OK;
 }
 
-static const struct df_media_module_api_v1 media_api = {
+static const struct df_media_module_api_v2 media_api = {
     .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
-    .struct_size = sizeof(struct df_media_module_api_v1),
+    .struct_size = sizeof(struct df_media_module_api_v2),
     .start = media_start,
     .command = media_command,
     .status = media_status,
@@ -103,7 +103,8 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
         DF_OK,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));
     TEST_ASSERT_INT_EQ(1, df_runtime_id_is_valid(service.runtime_id) ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 1));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, NULL, 1));
     TEST_ASSERT_INT_EQ(0, service.active_host ? 1 : 0);
     df_runtime_ubus_set_active_host(&service, true);
     TEST_ASSERT_INT_EQ(1, service.active_host ? 1 : 0);
@@ -179,11 +180,19 @@ void test_runtime_ubus_validates_and_routes_call_requests(void) {
     TEST_ASSERT_INT_EQ(9, status.session_generation);
     TEST_ASSERT_INT_EQ(1, test.status_calls);
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 11));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_ubus_submit_call(&service, &answer));
+    memcpy(answer.runtime_id, service.runtime_id, sizeof(answer.runtime_id));
+    memcpy(hangup.runtime_id, service.runtime_id, sizeof(hangup.runtime_id));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_submit_call(&service, &answer));
     TEST_ASSERT_INT_EQ(11, test.submitted_at);
     TEST_ASSERT_INT_EQ(DF_GVS_CALL_COMMAND_ANSWER, test.request.type);
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_submit_call(&service, &hangup));
     TEST_ASSERT_INT_EQ(2, test.submit_calls);
+    answer.runtime_id[0] = answer.runtime_id[0] == '0' ? '1' : '0';
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                       df_runtime_ubus_submit_call(&service, &answer));
+    memcpy(answer.runtime_id, service.runtime_id, sizeof(answer.runtime_id));
     answer.primary_media_port = 0;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_ubus_submit_call(&service, &answer));
@@ -399,16 +408,26 @@ void test_runtime_ubus_access_requires_active_host(void) {
         &service, provide_runtime_status, &calls, 10));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(
         &service, &access, &session, local));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, service.runtime_id, 7));
     TEST_ASSERT_INT_EQ(0, (int)calls);
     df_runtime_ubus_set_active_host(&service, true);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 0));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 6));
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_unlock(&service, 7));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, NULL, 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, "0000000000000000", 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, service.runtime_id, 0));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, service.runtime_id, 6));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_unlock(&service, service.runtime_id, 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, service.runtime_id, 7));
     TEST_ASSERT_INT_EQ(1, (int)calls);
     df_runtime_ubus_stop(&service);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_unlock(&service, 7));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock(&service, NULL, 7));
 }
 
 static int submit_elevator(
@@ -435,21 +454,26 @@ void test_runtime_ubus_elevator_requires_active_host_and_owns_ids(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_elevator(
         &service, &elevator, local));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_call_elevator(
-        &service, DF_GVS_ELEVATOR_UP, &transaction_id));
+        &service, service.runtime_id, DF_GVS_ELEVATOR_UP, &transaction_id));
     TEST_ASSERT_INT_EQ(99, (int)transaction_id);
     TEST_ASSERT_INT_EQ(0, (int)calls);
     df_runtime_ubus_set_active_host(&service, true);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_call_elevator(
+        &service, NULL, DF_GVS_ELEVATOR_DOWN, &transaction_id));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_call_elevator(
+        &service, "0000000000000000", DF_GVS_ELEVATOR_DOWN,
+        &transaction_id));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_call_elevator(
-        &service, DF_GVS_ELEVATOR_DOWN, &transaction_id));
+        &service, service.runtime_id, DF_GVS_ELEVATOR_DOWN, &transaction_id));
     TEST_ASSERT_INT_EQ(1, (int)transaction_id);
     TEST_ASSERT_INT_EQ(1, (int)calls);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_call_elevator(
-        &service, DF_GVS_ELEVATOR_UP, &transaction_id));
+        &service, service.runtime_id, DF_GVS_ELEVATOR_UP, &transaction_id));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_elevator_control_tick(
         &elevator, local, 2010));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 2010));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_call_elevator(
-        &service, DF_GVS_ELEVATOR_UP, &transaction_id));
+        &service, service.runtime_id, DF_GVS_ELEVATOR_UP, &transaction_id));
     TEST_ASSERT_INT_EQ(2, (int)transaction_id);
     TEST_ASSERT_INT_EQ(DF_GVS_ELEVATOR_UP, elevator.request.payload[0]);
     df_runtime_ubus_stop(&service);

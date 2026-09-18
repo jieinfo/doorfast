@@ -4,7 +4,7 @@
 #include <string.h>
 
 static int df_runtime_media_module_api_valid(
-    const struct df_media_module_api_v1 *api) {
+    const struct df_media_module_api_v2 *api) {
     if (api == NULL || api->abi_version != DF_MEDIA_MODULE_ABI_VERSION ||
         api->struct_size != sizeof(*api) || api->create == NULL ||
         api->destroy == NULL || api->start == NULL || api->command == NULL ||
@@ -16,9 +16,9 @@ static int df_runtime_media_module_api_valid(
 }
 
 int df_runtime_media_module_start_with_api(struct df_runtime_media_module *module,
-    const struct df_media_module_api_v1 *api,
-    const struct df_media_module_config_v1 *config,
-    const struct df_media_module_callbacks_v1 *callbacks) {
+    const struct df_media_module_api_v2 *api,
+    const struct df_media_module_config_v2 *config,
+    const struct df_media_module_callbacks_v2 *callbacks) {
     void *handle;
 
     if (module == NULL || config == NULL || callbacks == NULL ||
@@ -37,9 +37,9 @@ int df_runtime_media_module_start_with_api(struct df_runtime_media_module *modul
 }
 
 int df_runtime_media_module_start(struct df_runtime_media_module *module,
-    const struct df_media_module_config_v1 *config,
-    const struct df_media_module_callbacks_v1 *callbacks) {
-    const struct df_media_module_api_v1 *api;
+    const struct df_media_module_config_v2 *config,
+    const struct df_media_module_callbacks_v2 *callbacks) {
+    const struct df_media_module_api_v2 *api;
     void *handle;
     int result;
 
@@ -47,7 +47,7 @@ int df_runtime_media_module_start(struct df_runtime_media_module *module,
     memset(module, 0, sizeof(*module));
     handle = dlopen(DF_RUNTIME_MEDIA_MODULE_PATH, RTLD_NOW | RTLD_LOCAL);
     if (handle == NULL) return DF_ERR_IO;
-    *(void **)(&api) = dlsym(handle, "df_media_module_api_v1");
+    *(void **)(&api) = dlsym(handle, "df_media_module_api_v2");
     result = df_runtime_media_module_api_valid(api);
     if (result != DF_OK) {
         (void)dlclose(handle);

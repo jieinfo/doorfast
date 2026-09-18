@@ -36,6 +36,7 @@ static const char *df_runtime_ubus_media_failure_name(const char *failure) {
         "first_frame_timeout", "source_mismatch", "encoder_unavailable",
         "encoder_exited", "rtsp_publish_failed", "call_preempted",
         "stop_timeout", "control_send_failed", "monitor_failed",
+        "insufficient_memory",
     };
     size_t index;
 
@@ -410,6 +411,7 @@ static int df_runtime_ubus_logs_handler(
 }
 
 enum {
+    DF_UBUS_ANSWER_RUNTIME_ID,
     DF_UBUS_ANSWER_GENERATION,
     DF_UBUS_ANSWER_PRIMARY_PORT,
     DF_UBUS_ANSWER_SECONDARY_PORT,
@@ -418,6 +420,8 @@ enum {
 };
 
 static const struct blobmsg_policy df_runtime_ubus_answer_policy[] = {
+    [DF_UBUS_ANSWER_RUNTIME_ID] = {
+        .name = "runtime_id", .type = BLOBMSG_TYPE_STRING},
     [DF_UBUS_ANSWER_GENERATION] = {
         .name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
     [DF_UBUS_ANSWER_PRIMARY_PORT] = {
@@ -429,12 +433,15 @@ static const struct blobmsg_policy df_runtime_ubus_answer_policy[] = {
 };
 
 enum {
+    DF_UBUS_HANGUP_RUNTIME_ID,
     DF_UBUS_HANGUP_GENERATION,
     DF_UBUS_HANGUP_REASON,
     __DF_UBUS_HANGUP_MAX,
 };
 
 static const struct blobmsg_policy df_runtime_ubus_hangup_policy[] = {
+    [DF_UBUS_HANGUP_RUNTIME_ID] = {
+        .name = "runtime_id", .type = BLOBMSG_TYPE_STRING},
     [DF_UBUS_HANGUP_GENERATION] = {
         .name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
     [DF_UBUS_HANGUP_REASON] = {
@@ -455,6 +462,18 @@ static bool df_runtime_ubus_get_generation(
         return true;
     }
     return false;
+}
+
+static bool df_runtime_ubus_copy_runtime_id(
+    char output[DF_RUNTIME_ID_HEX_LENGTH + 1U], struct blob_attr *field) {
+    const char *value;
+
+    if (output == NULL || field == NULL ||
+        blobmsg_type(field) != BLOBMSG_TYPE_STRING) return false;
+    value = blobmsg_get_string(field);
+    if (!df_runtime_id_is_valid(value)) return false;
+    memcpy(output, value, DF_RUNTIME_ID_HEX_LENGTH + 1U);
+    return true;
 }
 
 static int df_runtime_ubus_submit_reply(
@@ -503,7 +522,8 @@ static int df_runtime_ubus_answer_handler(
     }
     blobmsg_parse(df_runtime_ubus_answer_policy, __DF_UBUS_ANSWER_MAX,
                   fields, blob_data(message), blob_len(message));
-    if (fields[DF_UBUS_ANSWER_GENERATION] == NULL ||
+    if (fields[DF_UBUS_ANSWER_RUNTIME_ID] == NULL ||
+        fields[DF_UBUS_ANSWER_GENERATION] == NULL ||
         fields[DF_UBUS_ANSWER_PRIMARY_PORT] == NULL ||
         fields[DF_UBUS_ANSWER_SECONDARY_PORT] == NULL ||
         fields[DF_UBUS_ANSWER_DURATION] == NULL) {
@@ -520,6 +540,9 @@ static int df_runtime_ubus_answer_handler(
             fields[DF_UBUS_ANSWER_GENERATION], &call.session_generation)) {
         return UBUS_STATUS_INVALID_ARGUMENT;
     }
+    if (!df_runtime_ubus_copy_runtime_id(
+            call.runtime_id, fields[DF_UBUS_ANSWER_RUNTIME_ID]))
+        return UBUS_STATUS_INVALID_ARGUMENT;
     call.primary_media_port = (uint16_t)primary;
     call.secondary_media_port = (uint16_t)secondary;
     call.duration_seconds = (uint8_t)duration;
@@ -544,7 +567,8 @@ static int df_runtime_ubus_hangup_handler(
     }
     blobmsg_parse(df_runtime_ubus_hangup_policy, __DF_UBUS_HANGUP_MAX,
                   fields, blob_data(message), blob_len(message));
-    if (fields[DF_UBUS_HANGUP_GENERATION] == NULL ||
+    if (fields[DF_UBUS_HANGUP_RUNTIME_ID] == NULL ||
+        fields[DF_UBUS_HANGUP_GENERATION] == NULL ||
         fields[DF_UBUS_HANGUP_REASON] == NULL) {
         return UBUS_STATUS_INVALID_ARGUMENT;
     }
@@ -556,16 +580,37 @@ static int df_runtime_ubus_hangup_handler(
             fields[DF_UBUS_HANGUP_GENERATION], &call.session_generation)) {
         return UBUS_STATUS_INVALID_ARGUMENT;
     }
+    if (!df_runtime_ubus_copy_runtime_id(
+            call.runtime_id, fields[DF_UBUS_HANGUP_RUNTIME_ID]))
+        return UBUS_STATUS_INVALID_ARGUMENT;
     call.reason = (uint8_t)reason;
     return df_runtime_ubus_submit_reply(context, request, platform, &call);
 }
 
+enum {
+    DF_UBUS_UNLOCK_RUNTIME_ID,
+    DF_UBUS_UNLOCK_GENERATION,
+    __DF_UBUS_UNLOCK_MAX,
+};
+
 static const struct blobmsg_policy df_runtime_ubus_unlock_policy[] = {
-    {.name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
+    [DF_UBUS_UNLOCK_RUNTIME_ID] = {
+        .name = "runtime_id", .type = BLOBMSG_TYPE_STRING},
+    [DF_UBUS_UNLOCK_GENERATION] = {
+        .name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
+};
+
+enum {
+    DF_UBUS_ELEVATOR_RUNTIME_ID,
+    DF_UBUS_ELEVATOR_DIRECTION,
+    __DF_UBUS_ELEVATOR_MAX,
 };
 
 static const struct blobmsg_policy df_runtime_ubus_elevator_policy[] = {
-    {.name = "direction", .type = BLOBMSG_TYPE_STRING},
+    [DF_UBUS_ELEVATOR_RUNTIME_ID] = {
+        .name = "runtime_id", .type = BLOBMSG_TYPE_STRING},
+    [DF_UBUS_ELEVATOR_DIRECTION] = {
+        .name = "direction", .type = BLOBMSG_TYPE_STRING},
 };
 
 static int df_runtime_ubus_unlock_handler(
@@ -574,16 +619,20 @@ static int df_runtime_ubus_unlock_handler(
     struct blob_attr *message) {
     struct df_runtime_ubus_platform *platform =
         container_of(object, struct df_runtime_ubus_platform, object);
-    struct blob_attr *fields[1] = {0};
+    struct blob_attr *fields[__DF_UBUS_UNLOCK_MAX] = {0};
+    const char *runtime_id;
     uint64_t generation;
     int status;
     (void)method;
     if (message == NULL) return UBUS_STATUS_INVALID_ARGUMENT;
-    blobmsg_parse(df_runtime_ubus_unlock_policy, 1, fields,
+    blobmsg_parse(df_runtime_ubus_unlock_policy, __DF_UBUS_UNLOCK_MAX, fields,
         blob_data(message), blob_len(message));
-    if (!df_runtime_ubus_get_generation(fields[0], &generation))
+    if (fields[DF_UBUS_UNLOCK_RUNTIME_ID] == NULL ||
+        !df_runtime_ubus_get_generation(
+            fields[DF_UBUS_UNLOCK_GENERATION], &generation))
         return UBUS_STATUS_INVALID_ARGUMENT;
-    status = df_runtime_ubus_unlock(platform->owner, generation);
+    runtime_id = blobmsg_get_string(fields[DF_UBUS_UNLOCK_RUNTIME_ID]);
+    status = df_runtime_ubus_unlock(platform->owner, runtime_id, generation);
     if (status != DF_OK)
         return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT :
                                          UBUS_STATUS_UNKNOWN_ERROR;
@@ -603,7 +652,8 @@ static int df_runtime_ubus_elevator_handler(
     struct blob_attr *message) {
     struct df_runtime_ubus_platform *platform =
         container_of(object, struct df_runtime_ubus_platform, object);
-    struct blob_attr *fields[1] = {0};
+    struct blob_attr *fields[__DF_UBUS_ELEVATOR_MAX] = {0};
+    const char *runtime_id;
     const char *direction;
     enum df_gvs_elevator_direction value;
     uint64_t transaction_id = 0;
@@ -612,11 +662,14 @@ static int df_runtime_ubus_elevator_handler(
     (void)method;
     if (message == NULL)
         return UBUS_STATUS_INVALID_ARGUMENT;
-    blobmsg_parse(df_runtime_ubus_elevator_policy, 1, fields,
+    blobmsg_parse(df_runtime_ubus_elevator_policy, __DF_UBUS_ELEVATOR_MAX,
+        fields,
         blob_data(message), blob_len(message));
-    if (fields[0] == NULL)
+    if (fields[DF_UBUS_ELEVATOR_RUNTIME_ID] == NULL ||
+        fields[DF_UBUS_ELEVATOR_DIRECTION] == NULL)
         return UBUS_STATUS_INVALID_ARGUMENT;
-    direction = blobmsg_get_string(fields[0]);
+    runtime_id = blobmsg_get_string(fields[DF_UBUS_ELEVATOR_RUNTIME_ID]);
+    direction = blobmsg_get_string(fields[DF_UBUS_ELEVATOR_DIRECTION]);
     if (strcmp(direction, "up") == 0)
         value = DF_GVS_ELEVATOR_UP;
     else if (strcmp(direction, "down") == 0)
@@ -624,7 +677,7 @@ static int df_runtime_ubus_elevator_handler(
     else
         return UBUS_STATUS_INVALID_ARGUMENT;
     status = df_runtime_ubus_call_elevator(
-        platform->owner, value, &transaction_id);
+        platform->owner, runtime_id, value, &transaction_id);
     if (status != DF_OK)
         return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT :
                                          UBUS_STATUS_UNKNOWN_ERROR;
@@ -1276,7 +1329,9 @@ int df_runtime_ubus_submit_call(
     bool hangup;
 
     if (service == NULL || !service->started || request == NULL ||
-        service->submit_call == NULL || request->session_generation == 0U) {
+        service->submit_call == NULL || request->session_generation == 0U ||
+        !df_runtime_id_is_valid(request->runtime_id) ||
+        strcmp(request->runtime_id, service->runtime_id) != 0) {
         return DF_ERR_INVALID;
     }
     answer = request->type == DF_GVS_CALL_COMMAND_ANSWER &&
@@ -1316,9 +1371,12 @@ int df_runtime_ubus_bind_access(struct df_runtime_ubus *service,
     return DF_OK;
 }
 
-int df_runtime_ubus_unlock(struct df_runtime_ubus *service, uint64_t generation) {
+int df_runtime_ubus_unlock(struct df_runtime_ubus *service,
+    const char *runtime_id, uint64_t generation) {
     if (service == NULL || !service->started || !service->active_host ||
-        service->access == NULL || generation == 0U)
+        service->access == NULL || generation == 0U ||
+        !df_runtime_id_is_valid(runtime_id) ||
+        strcmp(runtime_id, service->runtime_id) != 0)
         return DF_ERR_INVALID;
     return df_gvs_access_control_submit(service->access, service->access_session,
         generation, service->access_identity, service->last_now_ms);
@@ -1338,12 +1396,14 @@ int df_runtime_ubus_bind_elevator(struct df_runtime_ubus *service,
 }
 
 int df_runtime_ubus_call_elevator(struct df_runtime_ubus *service,
-    enum df_gvs_elevator_direction direction, uint64_t *transaction_id) {
+    const char *runtime_id, enum df_gvs_elevator_direction direction,
+    uint64_t *transaction_id) {
     uint64_t next_id;
 
     if (service == NULL || !service->started || !service->active_host ||
         service->elevator == NULL || service->elevator_identity == NULL ||
-        transaction_id == NULL ||
+        transaction_id == NULL || !df_runtime_id_is_valid(runtime_id) ||
+        strcmp(runtime_id, service->runtime_id) != 0 ||
         (direction != DF_GVS_ELEVATOR_DOWN &&
          direction != DF_GVS_ELEVATOR_UP) ||
         service->next_elevator_transaction_id == UINT64_MAX)

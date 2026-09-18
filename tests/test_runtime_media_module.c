@@ -6,8 +6,8 @@ static int runtime_fake_instance;
 static unsigned runtime_fake_start_calls;
 static uint64_t runtime_fake_start_now_ms;
 
-static void *runtime_fake_create(const struct df_media_module_config_v1 *config,
-    const struct df_media_module_callbacks_v1 *callbacks) {
+static void *runtime_fake_create(const struct df_media_module_config_v2 *config,
+    const struct df_media_module_callbacks_v2 *callbacks) {
     (void)config;
     (void)callbacks;
     return &runtime_fake_instance;
@@ -49,10 +49,10 @@ static int runtime_fake_status(const void *instance,
     (void)instance; (void)status; return DF_OK;
 }
 
-static struct df_media_module_api_v1 runtime_valid_api(void) {
-    const struct df_media_module_api_v1 api = {
+static struct df_media_module_api_v2 runtime_valid_api(void) {
+    const struct df_media_module_api_v2 api = {
         .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
-        .struct_size = sizeof(struct df_media_module_api_v1),
+        .struct_size = sizeof(struct df_media_module_api_v2),
         .create = runtime_fake_create,
         .destroy = runtime_fake_destroy,
         .start = runtime_fake_start,
@@ -68,8 +68,8 @@ static struct df_media_module_api_v1 runtime_valid_api(void) {
 
 void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void) {
     struct df_runtime_media_module module = {0};
-    const struct df_media_module_config_v1 config = {0};
-    const struct df_media_module_callbacks_v1 callbacks = {0};
+    const struct df_media_module_config_v2 config = {0};
+    const struct df_media_module_callbacks_v2 callbacks = {0};
 
     TEST_ASSERT_INT_EQ(DF_ERR_IO, df_runtime_media_module_start(&module,
         &config, &callbacks));
@@ -87,9 +87,9 @@ void test_runtime_module_rejects_commands_when_unavailable(void) {
 
 void test_runtime_module_rejects_incompatible_or_incomplete_api(void) {
     struct df_runtime_media_module module = {0};
-    const struct df_media_module_config_v1 config = {0};
-    const struct df_media_module_callbacks_v1 callbacks = {0};
-    struct df_media_module_api_v1 api = runtime_valid_api();
+    const struct df_media_module_config_v2 config = {0};
+    const struct df_media_module_callbacks_v2 callbacks = {0};
+    struct df_media_module_api_v2 api = runtime_valid_api();
 
     api.abi_version++;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_start_with_api(
@@ -106,9 +106,9 @@ void test_runtime_module_rejects_incompatible_or_incomplete_api(void) {
 
 void test_runtime_module_preserves_dynamic_library_handle(void) {
     struct df_runtime_media_module module = {0};
-    const struct df_media_module_config_v1 config = {0};
-    const struct df_media_module_callbacks_v1 callbacks = {0};
-    const struct df_media_module_api_v1 api = runtime_valid_api();
+    const struct df_media_module_config_v2 config = {0};
+    const struct df_media_module_callbacks_v2 callbacks = {0};
+    const struct df_media_module_api_v2 api = runtime_valid_api();
     int handle_sentinel = 0;
 
     module.handle = &handle_sentinel;
@@ -120,7 +120,7 @@ void test_runtime_module_preserves_dynamic_library_handle(void) {
 }
 
 void test_runtime_module_request_start_calls_loaded_module(void) {
-    const struct df_media_module_api_v1 api = runtime_valid_api();
+    const struct df_media_module_api_v2 api = runtime_valid_api();
     struct df_runtime_media_module module = {
         .api = &api,
         .instance = &runtime_fake_instance,
