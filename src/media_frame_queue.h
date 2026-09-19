@@ -35,6 +35,8 @@ struct df_media_frame_queue {
 
 int df_media_frame_queue_init(struct df_media_frame_queue *, uint64_t generation,
                               size_t maximum_frame_length);
+int df_media_frame_queue_reset(struct df_media_frame_queue *,
+                               uint64_t generation);
 void df_media_frame_queue_destroy(struct df_media_frame_queue *);
 int df_media_frame_queue_push(struct df_media_frame_queue *, const uint8_t *jpeg,
                               size_t length, uint64_t generation,

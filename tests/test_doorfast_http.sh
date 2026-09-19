@@ -13,6 +13,18 @@ fi
 if [ "${TEST_UBUS_EMPTY_METHOD:-}" = "$method" ]; then
   exit 0
 fi
+if [ "${TEST_UBUS_INVALID_METHOD:-}" = "$method" ]; then
+  printf '%s\n' 'not-json'
+  exit 0
+fi
+if [ -n "${TEST_UBUS_ERROR_CODE:-}" ] && [ "$method" = monitor_start ]; then
+  if [ "${TEST_UBUS_ERROR_CODE}" = capacity_busy ]; then
+    printf '%s\n' '{"error":{"code":"capacity_busy","configured_capacity":2,"effective_capacity":1,"active_encoders":1}}'
+  else
+    printf '{"error":{"code":"%s"}}\n' "${TEST_UBUS_ERROR_CODE}"
+  fi
+  exit 0
+fi
 if [ "$*" = 'call doorfast status' ]; then
   printf '{"call":{"generation":%s},"video":{"ready":%s,"generation":%s,"frame_no":%s,"bytes":%s},"audio":{"snapshot_ready":%s,"generation":%s,"snapshot_packet_count":%s,"snapshot_previous_packet_count":%s,"snapshot_bytes":%s,"snapshot_dropped_bytes":%s}}\n' \
     "${TEST_CALL_GENERATION:-7}" "${TEST_VIDEO_READY:-true}" \
@@ -24,7 +36,15 @@ if [ "$*" = 'call doorfast status' ]; then
 elif [ "$*" = 'call doorfast stations' ]; then
   printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":1,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"none","route_fresh":false,"monitorable":false,"last_seen_ms":null}]}'
 else
-  printf '{"ok":true}\n'
+  case "$method" in
+    monitor_start)
+      printf '{"state":"queued","runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}\n' ;;
+    monitor_stop)
+      printf '{"state":"stopping","runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}\n' ;;
+    monitor_viewer)
+      printf '{"state":"queued","runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7,"active":true}\n' ;;
+    *) printf '{"ok":true}\n' ;;
+  esac
 fi
 EOF
 cat >"$fakebin/jsonfilter" <<'EOF'
@@ -53,6 +73,21 @@ case "$expression" in
   '@.generation')
     printf '%s' "${source:-}" |
       sed -n 's/.*"generation"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'
+    ;;
+  '@.runtime_id')
+    printf '%s' "${source:-}" |
+      sed -n 's/.*"runtime_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+    ;;
+  '@.station_id')
+    printf '%s' "${source:-}" |
+      sed -n 's/.*"station_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+    ;;
+  '@.error.code') printf '%s\n' "${TEST_UBUS_ERROR_CODE:-}" ;;
+  '@')
+    case "${source:-}" in
+      \{*\}) printf '%s' "$source" ;;
+      *) exit 1 ;;
+    esac
     ;;
   '@.active')
     printf '%s' "${source:-}" |
@@ -118,18 +153,33 @@ tail -n 1 "$workspace/stations" >"$workspace/stations-json"
 printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":1,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"none","route_fresh":false,"monitorable":false,"last_seen_ms":null}]}' \
   >"$workspace/stations-expected"
 cmp "$workspace/stations-expected" "$workspace/stations-json"
-run_method /api/v1/monitor/start '' POST >"$workspace/monitor-start"
+(export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  TEST_UBUS_EMPTY_METHOD=stations PATH_INFO=/api/v1/stations \
+  REQUEST_METHOD=GET CONTENT_LENGTH=0; \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/stations-empty")
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/stations-empty"
+grep -aFq '"code":"service_unavailable","message":"station service unavailable"' \
+  "$workspace/stations-empty"
+(export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  TEST_UBUS_INVALID_METHOD=stations PATH_INFO=/api/v1/stations \
+  REQUEST_METHOD=GET CONTENT_LENGTH=0; \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/stations-invalid-json")
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/stations-invalid-json"
+grep -aFq '"code":"service_unavailable","message":"station service unavailable"' \
+  "$workspace/stations-invalid-json"
+run_method /api/v1/monitor/start \
+  '{"station_id":"gate_main","runtime_id":"0123456789abcdef"}' POST >"$workspace/monitor-start"
 run_method /api/v1/monitor/stop \
-  '{"generation":7}' POST >"$workspace/monitor-stop"
+  '{"generation":7,"station_id":"gate_main","runtime_id":"0123456789abcdef"}' POST >"$workspace/monitor-stop"
 run_method /api/v1/monitor/viewer \
-  '{"active":true,"generation":7}' POST \
+  '{"active":true,"generation":7,"station_id":"gate_main","runtime_id":"0123456789abcdef"}' POST \
   >"$workspace/monitor-viewer"
 run_method /api/v1/monitor/status '' GET >"$workspace/monitor-status"
-test "$(wc -l <"$trace" | tr -d ' ')" -eq 10
+test "$(wc -l <"$trace" | tr -d ' ')" -eq 12
 grep -Fxq 'call doorfast stations' "$trace"
-grep -Fxq 'call doorfast monitor_start {}' "$trace"
-grep -Fxq 'call doorfast monitor_stop {"generation":7}' "$trace"
-grep -Fxq 'call doorfast monitor_viewer {"generation":7,"active":true}' "$trace"
+grep -Fxq 'call doorfast monitor_start {"runtime_id":"0123456789abcdef","station_id":"gate_main"}' "$trace"
+grep -Fxq 'call doorfast monitor_stop {"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' "$trace"
+grep -Fxq 'call doorfast monitor_viewer {"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7,"active":true}' "$trace"
 grep -Fxq 'call doorfast monitor_status {}' "$trace"
 ! grep -Fq 'secret-' "$trace"
 trace_lines="$(wc -l <"$trace" | tr -d ' ')"
@@ -144,24 +194,39 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
 grep -aFq 'Status: 400 Bad Request' "$workspace/stations-query"
 test "$(wc -l <"$trace" | tr -d ' ')" -eq "$trace_lines"
 run_method /api/v1/monitor/stop \
-  '{"generation":7,"ignored":"secret-stop"}' POST \
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7,"ignored":"secret-stop"}' POST \
   >"$workspace/monitor-extra"
 grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-extra"
 run_method /api/v1/monitor/viewer \
-  '{"generation":7,"active":true,"ignored":"secret-viewer"}' POST \
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7,"active":true,"ignored":"secret-viewer"}' POST \
   >"$workspace/monitor-viewer-extra"
 grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-viewer-extra"
-run_method /api/v1/monitor/stop '{"generation":0}' POST \
+run_method /api/v1/monitor/stop '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":0}' POST \
   >"$workspace/monitor-invalid"
 grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-invalid"
 run_method /api/v1/monitor/start '' GET >"$workspace/monitor-wrong-method"
 grep -aFq 'Status: 405 Method Not Allowed' "$workspace/monitor-wrong-method"
 run_method /api/v1/monitor/viewer \
-  '{"generation":7,"active":1}' POST >"$workspace/monitor-invalid-active"
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7,"active":1}' POST >"$workspace/monitor-invalid-active"
 grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-invalid-active"
 run_method /api/v1/monitor/viewer \
-  '{"generation":7}' POST >"$workspace/monitor-missing-active"
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' POST >"$workspace/monitor-missing-active"
 grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-missing-active"
+run_method /api/v1/monitor/stop \
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":"7"}' POST >"$workspace/monitor-quoted-generation"
+grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-quoted-generation"
+run_method /api/v1/monitor/viewer \
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7,"active":"true"}' POST >"$workspace/monitor-quoted-active"
+grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-quoted-active"
+run_method /api/v1/monitor/start \
+  '{"runtime_id":"0123456789abcdef","station_id":"Gate-bad"}' POST >"$workspace/monitor-invalid-station"
+grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-invalid-station"
+run_method /api/v1/monitor/start \
+  '{"runtime_id":"0123456789abcdef","station_id":"gate main"}' POST >"$workspace/monitor-spaced-station"
+grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-spaced-station"
+run_method /api/v1/monitor/start \
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main","station_id":"gate_side"}' POST >"$workspace/monitor-duplicate-station"
+grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-duplicate-station"
 run_method /api/v1/monitor/status '' POST >"$workspace/monitor-status-wrong-method"
 grep -aFq 'Status: 405 Method Not Allowed' "$workspace/monitor-status-wrong-method"
 (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
@@ -178,41 +243,66 @@ test "$(wc -l <"$trace" | tr -d ' ')" -eq "$trace_lines"
   sh package/doorfast/files/doorfast-http.sh </dev/null \
     >"$workspace/monitor-empty-success")
 grep -aFq 'Content-Type: application/json' "$workspace/monitor-empty-success"
-! grep -aFq 'Status: 503 Service Unavailable' "$workspace/monitor-empty-success"
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/monitor-empty-success"
+grep -aFq '"code":"service_unavailable","message":"monitor service unavailable"' \
+  "$workspace/monitor-empty-success"
+(export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  TEST_UBUS_INVALID_METHOD=monitor_status \
+  PATH_INFO=/api/v1/monitor/status REQUEST_METHOD=GET CONTENT_LENGTH=0; \
+  sh package/doorfast/files/doorfast-http.sh </dev/null \
+    >"$workspace/monitor-invalid-json")
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/monitor-invalid-json"
+grep -aFq '"code":"service_unavailable","message":"monitor service unavailable"' \
+  "$workspace/monitor-invalid-json"
 (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   TEST_UBUS_FAIL_METHOD=monitor_stop TEST_UBUS_FAIL_CODE=2 \
   PATH_INFO=/api/v1/monitor/stop REQUEST_METHOD=POST \
-  CONTENT_TYPE=application/json CONTENT_LENGTH=16; \
-  printf '%s' '{"generation":7}' | sh package/doorfast/files/doorfast-http.sh \
+  CONTENT_TYPE=application/json CONTENT_LENGTH=73; \
+  printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' | sh package/doorfast/files/doorfast-http.sh \
     >"$workspace/monitor-invalid-ubus")
 grep -aFq 'Status: 400 Bad Request' "$workspace/monitor-invalid-ubus"
-grep -aFq '"error":"invalid monitor request"' \
+grep -aFq '"code":"invalid_request","message":"invalid monitor request"' \
   "$workspace/monitor-invalid-ubus"
 (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   TEST_UBUS_FAIL_METHOD=monitor_stop TEST_UBUS_FAIL_CODE=4 \
   PATH_INFO=/api/v1/monitor/stop REQUEST_METHOD=POST \
-  CONTENT_TYPE=application/json CONTENT_LENGTH=16; \
-  printf '%s' '{"generation":7}' | sh package/doorfast/files/doorfast-http.sh \
+  CONTENT_TYPE=application/json CONTENT_LENGTH=73; \
+  printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' | sh package/doorfast/files/doorfast-http.sh \
     >"$workspace/monitor-generation-conflict")
-grep -aFq 'Status: 409 Conflict' "$workspace/monitor-generation-conflict"
-grep -aFq '"error":"monitor generation mismatch"' \
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/monitor-generation-conflict"
+grep -aFq '"code":"service_unavailable","message":"monitor service unavailable"' \
   "$workspace/monitor-generation-conflict"
 (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   TEST_UBUS_FAIL_METHOD=monitor_start TEST_UBUS_FAIL_CODE=8 \
   PATH_INFO=/api/v1/monitor/start REQUEST_METHOD=POST \
-  CONTENT_TYPE=application/json CONTENT_LENGTH=0; \
-  sh package/doorfast/files/doorfast-http.sh </dev/null \
+  CONTENT_TYPE=application/json CONTENT_LENGTH=58; \
+  printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main"}' | \
+    sh package/doorfast/files/doorfast-http.sh \
     >"$workspace/monitor-state-conflict")
-grep -aFq 'Status: 409 Conflict' "$workspace/monitor-state-conflict"
-grep -aFq '"error":"monitor state does not allow operation"' \
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/monitor-state-conflict"
+grep -aFq '"code":"service_unavailable","message":"monitor service unavailable"' \
   "$workspace/monitor-state-conflict"
 (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   TEST_UBUS_FAIL_METHOD=monitor_stop TEST_UBUS_FAIL_CODE=1 \
   PATH_INFO=/api/v1/monitor/stop REQUEST_METHOD=POST \
-  CONTENT_TYPE=application/json CONTENT_LENGTH=16; \
-  printf '%s' '{"generation":7}' | sh package/doorfast/files/doorfast-http.sh \
+  CONTENT_TYPE=application/json CONTENT_LENGTH=73; \
+  printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' | sh package/doorfast/files/doorfast-http.sh \
     >"$workspace/monitor-unavailable")
 grep -aFq 'Status: 503 Service Unavailable' "$workspace/monitor-unavailable"
+for error_code in runtime_mismatch station_not_found generation_mismatch resource_exhausted; do
+  (export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+    TEST_UBUS_ERROR_CODE="$error_code" PATH_INFO=/api/v1/monitor/start \
+    REQUEST_METHOD=POST CONTENT_TYPE=application/json CONTENT_LENGTH=58; \
+    printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main"}' | \
+      sh package/doorfast/files/doorfast-http.sh >"$workspace/error-$error_code")
+  grep -aFq "\"code\":\"$error_code\"" "$workspace/error-$error_code"
+done
+(export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  TEST_UBUS_ERROR_CODE=capacity_busy PATH_INFO=/api/v1/monitor/start \
+  REQUEST_METHOD=POST CONTENT_TYPE=application/json CONTENT_LENGTH=58; \
+  printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main"}' | \
+    sh package/doorfast/files/doorfast-http.sh >"$workspace/error-capacity")
+grep -aFq '"configured_capacity":2' "$workspace/error-capacity"
 printf '\377\330\377\331' >"$workspace/latest.jpg"
 PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   DOORFAST_VIDEO_SNAPSHOT="$workspace/latest.jpg" \

@@ -27,9 +27,18 @@ struct df_media_session_manager {
     size_t active_count;
     uint64_t next_generation;
     struct df_media_session_resource_hooks resource_hooks;
+    struct df_media_credentials credentials;
     char *go2rtc_host;
     char *rtsp_username;
     char *credentials_path;
+    char preempted_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t preempted_generation;
+    char failed_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t failed_generation;
+    enum df_media_error_v3 failed_error;
+    uint64_t status_fingerprint;
+    uint64_t status_revision;
+    bool status_initialized;
     bool initialized;
 };
 
@@ -47,6 +56,12 @@ int df_media_session_manager_start(struct df_media_session_manager *,
 int df_media_session_manager_command(struct df_media_session_manager *,
     enum df_media_module_command, const struct df_media_session_key *,
     bool active, uint64_t now_ms);
+int df_media_session_manager_receive_control(struct df_media_session_manager *,
+    const struct df_gvs_frame *, uint32_t source_ipv4, uint64_t now_ms);
+int df_media_session_manager_incoming_call(struct df_media_session_manager *,
+    const char *station_id, uint64_t call_generation, uint64_t now_ms);
+const struct df_media_session *df_media_session_manager_find(
+    const struct df_media_session_manager *, const char *station_id);
 size_t df_media_session_manager_active(
     const struct df_media_session_manager *);
 size_t df_media_session_manager_capacity(
@@ -57,5 +72,14 @@ const struct df_media_session *df_media_session_manager_lookup(
 void df_media_session_manager_set_resource_hooks(
     struct df_media_session_manager *,
     const struct df_media_session_resource_hooks *);
+int df_media_session_manager_push_jpeg(struct df_media_session_manager *,
+    const uint8_t source[6], const uint8_t destination[6], uint32_t source_ipv4,
+    const uint8_t *jpeg, size_t length, uint16_t width, uint16_t height,
+    uint64_t timestamp_ms);
+int df_media_session_manager_push_video(struct df_media_session_manager *,
+    const struct df_gvs_video_packet *, uint32_t source_ipv4,
+    uint64_t timestamp_ms);
+int df_media_session_manager_tick(struct df_media_session_manager *,
+    uint64_t now_ms);
 
 #endif

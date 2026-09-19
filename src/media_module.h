@@ -7,6 +7,7 @@
 
 #include "config.h"
 #include "gvs_frame.h"
+#include "gvs_media.h"
 #include "gvs_monitor.h"
 #include "media_credentials.h"
 #include "media_encoder.h"
@@ -123,6 +124,11 @@ struct df_media_module_status_v3 {
     size_t effective_capacity;
     size_t active_encoders;
     uint64_t status_revision;
+    char preempted_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t preempted_generation;
+    char failed_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t failed_generation;
+    enum df_media_error_v3 failed_error;
 };
 
 struct df_media_module_config_v2 {
@@ -187,6 +193,8 @@ struct df_media_module_api_v3 {
                            uint32_t, uint64_t);
     int (*push_jpeg)(void *, const uint8_t[6], const uint8_t[6], uint32_t,
                      const uint8_t *, size_t, uint16_t, uint16_t, uint64_t);
+    int (*push_video)(void *, const struct df_gvs_video_packet *, uint32_t,
+                      uint64_t);
     int (*tick)(void *, uint64_t);
     int (*status)(const void *, struct df_media_module_status_v3 *);
 };
@@ -295,7 +303,7 @@ _Static_assert(sizeof(struct df_media_module_status) == 152U,
     "media ABI v2 status size changed");
 _Static_assert(offsetof(struct df_media_module_status,
     deprecated_relay_failures) == 148U, "media ABI v2 status relay slot moved");
-_Static_assert(sizeof(struct df_media_module_api_v3) == 80U,
+_Static_assert(sizeof(struct df_media_module_api_v3) == 88U,
     "media ABI v3 API size changed");
 #endif
 _Static_assert(_Generic(((struct df_media_module_config_v2 *)0)->

@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <arpa/inet.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,14 +91,15 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.media.fps = 10U;
     runtime->config.media.bitrate_kbps = 800U;
     runtime->config.media.profile = DF_MEDIA_PROFILE_BASELINE;
-    runtime->config.media.max_encoders = 0U;
+    runtime->config.media.max_encoders = 1U;
     runtime->config.media.min_free_kib = 393216U;
     runtime->config.media.preview_timeout_s = 120U;
     runtime->config.media.first_frame_timeout_s = 8U;
     /* Kept only as a legacy parser field; production publication failures
      * are reported asynchronously and are not retried by this option. */
     runtime->config.media.publish_retries = 0U;
-    runtime->config.media.overload_policy = DF_MEDIA_OVERLOAD_REJECT_NEW;
+    runtime->config.media.overload_policy =
+        DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW;
     runtime->config.media.diagnostics = true;
     (void)snprintf(runtime->media_stream_name, sizeof(runtime->media_stream_name),
                    "%s", "doorfast_preview");
@@ -263,6 +265,17 @@ static int df_parse_media_overload_policy(const char *value,
     else if (strcmp(value, "stop_oldest_preview") == 0)
         *output = DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW;
     else return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static int df_parse_media_call_policy(const char *value,
+                                      enum df_media_overload_policy *output) {
+    if (strcmp(value, "preempt_oldest_preview") == 0)
+        *output = DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW;
+    else if (strcmp(value, "preserve_previews") == 0)
+        *output = DF_MEDIA_OVERLOAD_REJECT_NEW;
+    else
+        return DF_ERR_INVALID;
     return DF_OK;
 }
 
@@ -491,14 +504,11 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
     }
     if (strcmp(name, "media_max_encoders") == 0) {
         option = DF_SEEN_MEDIA_MAX_ENCODERS;
-        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
-        if (strcmp(value, "auto") == 0) {
-            runtime->config.media.max_encoders = 0U;
-            return DF_OK;
-        }
-        if (df_parse_unsigned_range(value, 1U, 4U, &parsed) != DF_OK)
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 1U, ULONG_MAX, &parsed) != DF_OK ||
+            parsed > SIZE_MAX)
             return DF_ERR_INVALID;
-        runtime->config.media.max_encoders = (uint8_t)parsed;
+        runtime->config.media.max_encoders = (size_t)parsed;
         return DF_OK;
     }
     if (strcmp(name, "media_min_free_kib") == 0) {
@@ -538,6 +548,12 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_parse_media_overload_policy(value,
                                               &runtime->config.media.overload_policy);
+    }
+    if (strcmp(name, "media_incoming_call_policy") == 0) {
+        option = DF_SEEN_MEDIA_OVERLOAD_POLICY;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_media_call_policy(value,
+            &runtime->config.media.overload_policy);
     }
     if (strcmp(name, "media_diagnostics") == 0) {
         option = DF_SEEN_MEDIA_DIAGNOSTICS;
@@ -631,8 +647,21 @@ static int df_runtime_config_parse_into(const char *uci_text,
             return DF_ERR_INVALID;
         }
     }
+    if (df_station_registry_parse(&runtime->stations, uci_text) != DF_OK)
+        return DF_ERR_INVALID;
     if (df_config_validate(&runtime->config) != DF_OK) return DF_ERR_INVALID;
-    return df_station_registry_parse(&runtime->stations, uci_text);
+    if (runtime->config.media.enabled) {
+        size_t enabled_count = 0U;
+        size_t index;
+
+        for (index = 0U; index < runtime->stations.count; index++) {
+            if (runtime->stations.items[index].enabled) enabled_count++;
+        }
+        if (enabled_count == 0U ||
+            runtime->config.media.max_encoders > enabled_count)
+            return DF_ERR_INVALID;
+    }
+    return DF_OK;
 }
 
 int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime) {

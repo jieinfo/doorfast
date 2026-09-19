@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -106,6 +107,113 @@ static void df_runtime_log_public_event(struct df_runtime_ubus *ubus,
         "event=%s generation=%llu", event, (unsigned long long)generation);
     if (written > 0 && (size_t)written < sizeof(message))
         (void)df_runtime_ubus_log_event(ubus, now_ms, message);
+}
+
+static const struct df_station *df_runtime_station_by_address(
+    const struct df_station_registry *stations, const uint8_t address[6]) {
+    size_t index;
+
+    if (stations == NULL || address == NULL) return NULL;
+    for (index = 0U; index < stations->count; index++) {
+        if (memcmp(stations->items[index].logical_address, address,
+                sizeof(stations->items[index].logical_address)) == 0)
+            return &stations->items[index];
+    }
+    return NULL;
+}
+
+static const char *df_runtime_media_error_code(int result) {
+    switch (result) {
+    case DF_ERR_INVALID: return "invalid_request";
+    case DF_ERR_IO: return "encoder_failed";
+    case DF_MEDIA_ERROR_CAPACITY_BUSY: return "capacity_busy";
+    case DF_MEDIA_ERROR_RESOURCE_EXHAUSTED: return "resource_exhausted";
+    case DF_MEDIA_ERROR_ROUTE_UNAVAILABLE: return "route_unavailable";
+    case DF_MEDIA_ERROR_STATION_NOT_FOUND: return "station_not_found";
+    case DF_MEDIA_ERROR_STATION_DISABLED: return "station_disabled";
+    case DF_MEDIA_ERROR_GENERATION_MISMATCH: return "generation_mismatch";
+    case DF_MEDIA_ERROR_ENCODER_FAILED: return "encoder_failed";
+    default: return "service_unavailable";
+    }
+}
+
+static void df_runtime_log_station_media_event(struct df_runtime_ubus *ubus,
+    uint64_t now_ms, const char *event, const char *station_id,
+    uint64_t generation, int result) {
+    char message[DF_RUNTIME_UBUS_LOG_MESSAGE_MAX];
+    int written;
+
+    if (ubus == NULL || event == NULL || station_id == NULL) return;
+    if (generation == 0U) {
+        written = snprintf(message, sizeof(message),
+            "event=%s station_id=%s error=%s", event, station_id,
+            df_runtime_media_error_code(result));
+    } else {
+        written = snprintf(message, sizeof(message),
+            "event=%s station_id=%s generation=%llu error=%s", event,
+            station_id, (unsigned long long)generation,
+            df_runtime_media_error_code(result));
+    }
+    if (written > 0 && (size_t)written < sizeof(message))
+        (void)df_runtime_ubus_log_event(ubus, now_ms, message);
+}
+
+int df_runtime_media_push_video_with_event(
+    struct df_runtime_media_module *media, struct df_runtime_ubus *ubus,
+    const struct df_station_registry *stations,
+    const struct df_gvs_video_packet *packet, uint32_t source_ipv4,
+    uint64_t now_ms) {
+    const struct df_station *station;
+    int result = df_runtime_media_module_push_video(media, packet, source_ipv4,
+        now_ms);
+
+    if (result == DF_OK || result == DF_ERR_INVALID) return result;
+    station = packet == NULL ? NULL :
+        df_runtime_station_by_address(stations, packet->source);
+    if (station != NULL) {
+        df_runtime_log_station_media_event(ubus, now_ms,
+            "media_pipeline_failed", station->id, 0U, result);
+        (void)fprintf(stdout,
+            "doorfast: event=media_pipeline_failed station_id=%s error=%s\n",
+            station->id, df_runtime_media_error_code(result));
+    }
+    return result;
+}
+
+int df_runtime_media_tick_with_event(struct df_runtime_media_module *media,
+    struct df_runtime_ubus *ubus, struct df_event_stream *event_stream,
+    uint64_t now_ms) {
+    struct df_media_module_status_v3 status = {0};
+    int result;
+
+    if (media == NULL) return DF_ERR_INVALID;
+    result = df_runtime_media_module_tick(media, now_ms);
+    if (result != DF_OK) return result;
+    if (df_runtime_media_module_status(media, &status) != DF_OK)
+        return DF_ERR_IO;
+    if (status.failed_station_id[0] != '\0' &&
+        status.failed_generation != 0U &&
+        (status.failed_generation != media->reported_failed_generation ||
+         strcmp(status.failed_station_id,
+             media->reported_failed_station_id) != 0)) {
+        df_runtime_log_station_media_event(ubus, now_ms,
+            "media_pipeline_failed", status.failed_station_id,
+            status.failed_generation, status.failed_error);
+        if (event_stream != NULL && event_stream->listen_fd >= 0)
+            (void)df_event_stream_publish_station(event_stream,
+                "media_pipeline_failed", status.failed_station_id,
+                status.failed_generation, now_ms);
+        (void)fprintf(stdout,
+            "doorfast: event=media_pipeline_failed station_id=%s "
+            "generation=%llu error=%s\n", status.failed_station_id,
+            (unsigned long long)status.failed_generation,
+            df_runtime_media_error_code(status.failed_error));
+        (void)snprintf(media->reported_failed_station_id,
+            sizeof(media->reported_failed_station_id), "%s",
+            status.failed_station_id);
+        media->reported_failed_generation = status.failed_generation;
+    }
+    return DF_OK;
 }
 
 static void df_log_transition(const struct df_gvs_transition_event *event) {
@@ -306,13 +414,28 @@ static int df_runtime_wait_and_pump(unsigned delay_ms, void *context) {
     return DF_OK;
 }
 
-static void df_runtime_publish_event(struct df_event_stream *stream,
-                                     const char *event, uint64_t generation,
-                                     uint64_t now_ms) {
-    if (stream != NULL && stream->listen_fd >= 0 && df_event_stream_publish(
-            stream, event, generation, now_ms) != DF_OK) {
-        (void)fprintf(stderr, "doorfast: event_stream_publish_failed event=%s\n",
-                      event != NULL ? event : "unknown");
+static void df_runtime_publish_station_event(struct df_event_stream *stream,
+    const struct df_station_registry *stations, const uint8_t peer[6],
+    const char *event, uint64_t generation, uint64_t now_ms) {
+    const struct df_station *station =
+        df_runtime_station_by_address(stations, peer);
+
+    if (station == NULL) {
+        if (stream != NULL && stream->listen_fd >= 0 &&
+            df_event_stream_publish_logical_address(stream, event, peer,
+                generation, now_ms) != DF_OK) {
+            (void)fprintf(stderr,
+                "doorfast: event_stream_publish_failed event=%s\n",
+                event != NULL ? event : "unknown");
+        }
+        return;
+    }
+    if (stream != NULL && stream->listen_fd >= 0 &&
+        df_event_stream_publish_station(stream, event, station->id,
+            generation, now_ms) != DF_OK) {
+        (void)fprintf(stderr,
+            "doorfast: event_stream_publish_failed event=%s\n",
+            event != NULL ? event : "unknown");
     }
 }
 
@@ -386,23 +509,38 @@ static int df_runtime_call_submit(
 }
 
 int df_runtime_media_build_module_config(const struct df_runtime_config *runtime,
-    const uint8_t local[6], struct df_media_module_config_v2 *output) {
+    const uint8_t local[6], struct df_media_station_config_v3 *stations,
+    size_t station_capacity, struct df_media_module_config_v3 *output) {
     const struct df_media_config *media;
+    size_t index;
 
     if (runtime == NULL || local == NULL || output == NULL ||
-        !runtime->config.media.enabled) return DF_ERR_INVALID;
+        !runtime->config.media.enabled || stations == NULL ||
+        station_capacity < runtime->stations.count) return DF_ERR_INVALID;
     media = &runtime->config.media;
     memset(output, 0, sizeof(*output));
-    if (df_gvs_station_parse(media->station_address, output->station) != DF_OK ||
-        (media->station_ipv4 != NULL && media->station_ipv4[0] != '\0' &&
-         inet_pton(AF_INET, media->station_ipv4, &output->station_ipv4) != 1)) {
-        return DF_ERR_INVALID;
+    memset(stations, 0, station_capacity * sizeof(*stations));
+    for (index = 0U; index < runtime->stations.count; index++) {
+        const struct df_station *station = &runtime->stations.items[index];
+
+        stations[index].id = station->id;
+        stations[index].stream_name = station->stream_name;
+        stations[index].enabled = station->enabled;
+        memcpy(stations[index].logical_address, station->logical_address,
+            sizeof(stations[index].logical_address));
+        stations[index].ipv4 = station->configured_ipv4;
     }
     output->enabled = true;
     memcpy(output->local, local, sizeof(output->local));
+    output->stations = stations;
+    output->station_count = runtime->stations.count;
+    output->max_encoders = media->max_encoders;
+    output->incoming_call_policy = media->overload_policy ==
+        DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW ?
+        DF_MEDIA_CALL_PREEMPT_OLDEST_PREVIEW :
+        DF_MEDIA_CALL_PRESERVE_PREVIEWS;
     output->go2rtc_host = media->go2rtc_host;
     output->go2rtc_port = media->go2rtc_port;
-    output->stream_name = media->stream_name;
     output->rtsp_username = media->rtsp_username;
     output->credentials_path = media->credentials_path;
     output->encoder = media->encoder;
@@ -417,18 +555,21 @@ int df_runtime_media_build_module_config(const struct df_runtime_config *runtime
 }
 
 int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
+    struct df_runtime_ubus *ubus, struct df_event_stream *event_stream,
+    const struct df_station_registry *stations,
     struct df_gvs_call_control *control, const uint8_t *data, size_t length,
     const uint8_t local[6], struct df_gvs_session *session,
     struct df_gvs_deadline *deadline, uint32_t source_ipv4, uint64_t now_ms,
-    struct df_gvs_call_control_result *result) {
+    struct df_gvs_call_control_result *result, int *media_result) {
     struct df_gvs_frame frame;
     struct df_event event;
 
     if (control == NULL || data == NULL || local == NULL || session == NULL ||
-        deadline == NULL || result == NULL ||
+        deadline == NULL || result == NULL || media_result == NULL ||
         df_gvs_frame_parse(data, length, &frame, &event) != DF_OK) {
         return DF_ERR_INVALID;
     }
+    *media_result = DF_OK;
     if (media != NULL && media->available && frame.family == 0x03U &&
         frame.opcode == 0x01U && df_gvs_frame_is_for_identity(&frame, local)) {
         struct df_gvs_call_control next_control = *control;
@@ -440,8 +581,51 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
                 &next_session, &next_deadline, now_ms, &next_result) != DF_OK) {
             return DF_ERR_INVALID;
         }
-        if (next_result.runtime.receive.accepted_call) {
-            (void)df_runtime_media_module_preempt(media, now_ms);
+        if (next_result.runtime.receive.accepted_call && stations != NULL) {
+            size_t index;
+            char preempted_station_id[DF_MEDIA_MODULE_STATION_ID_MAX] = {0};
+            uint64_t preempted_generation = 0U;
+
+            *media_result = DF_MEDIA_ERROR_STATION_NOT_FOUND;
+            for (index = 0U; index < stations->count; index++) {
+                if (memcmp(stations->items[index].logical_address,
+                        frame.source, sizeof(frame.source)) == 0) {
+                    *media_result = df_runtime_media_module_incoming_call(media,
+                        stations->items[index].id, next_session.generation,
+                        now_ms, preempted_station_id,
+                        &preempted_generation);
+                    if (*media_result == DF_OK &&
+                        preempted_station_id[0] != '\0') {
+                        char message[DF_RUNTIME_UBUS_LOG_MESSAGE_MAX];
+                        int written = snprintf(message, sizeof(message),
+                            "event=monitor_preempted station_id=%s "
+                            "generation=%llu", preempted_station_id,
+                            (unsigned long long)preempted_generation);
+
+                        if (written > 0 && (size_t)written < sizeof(message))
+                            (void)df_runtime_ubus_log_event(ubus, now_ms, message);
+                        if (event_stream != NULL && event_stream->listen_fd >= 0)
+                            (void)df_event_stream_publish_station(event_stream,
+                                "preempted", preempted_station_id,
+                                preempted_generation, now_ms);
+                        (void)fprintf(stdout,
+                            "doorfast: event=monitor_preempted "
+                            "station_id=%s generation=%llu\n",
+                            preempted_station_id,
+                            (unsigned long long)preempted_generation);
+                    }
+                    if (*media_result != DF_OK) {
+                        const char *event_name = *media_result ==
+                            DF_MEDIA_ERROR_CAPACITY_BUSY ?
+                            "incoming_call_media_capacity_busy" :
+                            "incoming_call_media_failed";
+                        df_runtime_log_station_media_event(ubus, now_ms,
+                            event_name, stations->items[index].id,
+                            next_session.generation, *media_result);
+                    }
+                    break;
+                }
+            }
         }
         *control = next_control;
         *session = next_session;
@@ -478,12 +662,26 @@ static int df_runtime_media_resolve_route(const uint8_t peer[6], uint64_t now_ms
         DF_RUNTIME_PREVIEW_ROUTE_MAX_AGE_MS, ipv4);
 }
 
-static bool df_runtime_media_monitor_active(
-    enum df_gvs_monitor_state state) {
-    return state == DF_GVS_MONITOR_REQUESTING ||
-        state == DF_GVS_MONITOR_AWAITING_VIDEO ||
-        state == DF_GVS_MONITOR_PUBLISHING ||
-        state == DF_GVS_MONITOR_VIEWING;
+static int df_runtime_media_available_memory(uint64_t *available_kib,
+    void *context) {
+    FILE *file;
+    char key[64];
+    char unit[16];
+    unsigned long long value;
+
+    (void)context;
+    if (available_kib == NULL) return DF_ERR_INVALID;
+    file = fopen("/proc/meminfo", "r");
+    if (file == NULL) return DF_ERR_IO;
+    while (fscanf(file, "%63s %llu %15s", key, &value, unit) == 3) {
+        if (strcmp(key, "MemAvailable:") == 0) {
+            (void)fclose(file);
+            *available_kib = (uint64_t)value;
+            return DF_OK;
+        }
+    }
+    (void)fclose(file);
+    return DF_ERR_IO;
 }
 
 int df_runtime_service_run(const struct df_runtime_config *runtime) {
@@ -507,7 +705,6 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_video_reassembly video = {0};
     struct df_gvs_video_frame_cache video_cache = {0};
     struct df_gvs_media_lifecycle media_lifecycle = {0};
-    struct df_gvs_video_reassembly preview_video = {0};
     struct df_gvs_audio_buffer audio = {0};
     struct df_gvs_audio_tx audio_tx = {0};
     struct df_gvs_pcm_ingress pcm_ingress = {.fd = -1};
@@ -580,7 +777,6 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_gvs_station_scan_start(&station_scan, identity, started_ms) != DF_OK)
         return DF_ERR_INVALID;
     df_gvs_video_reassembly_init(&video);
-    df_gvs_video_reassembly_init(&preview_video);
     df_gvs_video_frame_cache_init(&video_cache);
     df_gvs_media_lifecycle_init(&media_lifecycle);
     df_gvs_audio_buffer_init(&audio);
@@ -637,25 +833,29 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
     }
     if (runtime->config.media.enabled) {
-        struct df_media_module_config_v2 media_config;
-        const struct df_media_module_callbacks_v2 media_callbacks = {
+        struct df_media_module_config_v3 media_config;
+        struct df_media_station_config_v3 *media_stations = calloc(
+            runtime->stations.count, sizeof(*media_stations));
+        const struct df_media_module_callbacks_v3 media_callbacks = {
             .emit_control = df_runtime_media_emit_control,
             .resolve_route = df_runtime_media_resolve_route,
+            .available_memory = df_runtime_media_available_memory,
             .context = &udp_sender,
         };
 
-        if (df_runtime_media_build_module_config(runtime, identity,
+        if (media_stations == NULL ||
+            df_runtime_media_build_module_config(runtime, identity,
+                media_stations, runtime->stations.count,
                 &media_config) != DF_OK ||
-            (media_config.station_ipv4 != 0U &&
-             df_gvs_udp_sender_set_configured_route(&udp_sender,
-                media_config.station, media_config.station_ipv4) != DF_OK) ||
             df_runtime_media_module_start(&media_module, &media_config,
                 &media_callbacks) != DF_OK) {
+            free(media_stations);
             df_gvs_multicast_close(&multicast);
             df_gvs_udp_sender_close(&udp_sender);
             df_gvs_runtime_sync_stop(&sync);
             return DF_ERR_IO;
         }
+        free(media_stations);
     }
     if (df_gvs_elevator_query_init(&elevator_query, identity,
             runtime->config.active_host, started_ms,
@@ -772,7 +972,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         (void)df_event_stream_process(&event_stream);
         if (media_module.available &&
-            df_runtime_media_module_tick(&media_module, now_ms) != DF_OK) {
+            df_runtime_media_tick_with_event(&media_module, &ubus,
+                &event_stream, now_ms) != DF_OK) {
             (void)fputs("doorfast: event=media_module_tick_failed\n", stderr);
         }
         (void)df_gvs_access_result_tick(&access.result, &session, identity, now_ms);
@@ -886,8 +1087,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         if (timed_out) {
             (void)printf("doorfast: event=session_timeout generation=%llu\n",
                          (unsigned long long)session.generation);
-            df_runtime_publish_event(&event_stream, "timeout",
-                                     session.generation, now_ms);
+            df_runtime_publish_station_event(&event_stream,
+                &runtime->stations, session.peer, "timeout",
+                session.generation, now_ms);
         }
 
         if (captured == DF_CAPTURE_TIMEOUT) {
@@ -904,10 +1106,6 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             bool ended = false;
 
             (void)df_gvs_session_abort(&session, &ended);
-            if (media_module.available)
-                (void)df_runtime_media_module_preempt(&media_module, now_ms);
-            df_gvs_video_reassembly_reset(&preview_video);
-            df_gvs_video_reassembly_init(&preview_video);
             df_gvs_deadline_cancel(&deadline);
             {
                 struct df_gvs_call_control_result call_result;
@@ -1036,35 +1234,16 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 (media_prefix.source_port == 8303 ||
                  media_prefix.destination_port == 8303) &&
                 media_module.available) {
-                struct df_media_module_status module_status;
                 struct df_gvs_video_packet preview_packet;
-                const uint8_t *frame = NULL;
-                size_t frame_length = 0U;
                 const uint8_t *media_payload =
                     packet + media_prefix.payload_offset;
 
-                if (df_runtime_media_module_status(&media_module,
-                        &module_status) == DF_OK &&
-                    df_runtime_media_monitor_active(module_status.monitor_state) &&
-                    df_gvs_parse_video(media_payload,
+                if (df_gvs_parse_video(media_payload,
                         media_prefix.declared_payload_length,
                         &preview_packet) == 0) {
-                    int frame_status = df_gvs_video_reassembly_push(&preview_video,
-                        &preview_packet, &frame, &frame_length);
-                    if (frame_status == DF_GVS_VIDEO_REASSEMBLY_COMPLETE &&
-                        df_gvs_jpeg_validate(frame, frame_length) == 0) {
-                        uint16_t width = 0U;
-                        uint16_t height = 0U;
-                        if (df_gvs_jpeg_dimensions(frame, frame_length, &width,
-                                &height) == 0) {
-                            (void)df_runtime_media_module_push_jpeg(
-                                &media_module, preview_packet.source,
-                                preview_packet.destination,
-                                media_prefix.source_ipv4,
-                                module_status.generation, frame, frame_length,
-                                width, height, now_ms);
-                        }
-                    }
+                    (void)df_runtime_media_push_video_with_event(
+                        &media_module, &ubus, &runtime->stations,
+                        &preview_packet, media_prefix.source_ipv4, now_ms);
                     continue;
                 }
             }
@@ -1229,13 +1408,34 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     continue;
                 }
             }
-            if (df_runtime_receive_control_with_media(&media_module,
-                    &call_control, payload, payload_length, identity,
-                    &session, &deadline, control_source_ipv4, now_ms,
-                    &call_result) == DF_OK) {
-                const struct df_gvs_receive_result *result =
-                    &call_result.runtime.receive;
-                unsigned i;
+            {
+                int call_media_result = DF_OK;
+
+                if (df_runtime_receive_control_with_media(&media_module,
+                        &ubus, &event_stream, &runtime->stations,
+                        &call_control, payload, payload_length, identity,
+                        &session, &deadline, control_source_ipv4, now_ms,
+                        &call_result, &call_media_result) == DF_OK) {
+                    const struct df_gvs_receive_result *result =
+                        &call_result.runtime.receive;
+                    unsigned i;
+                    if (call_media_result != DF_OK) {
+                        const char *media_event = call_media_result ==
+                            DF_MEDIA_ERROR_CAPACITY_BUSY ?
+                            "incoming_call_media_capacity_busy" :
+                            "incoming_call_media_failed";
+                        const struct df_station *media_station =
+                            df_runtime_station_by_address(&runtime->stations,
+                                session.peer);
+                        (void)fprintf(stdout,
+                            "doorfast: event=%s station_id=%s generation=%llu "
+                            "error=%s\n",
+                            media_event,
+                            media_station == NULL ? "unknown" :
+                                media_station->id,
+                            (unsigned long long)session.generation,
+                            df_runtime_media_error_code(call_media_result));
+                    }
                 if (call_result.handshake.accepted_ask || call_result.handshake.accepted_reply)
                     (void)fprintf(stdout, "doorfast: event=handshake_received opcode=%02x mode=%s\n",
                         call_result.handshake.accepted_ask ? 0x51 : 0x52,
@@ -1259,14 +1459,15 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 }
                 if (result->preempted_session) {
                     if (result->transition.count > 0U) {
-                        df_runtime_publish_event(&event_stream, "preempted",
+                        df_runtime_publish_station_event(&event_stream,
+                            &runtime->stations,
+                            result->transition.events[0].peer, "preempted",
                             result->transition.events[0].generation, now_ms);
                     }
                 }
                 if (result->accepted_call) {
-                    df_gvs_video_reassembly_reset(&preview_video);
-                    df_gvs_video_reassembly_init(&preview_video);
-                    df_runtime_publish_event(&event_stream, "incoming_call",
+                    df_runtime_publish_station_event(&event_stream,
+                        &runtime->stations, session.peer, "incoming_call",
                         session.generation, now_ms);
                 }
                 if (runtime->config.active_host && result->accepted_call) {
@@ -1308,7 +1509,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (result->talking_transition) {
                     (void)printf("doorfast: event=session_established generation=%llu\n",
                                  (unsigned long long)session.generation);
-                    df_runtime_publish_event(&event_stream, "call_established",
+                    df_runtime_publish_station_event(&event_stream,
+                        &runtime->stations, session.peer, "call_established",
                         session.generation, now_ms);
                     df_runtime_log_public_event(&ubus, now_ms,
                         "call_established", session.generation);
@@ -1316,7 +1518,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (result->observed_hangup) {
                     (void)printf("doorfast: event=hangup generation=%llu\n",
                                  (unsigned long long)session.generation);
-                    df_runtime_publish_event(&event_stream, "hangup",
+                    df_runtime_publish_station_event(&event_stream,
+                        &runtime->stations, session.peer, "hangup",
                         session.generation, now_ms);
                     df_runtime_log_public_event(&ubus, now_ms, "hangup",
                         session.generation);
@@ -1324,7 +1527,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (result->timed_out_transition) {
                     (void)printf("doorfast: event=session_timeout generation=%llu\n",
                                  (unsigned long long)session.generation);
-                    df_runtime_publish_event(&event_stream, "timeout",
+                    df_runtime_publish_station_event(&event_stream,
+                        &runtime->stations, session.peer, "timeout",
                         session.generation, now_ms);
                     df_runtime_log_public_event(&ubus, now_ms, "session_timeout",
                         session.generation);
@@ -1341,6 +1545,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     status = DF_ERR_IO;
                     goto done;
                 }
+                }
             }
         }
     }
@@ -1348,7 +1553,6 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
 
 done:
     df_runtime_media_module_stop(&media_module);
-    df_gvs_video_reassembly_reset(&preview_video);
     df_runtime_media_clear(&video, &video_cache, &audio, 0);
     df_gvs_pcm_ingress_close(&pcm_ingress);
     df_gvs_multicast_close(&multicast);

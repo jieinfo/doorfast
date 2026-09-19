@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "runtime_config.h"
@@ -329,5 +330,61 @@ void test_runtime_config_failed_reload_preserves_owned_registry(void) {
     TEST_ASSERT_INT_EQ(0, strcmp("239.1.2.3", runtime.multicast_address));
     TEST_ASSERT_INT_EQ(1,
         df_station_registry_find(&runtime.stations, "gate_main") != NULL);
+    df_runtime_config_destroy(&runtime);
+}
+
+void test_runtime_config_validates_media_capacity_and_call_policy(void) {
+    const char valid[] =
+        "config gvs 'main'\n"
+        "\toption enabled '1'\n"
+        "\toption active_host '1'\n"
+        "\toption host_interface 'eth2'\n"
+        "\toption gvs_local_address 'IS:2-1-101-1'\n"
+        "\toption indoor_netmask '255.0.0.0'\n"
+        "\toption media_enabled '1'\n"
+        "\toption media_go2rtc_host 'ha.local'\n"
+        "\toption media_max_encoders '2'\n"
+        "\toption media_incoming_call_policy 'preempt_oldest_preview'\n"
+        "config station 'gate_main'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Main Gate'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_main'\n"
+        "config station 'gate_side'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Side Gate'\n"
+        "\toption logical_address '32:02:01:00:03:00'\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_side'\n";
+    const char *capacity = strstr(valid, "media_max_encoders '2'");
+    const char *policy = strstr(valid,
+        "media_incoming_call_policy 'preempt_oldest_preview'");
+    char invalid_capacity[sizeof(valid)];
+    char preserve[sizeof(valid)];
+    struct df_runtime_config runtime = {0};
+
+    TEST_ASSERT_INT_EQ(1, capacity != NULL);
+    TEST_ASSERT_INT_EQ(1, policy != NULL);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(valid, &runtime));
+    TEST_ASSERT_INT_EQ(2, (int)runtime.config.media.max_encoders);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW,
+        runtime.config.media.overload_policy);
+    df_runtime_config_destroy(&runtime);
+
+    memcpy(invalid_capacity, valid, sizeof(valid));
+    invalid_capacity[(size_t)(capacity - valid) +
+        strlen("media_max_encoders '")] = '3';
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_config_parse(invalid_capacity, &runtime));
+
+    (void)snprintf(preserve, sizeof(preserve), "%.*s%s%s",
+        (int)((policy - valid) +
+            strlen("media_incoming_call_policy '")), valid,
+        "preserve_previews",
+        policy + strlen("media_incoming_call_policy 'preempt_oldest_preview"));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_config_parse(preserve, &runtime));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_OVERLOAD_REJECT_NEW,
+        runtime.config.media.overload_policy);
     df_runtime_config_destroy(&runtime);
 }

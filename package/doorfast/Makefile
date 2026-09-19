@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=doorfast
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=53
+PKG_RELEASE:=54
 PKGARCH:=x86_64
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -13,7 +13,10 @@ DF_MEDIA_MODULE_SOURCES:= \
 	$(PKG_BUILD_DIR)/src/media_capacity.c \
 	$(PKG_BUILD_DIR)/src/media_encoder.c \
 	$(PKG_BUILD_DIR)/src/media_frame_queue.c \
-	$(PKG_BUILD_DIR)/src/media_module.c
+	$(PKG_BUILD_DIR)/src/media_module.c \
+	$(PKG_BUILD_DIR)/src/media_module_config.c \
+	$(PKG_BUILD_DIR)/src/media_session.c \
+	$(PKG_BUILD_DIR)/src/media_session_manager.c
 define Package/doorfast
   SECTION:=net
   CATEGORY:=Network
@@ -113,11 +116,13 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	mkdir -p /etc/doorfast || exit 1
 	chmod 0750 /etc/doorfast || exit 1
 fi
-if [ -z "$${IPKG_INSTROOT}" ] && [ "$${PKG_UPGRADE}" = "1" ]; then
-	migrate_media_credentials || exit 1
-	/etc/init.d/doorfast restart
-	/etc/init.d/doorfast-event-relay restart
-fi
+	if [ -z "$${IPKG_INSTROOT}" ] && [ "$${PKG_UPGRADE}" = "1" ]; then
+		migrate_media_credentials || exit 1
+		/etc/init.d/doorfast-event-relay restart
+		if [ ! -r /usr/lib/doorfast/media-v3.so ]; then
+			/etc/init.d/doorfast restart
+		fi
+	fi
 exit 0
 endef
 

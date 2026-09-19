@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -112,6 +113,20 @@ class VmMediaRunnerTest(unittest.TestCase):
             env=environment,
         )
 
+    def run_multi_media_runner(self, source_root=None):
+        command = [
+            "python3", "-B", "tests/run_doorfast_vm_multi_media.py",
+            "tests/fixtures/fake-vm-preflight-ssh.sh",
+            "--output-dir", str(self.root / "multi-media-output"),
+        ]
+        if source_root is not None:
+            command.extend(["--source-root", str(source_root)])
+        return subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+        )
+
     def test_vm_summary_does_not_label_unrun_fixture_as_evidence(self):
         result = self.run_runner()
 
@@ -157,6 +172,143 @@ class VmMediaRunnerTest(unittest.TestCase):
              "reply_count", "configured"},
             set(report["candidates"][0]),
         )
+
+    def test_multi_media_runner_proves_two_streams_and_isolated_stop(self):
+        result = self.run_multi_media_runner()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            {
+                "configured_capacity": 2,
+                "peak_active_encoders": 2,
+                "streams": ["doorfast_gate_main", "doorfast_gate_side"],
+                "isolated_stop": True,
+            },
+            json.loads(result.stdout),
+        )
+        report = json.loads(
+            (self.root / "multi-media-output" / "acceptance.json").read_text()
+        )
+        self.assertEqual("df_media_module_api_v3", report["engine"])
+        self.assertEqual("publishing", report["states"]["before_stop"]["gate_main"])
+        self.assertEqual("publishing", report["states"]["before_stop"]["gate_side"])
+        self.assertEqual("idle", report["states"]["after_stop"]["gate_main"])
+        self.assertEqual("publishing", report["states"]["after_stop"]["gate_side"])
+        self.assertEqual(0, report["cleanup"]["active_encoders"])
+        self.assertEqual(0, report["rtsp"]["producer_count"])
+        self.assertEqual(2, report["rtsp"]["max_producer_count"])
+        self.assertEqual(
+            {
+                "preserve": {
+                    "preview_03_04": 2,
+                    "confirmation_03_84": 2,
+                    "stop_03_02": 2,
+                },
+                "preempt": {
+                    "preview_03_04": 2,
+                    "confirmation_03_84": 2,
+                    "stop_03_02": 1,
+                },
+            },
+            report["protocol"],
+        )
+        self.assertGreaterEqual(
+            report["memory"]["available_kib"], report["memory"]["minimum_free_kib"]
+        )
+        self.assertEqual(
+            "capacity_busy",
+            report["call_at_capacity"]["preserve_previews"]["result"],
+        )
+        self.assertEqual(
+            "gate_main",
+            report["call_at_capacity"]["preempt_oldest_preview"]["preempted"],
+        )
+        self.assertEqual(
+            "gate_side",
+            report["call_at_capacity"]["preempt_oldest_preview"]["active_preview"],
+        )
+        self.assertEqual(
+            "accepted",
+            report["call_at_capacity"]["preempt_oldest_preview"]["result"],
+        )
+        self.assertEqual(
+            2,
+            report["call_at_capacity"]["preempt_oldest_preview"]["active_before"],
+        )
+        self.assertEqual(
+            "publishing",
+            report["call_at_capacity"]["preempt_oldest_preview"]["victim_state_before"],
+        )
+        self.assertEqual(
+            2,
+            report["call_at_capacity"]["preempt_oldest_preview"]["active_encoders"],
+        )
+        self.assertEqual(
+            "doorfast_gate_call",
+            report["call_at_capacity"]["preempt_oldest_preview"]["call_stream"],
+        )
+        announced = {
+            row["path"] for row in report["rtsp"]["transactions"]
+            if row["method"] == "ANNOUNCE"
+        }
+        self.assertTrue({"/doorfast_gate_main", "/doorfast_gate_side"} <= announced)
+        serialized = json.dumps(report, sort_keys=True)
+        self.assertNotIn("JPEG-MAIN", serialized)
+        self.assertNotIn("JPEG-SIDE", serialized)
+        self.assertNotIn("JPEG-CALL", serialized)
+        self.assertNotIn("password", serialized.lower())
+
+    def test_multi_media_runner_hashes_each_encoder_pipe_independently(self):
+        result = self.run_multi_media_runner()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads(
+            (self.root / "multi-media-output" / "acceptance.json").read_text()
+        )
+        self.assertEqual(
+            {
+                "doorfast_gate_main": {
+                    "bytes": 5,
+                    "sha256": "355809dc46166fd61e20ddbfb70b7afa0d08f73cdf0e88abef99999cc5138bb1",
+                },
+                "doorfast_gate_call": {
+                    "bytes": 5,
+                    "sha256": "dec252baa05e53819b757db5116ec4add03894adafa0aae2f4182beaf257fb41",
+                },
+                "doorfast_gate_side": {
+                    "bytes": 5,
+                    "sha256": "e7df0374e6841e87c72088e3b7ea1cc3277ecef228721714996442ac85241ace",
+                },
+            },
+            report["encoder_pipe_evidence"],
+        )
+
+    def test_multi_media_runner_catches_v3_start_always_failing_mutation(self):
+        source_root = self.root / "mutated-project"
+        shutil.copytree("src", source_root / "src")
+        manager = source_root / "src" / "media_session_manager.c"
+        source = manager.read_text()
+        original = """static int df_media_module_api_start_v3(void *instance, const char *station_id,
+    enum df_media_session_purpose purpose, uint64_t request_generation,
+    uint64_t now_ms) {
+    struct df_media_session_manager *manager = instance;
+"""
+        replacement = original + """    (void)station_id;
+    (void)purpose;
+    (void)request_generation;
+    (void)now_ms;
+    if (manager != NULL) return DF_MEDIA_ERROR_CAPACITY_BUSY;
+"""
+        self.assertIn(original, source)
+        source = source.replace(original, replacement, 1)
+        manager.write_text(source)
+
+        result = self.run_multi_media_runner(source_root)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("media ABI v3 harness failed", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("NameError", result.stderr)
 
 
 if __name__ == "__main__":

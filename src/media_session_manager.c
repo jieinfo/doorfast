@@ -1,10 +1,22 @@
 #include "media_session_manager.h"
 
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "doorfast.h"
+
+static void df_media_session_manager_advance_revisions(
+    struct df_media_session_manager *manager,
+    struct df_media_session *session) {
+    if (manager != NULL && manager->status_revision != UINT64_MAX)
+        manager->status_revision++;
+    if (session != NULL && session->status_revision != UINT64_MAX)
+        session->status_revision++;
+    if (manager != NULL) manager->status_initialized = false;
+    if (session != NULL) session->status_initialized = false;
+}
 
 static int df_media_session_resource_start_default(
     struct df_media_session *session, uint64_t proposed_generation,
@@ -21,10 +33,37 @@ static void df_media_session_resource_stop_default(
     (void)context;
 }
 
-static void df_media_session_manager_stop_resources(
+static int df_media_session_manager_stop_resources(
     struct df_media_session *session) {
-    if (session != NULL && session->stop_resources != NULL)
+    int result;
+
+    if (session == NULL) return DF_ERR_INVALID;
+    result = df_media_session_stop_pipeline(session);
+    if (session->stop_resources != NULL) {
         session->stop_resources(session, session->resource_context);
+        session->stop_resources = NULL;
+        session->resource_context = NULL;
+    }
+    return result;
+}
+
+static int df_media_session_manager_release_failed(
+    struct df_media_session_manager *manager,
+    struct df_media_session *session) {
+    if (manager == NULL || session == NULL || !session->active)
+        return DF_ERR_INVALID;
+    if (session->last_error != DF_MEDIA_ERROR_NONE) {
+        (void)snprintf(manager->failed_station_id,
+            sizeof(manager->failed_station_id), "%s", session->station_id);
+        manager->failed_generation = session->generation;
+        manager->failed_error = session->last_error;
+    }
+    if (df_media_session_manager_stop_resources(session) != DF_OK)
+        return DF_ERR_IO;
+    session->active = false;
+    session->reserved = false;
+    if (manager->active_count > 0U) manager->active_count--;
+    return DF_OK;
 }
 
 static char *df_media_session_manager_copy_string(const char *source) {
@@ -136,6 +175,62 @@ static struct df_media_session *df_media_session_manager_find_free(
     return NULL;
 }
 
+static const struct df_media_session *df_media_session_manager_find_const(
+    const struct df_media_session_manager *manager, const char *station_id) {
+    size_t index;
+
+    if (manager == NULL || station_id == NULL) return NULL;
+    for (index = 0U; index < manager->capacity; index++) {
+        if (df_media_session_matches_station(&manager->sessions[index],
+                station_id)) return &manager->sessions[index];
+    }
+    return NULL;
+}
+
+const struct df_media_session *df_media_session_manager_find(
+    const struct df_media_session_manager *manager, const char *station_id) {
+    return df_media_session_manager_find_const(manager, station_id);
+}
+
+static int df_media_session_manager_start_monitor(
+    struct df_media_session_manager *manager,
+    struct df_media_session *session, uint64_t now_ms) {
+    if (manager->config.local[0] == 0U) return DF_OK;
+    if (manager->config.first_frame_timeout_s != 0U &&
+        df_gvs_monitor_set_first_frame_timeout(&session->monitor,
+            (uint64_t)manager->config.first_frame_timeout_s * 1000U) != DF_OK)
+        return DF_ERR_INVALID;
+    return df_gvs_monitor_start_with_generation(&session->monitor,
+        manager->config.local, session->station, session->station_ipv4,
+        session->generation, now_ms);
+}
+
+static int df_media_session_manager_bind_call_monitor(
+    struct df_media_session_manager *manager,
+    struct df_media_session *session, uint64_t now_ms) {
+    if (manager->config.local[0] == 0U) return DF_OK;
+    if (manager->config.first_frame_timeout_s != 0U)
+        session->monitor.first_frame_timeout_ms =
+            (uint64_t)manager->config.first_frame_timeout_s * 1000U;
+    return df_gvs_monitor_bind_call(&session->monitor, manager->config.local,
+        session->station, session->station_ipv4, session->generation, now_ms);
+}
+
+static int df_media_session_manager_call_monitor_preflight(
+    const struct df_media_session_manager *manager,
+    const struct df_media_session *session, uint64_t now_ms) {
+    uint64_t timeout_ms;
+
+    if (manager->config.local[0] == 0U) return DF_OK;
+    timeout_ms = manager->config.first_frame_timeout_s == 0U ?
+        session->monitor.first_frame_timeout_ms :
+        (uint64_t)manager->config.first_frame_timeout_s * 1000U;
+    if (timeout_ms == 0U) timeout_ms = DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS;
+    if (now_ms < session->monitor.last_now_ms ||
+        now_ms > UINT64_MAX - timeout_ms) return DF_ERR_INVALID;
+    return DF_OK;
+}
+
 int df_media_session_manager_init(struct df_media_session_manager *manager,
     const struct df_media_module_config_v3 *config,
     const struct df_media_module_callbacks_v3 *callbacks) {
@@ -151,6 +246,13 @@ int df_media_session_manager_init(struct df_media_session_manager *manager,
         df_media_session_manager_free_config(manager);
         memset(manager, 0, sizeof(*manager));
         return DF_ERR_IO;
+    }
+    if (manager->config.credentials_path != NULL &&
+        df_media_credentials_load(manager->config.credentials_path,
+            &manager->credentials) != DF_OK) {
+        df_media_session_manager_free_config(manager);
+        memset(manager, 0, sizeof(*manager));
+        return DF_ERR_INVALID;
     }
     manager->callbacks = *callbacks;
     for (index = 0U; index < config->station_count; index++) {
@@ -183,7 +285,7 @@ void df_media_session_manager_destroy(struct df_media_session_manager *manager) 
         for (index = 0U; index < manager->capacity; index++) {
             if (manager->sessions[index].active ||
                 manager->sessions[index].reserved)
-                df_media_session_manager_stop_resources(
+                (void)df_media_session_manager_stop_resources(
                     &manager->sessions[index]);
             df_media_session_reset(&manager->sessions[index]);
         }
@@ -265,11 +367,16 @@ int df_media_session_manager_start(struct df_media_session_manager *manager,
     session->resource_context = resource_hooks.context;
     if (resource_hooks.start(session, proposed_generation,
             resource_hooks.context) != DF_OK) {
-        df_media_session_manager_stop_resources(session);
+        (void)df_media_session_manager_stop_resources(session);
         df_media_session_reset(session);
         return DF_MEDIA_ERROR_ENCODER_FAILED;
     }
     if (df_media_session_activate(session, proposed_generation) != DF_OK) {
+        (void)df_media_session_manager_stop_resources(session);
+        df_media_session_reset(session);
+        return DF_MEDIA_ERROR_ENCODER_FAILED;
+    }
+    if (df_media_session_manager_start_monitor(manager, session, now_ms) != DF_OK) {
         df_media_session_manager_stop_resources(session);
         df_media_session_reset(session);
         return DF_MEDIA_ERROR_ENCODER_FAILED;
@@ -277,6 +384,203 @@ int df_media_session_manager_start(struct df_media_session_manager *manager,
     manager->next_generation = proposed_generation;
     manager->active_count++;
     *generation = proposed_generation;
+    df_media_session_manager_advance_revisions(manager, session);
+    return DF_OK;
+}
+
+int df_media_session_manager_receive_control(
+    struct df_media_session_manager *manager, const struct df_gvs_frame *frame,
+    uint32_t source_ipv4, uint64_t now_ms) {
+    size_t index;
+
+    if (manager == NULL || !manager->initialized || frame == NULL)
+        return DF_ERR_INVALID;
+    for (index = 0U; index < manager->capacity; index++) {
+        struct df_media_session *session = &manager->sessions[index];
+        struct df_gvs_monitor_result result;
+
+        if (!session->active || memcmp(session->station, frame->source,
+                sizeof(session->station)) != 0 ||
+            source_ipv4 != session->station_ipv4)
+            continue;
+        if (memcmp(frame->destination, manager->config.local,
+                sizeof(manager->config.local)) != 0)
+            return DF_ERR_INVALID;
+        if (df_gvs_monitor_receive(&session->monitor, frame, source_ipv4,
+                now_ms, &result) != DF_OK)
+            return DF_ERR_INVALID;
+        if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
+        if (result.failed) {
+            session->state = DF_MEDIA_SESSION_FAILED;
+            if (df_media_session_manager_release_failed(manager, session) != DF_OK)
+                return DF_ERR_IO;
+        }
+        if (result.stopped) {
+            if (df_media_session_manager_stop_resources(session) != DF_OK)
+                return DF_ERR_IO;
+            df_media_session_reset(session);
+            if (manager->active_count > 0U) manager->active_count--;
+        }
+        return DF_OK;
+    }
+    return DF_ERR_INVALID;
+}
+
+static struct df_media_session *df_media_session_manager_oldest_preview(
+    struct df_media_session_manager *manager) {
+    struct df_media_session *victim = NULL;
+    size_t index;
+
+    for (index = 0U; index < manager->capacity; index++) {
+        struct df_media_session *session = &manager->sessions[index];
+        if (!session->active || session->purpose != DF_MEDIA_SESSION_PREVIEW)
+            continue;
+        if (victim == NULL || session->started_ms < victim->started_ms)
+            victim = session;
+    }
+    return victim;
+}
+
+static int df_media_session_manager_preempt_preview(
+    struct df_media_session_manager *manager,
+    struct df_media_session *session, uint64_t now_ms) {
+    struct df_gvs_monitor previous_monitor;
+    struct df_gvs_monitor_action action;
+
+    if (manager == NULL || session == NULL || !session->active ||
+        session->purpose != DF_MEDIA_SESSION_PREVIEW)
+        return DF_ERR_INVALID;
+    previous_monitor = session->monitor;
+    if (session->monitor.state != DF_GVS_MONITOR_IDLE) {
+        if (df_gvs_monitor_stop(&session->monitor, session->generation,
+                now_ms) != DF_OK ||
+            df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK) {
+            session->monitor = previous_monitor;
+            return DF_ERR_INVALID;
+        }
+        if (action.send && manager->callbacks.emit_control(
+                action.destination, session->station_ipv4, action.source,
+                action.family, action.opcode, action.payload,
+                action.payload_length, manager->callbacks.context) != DF_OK) {
+            session->monitor = previous_monitor;
+            return DF_ERR_IO;
+        }
+    }
+    return df_media_session_manager_stop_resources(session);
+}
+
+static int df_media_session_manager_prepare_call(
+    struct df_media_session_manager *manager,
+    const struct df_media_station_config_v3 *station, uint64_t generation,
+    uint64_t call_generation, uint64_t now_ms,
+    struct df_media_session *session) {
+    uint32_t station_ipv4;
+    uint64_t available_kib;
+    int result;
+
+    if (session == NULL) return DF_ERR_INVALID;
+    df_media_session_reset(session);
+    station_ipv4 = station->ipv4;
+    if (station_ipv4 == 0U &&
+        (manager->callbacks.resolve_route(station->logical_address, now_ms,
+            &station_ipv4, manager->callbacks.context) != DF_OK ||
+         station_ipv4 == 0U)) return DF_MEDIA_ERROR_ROUTE_UNAVAILABLE;
+    if (manager->config.min_free_kib != 0U &&
+        (manager->callbacks.available_memory(&available_kib,
+            manager->callbacks.context) != DF_OK ||
+         available_kib < manager->config.min_free_kib))
+        return DF_MEDIA_ERROR_RESOURCE_EXHAUSTED;
+    result = df_media_session_prepare(session, station, station_ipv4,
+        DF_MEDIA_SESSION_CALL, now_ms);
+    if (result != DF_OK) return DF_ERR_INVALID;
+    session->stop_resources = manager->resource_hooks.stop;
+    session->resource_context = manager->resource_hooks.context;
+    if (manager->resource_hooks.start(session, generation,
+            manager->resource_hooks.context) != DF_OK ||
+        df_media_session_activate(session, generation) != DF_OK ||
+        df_media_session_manager_bind_call_monitor(manager, session,
+            now_ms) != DF_OK) {
+        (void)df_media_session_manager_stop_resources(session);
+        df_media_session_reset(session);
+        return DF_MEDIA_ERROR_ENCODER_FAILED;
+    }
+    session->call_generation = call_generation;
+    return DF_OK;
+}
+
+int df_media_session_manager_incoming_call(
+    struct df_media_session_manager *manager, const char *station_id,
+    uint64_t call_generation, uint64_t now_ms) {
+    const struct df_media_station_config_v3 *station;
+    struct df_media_session *session;
+    struct df_media_session *victim;
+    struct df_media_session candidate = {0};
+    uint64_t generation;
+    int result;
+
+    if (manager == NULL || !manager->initialized || station_id == NULL ||
+        call_generation == 0U) return DF_ERR_INVALID;
+    manager->preempted_station_id[0] = '\0';
+    manager->preempted_generation = 0U;
+    station = df_media_session_manager_find_station(manager, station_id);
+    if (station == NULL) return DF_MEDIA_ERROR_STATION_NOT_FOUND;
+    if (!manager->config.enabled || !station->enabled)
+        return DF_MEDIA_ERROR_STATION_DISABLED;
+    session = df_media_session_manager_find_active(manager, station_id);
+    if (session != NULL && session->purpose == DF_MEDIA_SESSION_CALL) {
+        if (call_generation == session->call_generation)
+            return DF_OK;
+        if (call_generation < session->call_generation)
+            return DF_MEDIA_ERROR_GENERATION_MISMATCH;
+    }
+    if (manager->next_generation == UINT64_MAX)
+        return DF_MEDIA_ERROR_RESOURCE_EXHAUSTED;
+    generation = manager->next_generation + 1U;
+    if (session != NULL) {
+        if (df_media_session_manager_call_monitor_preflight(manager, session,
+                now_ms) != DF_OK)
+            return DF_MEDIA_ERROR_ENCODER_FAILED;
+        result = df_media_session_upgrade_to_call(session, generation,
+            call_generation, now_ms);
+        if (result != DF_OK) return result;
+        if (df_media_session_manager_bind_call_monitor(manager, session,
+                now_ms) != DF_OK)
+            return DF_MEDIA_ERROR_ENCODER_FAILED;
+        manager->next_generation = generation;
+        df_media_session_manager_advance_revisions(manager, session);
+        return DF_OK;
+    }
+    if (manager->active_count >= manager->capacity) {
+        if (manager->config.incoming_call_policy == DF_MEDIA_CALL_PRESERVE_PREVIEWS)
+            return DF_MEDIA_ERROR_CAPACITY_BUSY;
+        victim = df_media_session_manager_oldest_preview(manager);
+        if (victim == NULL) return DF_MEDIA_ERROR_CAPACITY_BUSY;
+        result = df_media_session_manager_prepare_call(manager, station,
+            generation, call_generation, now_ms, &candidate);
+        if (result != DF_OK) return result;
+        if (df_media_session_manager_preempt_preview(
+                manager, victim, now_ms) != DF_OK) {
+            (void)df_media_session_manager_stop_resources(&candidate);
+            df_media_session_reset(&candidate);
+            return DF_MEDIA_ERROR_ENCODER_FAILED;
+        }
+        (void)snprintf(manager->preempted_station_id,
+            sizeof(manager->preempted_station_id), "%s", victim->station_id);
+        manager->preempted_generation = victim->generation;
+        df_media_session_reset(victim);
+        *victim = candidate;
+        manager->next_generation = generation;
+        df_media_session_manager_advance_revisions(manager, victim);
+        return DF_OK;
+    }
+    session = df_media_session_manager_find_free(manager);
+    if (session == NULL) return DF_MEDIA_ERROR_CAPACITY_BUSY;
+    result = df_media_session_manager_prepare_call(manager, station,
+        generation, call_generation, now_ms, session);
+    if (result != DF_OK) return result;
+    manager->active_count++;
+    manager->next_generation = generation;
+    df_media_session_manager_advance_revisions(manager, session);
     return DF_OK;
 }
 
@@ -299,15 +603,45 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
     if (session == NULL || session->generation != key->generation ||
         key->generation == 0U) return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     if (command == DF_MEDIA_MODULE_COMMAND_STOP) {
-        df_media_session_manager_stop_resources(session);
+        if (session->monitor.state == DF_GVS_MONITOR_REQUESTING ||
+            session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO ||
+            session->monitor.state == DF_GVS_MONITOR_PUBLISHING ||
+            session->monitor.state == DF_GVS_MONITOR_VIEWING) {
+            struct df_gvs_monitor_action action;
+            struct df_gvs_monitor previous_monitor = session->monitor;
+
+            if (df_gvs_monitor_stop(&session->monitor, key->generation,
+                    now_ms) != DF_OK ||
+                df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
+                return DF_ERR_INVALID;
+            if (action.send && manager->callbacks.emit_control(
+                    action.destination, session->station_ipv4, action.source,
+                    action.family, action.opcode, action.payload,
+                    action.payload_length, manager->callbacks.context) != DF_OK) {
+                session->monitor = previous_monitor;
+                return DF_ERR_IO;
+            }
+            session->state = DF_MEDIA_SESSION_STOPPING;
+            session->viewer_active = false;
+            if (df_media_session_stop_pipeline(session) != DF_OK)
+                return DF_MEDIA_ERROR_ENCODER_FAILED;
+            df_media_session_manager_advance_revisions(manager, session);
+            return DF_OK;
+        }
+        if (df_media_session_manager_stop_resources(session) != DF_OK)
+            return DF_MEDIA_ERROR_ENCODER_FAILED;
         result = df_media_session_command(session, command, key, active,
             now_ms);
         if (result != DF_OK) return result;
         df_media_session_reset(session);
         manager->active_count--;
+        df_media_session_manager_advance_revisions(manager, session);
         return DF_OK;
     }
-    return df_media_session_command(session, command, key, active, now_ms);
+    result = df_media_session_command(session, command, key, active, now_ms);
+    if (result == DF_OK)
+        df_media_session_manager_advance_revisions(manager, session);
+    return result;
 }
 
 size_t df_media_session_manager_active(
@@ -333,3 +667,358 @@ const struct df_media_session *df_media_session_manager_lookup(
     }
     return NULL;
 }
+
+int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
+    const uint8_t source[6], const uint8_t destination[6], uint32_t source_ipv4,
+    const uint8_t *jpeg, size_t length, uint16_t width, uint16_t height,
+    uint64_t timestamp_ms) {
+    size_t index;
+
+    if (manager == NULL || !manager->initialized || source == NULL ||
+        destination == NULL || jpeg == NULL || source_ipv4 == 0U ||
+        memcmp(destination, manager->config.local,
+            sizeof(manager->config.local)) != 0) return DF_ERR_INVALID;
+    for (index = 0U; index < manager->capacity; index++) {
+        struct df_media_session *session = &manager->sessions[index];
+
+        if (!session->active ||
+            memcmp(source, session->station, sizeof(session->station)) != 0)
+            continue;
+        if (source_ipv4 != session->station_ipv4) return DF_ERR_INVALID;
+        {
+            struct df_gvs_monitor_result monitor_result;
+            int result;
+
+            if (session->monitor.state != DF_GVS_MONITOR_IDLE &&
+                df_gvs_monitor_admit_jpeg(&session->monitor, source,
+                    destination, source_ipv4, session->generation,
+                    timestamp_ms, &monitor_result) != DF_OK)
+                return DF_ERR_INVALID;
+            result = df_media_session_push_jpeg(session, &manager->config,
+                &manager->credentials, jpeg, length, width, height,
+                timestamp_ms);
+
+            if (session->state == DF_MEDIA_SESSION_FAILED)
+                (void)df_media_session_manager_release_failed(manager, session);
+            else if (result == DF_OK &&
+                session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO &&
+                df_gvs_monitor_mark_publishing(&session->monitor,
+                    session->generation, timestamp_ms) != DF_OK)
+                return DF_ERR_IO;
+            return result;
+        }
+    }
+    return DF_ERR_INVALID;
+}
+
+int df_media_session_manager_push_video(
+    struct df_media_session_manager *manager,
+    const struct df_gvs_video_packet *packet, uint32_t source_ipv4,
+    uint64_t timestamp_ms) {
+    size_t index;
+
+    if (manager == NULL || !manager->initialized || packet == NULL ||
+        source_ipv4 == 0U ||
+        memcmp(packet->destination, manager->config.local,
+            sizeof(manager->config.local)) != 0)
+        return DF_ERR_INVALID;
+    for (index = 0U; index < manager->capacity; index++) {
+        struct df_media_session *session = &manager->sessions[index];
+        const uint8_t *jpeg = NULL;
+        size_t length = 0U;
+        uint16_t width = 0U;
+        uint16_t height = 0U;
+        int result;
+
+        if (!session->active ||
+            memcmp(packet->source, session->station,
+                sizeof(session->station)) != 0)
+            continue;
+        if (source_ipv4 != session->station_ipv4) return DF_ERR_INVALID;
+        result = df_gvs_video_reassembly_push(
+            &session->video, packet, &jpeg, &length);
+        if (result == DF_GVS_VIDEO_REASSEMBLY_INCOMPLETE ||
+            result == DF_GVS_VIDEO_REASSEMBLY_DUPLICATE ||
+            result == DF_GVS_VIDEO_REASSEMBLY_LATE)
+            return DF_OK;
+        if (result != DF_GVS_VIDEO_REASSEMBLY_COMPLETE ||
+            df_gvs_jpeg_validate(jpeg, length) != 0 ||
+            df_gvs_jpeg_dimensions(jpeg, length, &width, &height) != 0)
+            return DF_ERR_INVALID;
+        return df_media_session_manager_push_jpeg(manager, packet->source,
+            packet->destination, source_ipv4, jpeg, length, width, height,
+            timestamp_ms);
+    }
+    return DF_ERR_INVALID;
+}
+
+int df_media_session_manager_tick(struct df_media_session_manager *manager,
+    uint64_t now_ms) {
+    size_t index;
+    int overall = DF_OK;
+
+    if (manager == NULL || !manager->initialized) return DF_ERR_INVALID;
+    for (index = 0U; index < manager->capacity; index++) {
+        struct df_media_session *session = &manager->sessions[index];
+
+        if (!session->active)
+            continue;
+        if (session->state == DF_MEDIA_SESSION_FAILED) {
+            if (df_media_session_manager_release_failed(manager, session) != DF_OK)
+                overall = DF_ERR_IO;
+            continue;
+        }
+        {
+            struct df_gvs_monitor_action action;
+            if (df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
+                overall = DF_ERR_IO;
+            else if (action.send && manager->callbacks.emit_control(
+                    action.destination, session->station_ipv4, action.source,
+                    action.family, action.opcode, action.payload,
+                    action.payload_length, manager->callbacks.context) != DF_OK)
+                overall = DF_ERR_IO;
+        }
+        if (session->monitor.state == DF_GVS_MONITOR_FAILED) {
+            session->state = DF_MEDIA_SESSION_FAILED;
+            if (df_media_session_manager_release_failed(manager, session) != DF_OK)
+                overall = DF_ERR_IO;
+            continue;
+        }
+        if (session->state == DF_MEDIA_SESSION_STOPPING &&
+            session->monitor.state == DF_GVS_MONITOR_IDLE) {
+            if (df_media_session_manager_stop_resources(session) != DF_OK) {
+                overall = DF_ERR_IO;
+            } else {
+                df_media_session_reset(session);
+                if (manager->active_count > 0U) manager->active_count--;
+            }
+            continue;
+        }
+        if (df_media_encoder_is_running(&session->encoder) &&
+            df_media_session_tick_pipeline(session, now_ms) != DF_OK)
+            overall = DF_ERR_IO;
+        if (session->state == DF_MEDIA_SESSION_FAILED)
+            (void)df_media_session_manager_release_failed(manager, session);
+    }
+    return overall;
+}
+
+static void *df_media_module_api_create_v3(
+    const struct df_media_module_config_v3 *config,
+    const struct df_media_module_callbacks_v3 *callbacks) {
+    struct df_media_session_manager *manager = calloc(1U, sizeof(*manager));
+
+    if (manager == NULL ||
+        df_media_session_manager_init(manager, config, callbacks) != DF_OK) {
+        free(manager);
+        return NULL;
+    }
+    return manager;
+}
+
+static void df_media_module_api_destroy_v3(void *instance) {
+    struct df_media_session_manager *manager = instance;
+
+    if (manager == NULL) return;
+    df_media_session_manager_destroy(manager);
+    free(manager);
+}
+
+static int df_media_module_api_start_v3(void *instance, const char *station_id,
+    enum df_media_session_purpose purpose, uint64_t request_generation,
+    uint64_t now_ms) {
+    struct df_media_session_manager *manager = instance;
+    uint64_t generation = 0U;
+
+    if (purpose == DF_MEDIA_SESSION_CALL)
+        return df_media_session_manager_incoming_call(manager, station_id,
+            request_generation, now_ms);
+    if (purpose != DF_MEDIA_SESSION_PREVIEW || request_generation != 0U)
+        return DF_ERR_INVALID;
+    return df_media_session_manager_start(manager, station_id, purpose, now_ms,
+        &generation);
+}
+
+static int df_media_module_api_command_v3(void *instance,
+    enum df_media_module_command command,
+    const struct df_media_session_key *key, bool active, uint64_t now_ms) {
+    return df_media_session_manager_command(instance, command, key, active,
+        now_ms);
+}
+
+static int df_media_module_api_receive_control_v3(void *instance,
+    const struct df_gvs_frame *frame, uint32_t source_ipv4, uint64_t now_ms) {
+    return df_media_session_manager_receive_control(instance, frame,
+        source_ipv4, now_ms);
+}
+
+static int df_media_module_api_push_jpeg_v3(void *instance,
+    const uint8_t source[6], const uint8_t destination[6], uint32_t source_ipv4,
+    const uint8_t *jpeg, size_t length, uint16_t width, uint16_t height,
+    uint64_t timestamp_ms) {
+    return df_media_session_manager_push_jpeg(instance, source, destination,
+        source_ipv4, jpeg, length, width, height, timestamp_ms);
+}
+
+static int df_media_module_api_push_video_v3(void *instance,
+    const struct df_gvs_video_packet *packet, uint32_t source_ipv4,
+    uint64_t timestamp_ms) {
+    return df_media_session_manager_push_video(instance, packet, source_ipv4,
+        timestamp_ms);
+}
+
+static int df_media_module_api_tick_v3(void *instance, uint64_t now_ms) {
+    return df_media_session_manager_tick(instance, now_ms);
+}
+
+static bool df_media_session_status_ready(
+    enum df_media_session_state_v3 state) {
+    return state == DF_MEDIA_SESSION_PUBLISHING ||
+        state == DF_MEDIA_SESSION_VIEWING;
+}
+
+static uint64_t df_media_status_mix(uint64_t hash, uint64_t value) {
+    unsigned index;
+
+    for (index = 0U; index < 8U; index++) {
+        hash ^= (uint8_t)(value >> (index * 8U));
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static uint64_t df_media_string_fingerprint(uint64_t fingerprint,
+    const char *value) {
+    const unsigned char *cursor = (const unsigned char *)value;
+
+    while (cursor != NULL && *cursor != '\0') {
+        fingerprint ^= *cursor++;
+        fingerprint *= UINT64_C(1099511628211);
+    }
+    return fingerprint;
+}
+
+static uint64_t df_media_session_status_fingerprint(
+    const struct df_media_session *session) {
+    uint64_t fingerprint = UINT64_C(1469598103934665603);
+
+    fingerprint = df_media_string_fingerprint(fingerprint,
+        session->station_id);
+    fingerprint = df_media_status_mix(fingerprint, session->generation);
+    fingerprint = df_media_status_mix(fingerprint, (uint64_t)session->purpose);
+    fingerprint = df_media_status_mix(fingerprint, (uint64_t)session->state);
+    fingerprint = df_media_status_mix(fingerprint,
+        (uint64_t)session->last_error);
+    fingerprint = df_media_status_mix(fingerprint, session->active ? 1U : 0U);
+    fingerprint = df_media_status_mix(fingerprint,
+        session->viewer_active ? 1U : 0U);
+    fingerprint = df_media_status_mix(fingerprint,
+        df_media_encoder_is_running(&session->encoder) ? 1U : 0U);
+    fingerprint = df_media_status_mix(fingerprint, session->started_ms);
+    fingerprint = df_media_status_mix(fingerprint,
+        session->queue.dropped_oldest);
+    return fingerprint;
+}
+
+static void df_media_status_revision_update(uint64_t fingerprint,
+    uint64_t *stored_fingerprint, uint64_t *revision, bool *initialized) {
+    if (!*initialized) {
+        *stored_fingerprint = fingerprint;
+        if (*revision == 0U) *revision = 1U;
+        *initialized = true;
+    } else if (*stored_fingerprint != fingerprint) {
+        *stored_fingerprint = fingerprint;
+        if (*revision != UINT64_MAX) (*revision)++;
+    }
+}
+
+static int df_media_module_api_status_v3(const void *instance,
+    struct df_media_module_status_v3 *status) {
+    struct df_media_session_manager *manager =
+        (struct df_media_session_manager *)instance;
+    size_t capacity;
+    size_t copied = 0U;
+    size_t required = 0U;
+    size_t active_encoders = 0U;
+    size_t index;
+    uint64_t fingerprint = UINT64_C(1469598103934665603);
+
+    if (manager == NULL || !manager->initialized || status == NULL)
+        return DF_ERR_INVALID;
+    capacity = status->session_count;
+    for (index = 0U; index < manager->capacity; index++) {
+        struct df_media_session *session = &manager->sessions[index];
+        struct df_media_session_status_v3 *entry;
+        uint64_t session_fingerprint;
+
+        if (!session->active) continue;
+        required++;
+        session_fingerprint = df_media_session_status_fingerprint(session);
+        df_media_status_revision_update(session_fingerprint,
+            &session->status_fingerprint, &session->status_revision,
+            &session->status_initialized);
+        fingerprint = df_media_status_mix(fingerprint, session_fingerprint);
+        if (df_media_encoder_is_running(&session->encoder)) active_encoders++;
+        if (status->sessions == NULL || copied >= capacity) continue;
+        entry = &status->sessions[copied++];
+        memset(entry, 0, sizeof(*entry));
+        (void)snprintf(entry->station_id, sizeof(entry->station_id), "%s",
+            session->station_id);
+        (void)snprintf(entry->stream_name, sizeof(entry->stream_name), "%s",
+            session->stream_name);
+        entry->generation = session->generation;
+        entry->purpose = session->purpose;
+        entry->state = session->state;
+        entry->last_error = session->last_error;
+        entry->active = session->active;
+        entry->ready = df_media_session_status_ready(session->state);
+        entry->viewer_active = session->viewer_active;
+        entry->encoder_running =
+            df_media_encoder_is_running(&session->encoder);
+        entry->started_ms = session->started_ms;
+        entry->status_revision = session->status_revision;
+        entry->queue_drops = session->queue.dropped_oldest;
+    }
+    fingerprint = df_media_status_mix(fingerprint, required);
+    fingerprint = df_media_status_mix(fingerprint, active_encoders);
+    fingerprint = df_media_string_fingerprint(fingerprint,
+        manager->preempted_station_id);
+    fingerprint = df_media_status_mix(fingerprint,
+        manager->preempted_generation);
+    fingerprint = df_media_string_fingerprint(fingerprint,
+        manager->failed_station_id);
+    fingerprint = df_media_status_mix(fingerprint, manager->failed_generation);
+    fingerprint = df_media_status_mix(fingerprint, manager->failed_error);
+    df_media_status_revision_update(fingerprint, &manager->status_fingerprint,
+        &manager->status_revision, &manager->status_initialized);
+    status->required_session_count = required;
+    status->session_count = copied;
+    status->configured_capacity = manager->config.max_encoders == 0U ? 1U :
+        manager->config.max_encoders;
+    status->effective_capacity = manager->capacity;
+    status->active_encoders = active_encoders;
+    status->status_revision = manager->status_revision;
+    (void)snprintf(status->preempted_station_id,
+        sizeof(status->preempted_station_id), "%s",
+        manager->preempted_station_id);
+    status->preempted_generation = manager->preempted_generation;
+    (void)snprintf(status->failed_station_id, sizeof(status->failed_station_id),
+        "%s", manager->failed_station_id);
+    status->failed_generation = manager->failed_generation;
+    status->failed_error = manager->failed_error;
+    return DF_OK;
+}
+
+const struct df_media_module_api_v3 df_media_module_api_v3 = {
+    .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
+    .struct_size = sizeof(struct df_media_module_api_v3),
+    .create = df_media_module_api_create_v3,
+    .destroy = df_media_module_api_destroy_v3,
+    .start = df_media_module_api_start_v3,
+    .command = df_media_module_api_command_v3,
+    .receive_control = df_media_module_api_receive_control_v3,
+    .push_jpeg = df_media_module_api_push_jpeg_v3,
+    .push_video = df_media_module_api_push_video_v3,
+    .tick = df_media_module_api_tick_v3,
+    .status = df_media_module_api_status_v3,
+};

@@ -22,6 +22,7 @@
 #define DF_RUNTIME_UBUS_LOG_CAPACITY 128U
 #define DF_RUNTIME_UBUS_LOG_MESSAGE_MAX 160U
 #define DF_RUNTIME_UBUS_MEDIA_PATH_MAX 256U
+#define DF_RUNTIME_MEDIA_ERROR_RUNTIME_MISMATCH 200
 #define DF_RUNTIME_STATION_ADDRESS_TEXT_SIZE 18U
 #define DF_RUNTIME_STATION_IPV4_TEXT_SIZE 16U
 #define DF_RUNTIME_STATION_ROUTE_SOURCE_SIZE 11U
@@ -66,14 +67,14 @@ struct df_runtime_elevator_status {
 struct df_runtime_media_status {
     bool installed;
     bool available;
-    bool encoder_running;
-    enum df_gvs_monitor_state monitor_state;
-    char state[DF_MEDIA_MODULE_STATE_MAX];
-    char failure[DF_MEDIA_MODULE_FAILURE_MAX];
-    uint64_t generation;
+    size_t configured_capacity;
+    size_t effective_capacity;
+    size_t active_encoders;
     uint64_t status_revision;
-    unsigned effective_capacity;
-    unsigned queue_drops;
+    char preempted_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t preempted_generation;
+    const struct df_media_session_status_v3 *sessions;
+    size_t session_count;
     bool rtsp_password_set;
     bool has_credential_text;
 };
@@ -129,6 +130,8 @@ struct df_runtime_ubus {
     struct df_gvs_audio_tx *audio_tx;
     struct df_gvs_video_frame_cache *video;
     struct df_runtime_media_module *media;
+    struct df_media_session_status_v3 *media_session_entries;
+    size_t media_session_capacity;
     char media_credentials_path[DF_RUNTIME_UBUS_MEDIA_PATH_MAX];
     const uint8_t *elevator_identity;
     uint64_t next_elevator_transaction_id;
@@ -197,10 +200,13 @@ int df_runtime_ubus_read_video_status(struct df_runtime_ubus *,
     struct df_gvs_video_status *);
 int df_runtime_ubus_bind_media(struct df_runtime_ubus *,
     struct df_runtime_media_module *, const char *credentials_path);
-int df_runtime_ubus_monitor_start(struct df_runtime_ubus *);
-int df_runtime_ubus_monitor_stop(struct df_runtime_ubus *, uint64_t generation);
+int df_runtime_ubus_monitor_start(struct df_runtime_ubus *,
+    const char *runtime_id, const char *station_id, uint64_t *generation);
+int df_runtime_ubus_monitor_stop(struct df_runtime_ubus *,
+    const char *runtime_id, const char *station_id, uint64_t generation);
 int df_runtime_ubus_monitor_viewer(struct df_runtime_ubus *,
-    uint64_t generation, bool active);
+    const char *runtime_id, const char *station_id, uint64_t generation,
+    bool active);
 int df_runtime_ubus_read_media_status(struct df_runtime_ubus *,
     struct df_runtime_media_status *);
 int df_runtime_ubus_update_media_credentials(struct df_runtime_ubus *,

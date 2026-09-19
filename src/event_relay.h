@@ -9,6 +9,8 @@
 
 struct df_relay_event {
     char line[DF_RELAY_MAX_LINE];
+    char station_id[33];
+    char logical_address[18];
     uint64_t event_id;
     uint64_t generation;
     uint64_t timestamp_ms;

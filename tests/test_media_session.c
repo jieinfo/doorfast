@@ -18,7 +18,7 @@ void test_media_session_binds_commands_to_station_and_generation(void) {
         .station_id = "gate_main",
         .generation = 6U,
     };
-    struct df_media_session session;
+    struct df_media_session session = {0};
 
     df_media_session_reset(&session);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_publish(&session, &station,

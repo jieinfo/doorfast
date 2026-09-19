@@ -48,7 +48,7 @@ struct df_media_config {
     uint8_t fps;
     uint16_t bitrate_kbps;
     enum df_media_profile profile;
-    uint8_t max_encoders;
+    size_t max_encoders;
     uint32_t min_free_kib;
     uint16_t preview_timeout_s;
     uint8_t first_frame_timeout_s;

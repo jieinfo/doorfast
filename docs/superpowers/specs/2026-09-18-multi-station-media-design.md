@@ -505,12 +505,15 @@ The HA suite covers:
 - configurable go2rtc API URL and per-station stream selection;
 - event and polling convergence after relay disconnect.
 
-### 13.3 VM acceptance
+### 13.3 Software and VM acceptance
 
-The ImmortalWrt VM test uses multiple simulated station identities and distinct
-JPEG sources. It verifies concurrent supervised FFmpeg processes, separate
-RTSP stream paths, process cleanup, memory guard behavior, package permissions,
-restart recovery, and redacted logs.
+The ImmortalWrt VM preflight verifies the installed Doorfast service and ABI v3
+media module are available. A host harness linked from the same source set as
+the media APK drives the exported ABI v3 API with multiple simulated station
+identities and distinct JPEG sources. It verifies monitor control lifecycles,
+concurrent supervised FFmpeg processes, separate RTSP stream paths, process
+cleanup, memory guard behavior, and redacted evidence. This is not VM daemon
+media injection and does not establish device-side concurrent monitoring.
 
 ### 13.4 Field acceptance
 

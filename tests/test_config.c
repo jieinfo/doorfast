@@ -93,7 +93,7 @@ void test_media_config_requires_an_active_host_and_valid_public_values(void) {
             .fps = 10,
             .bitrate_kbps = 800,
             .profile = DF_MEDIA_PROFILE_BASELINE,
-            .max_encoders = 0,
+            .max_encoders = 1,
             .min_free_kib = 393216,
             .preview_timeout_s = 120,
             .first_frame_timeout_s = 8,

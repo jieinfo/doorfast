@@ -49,27 +49,46 @@ static int submit_call(const struct df_runtime_call_request *request,
 }
 
 struct media_binding_test {
-    struct df_media_module_status status;
+    struct df_media_module_status_v3 status;
+    struct df_media_session_status_v3 sessions[2];
     enum df_media_module_command command;
+    char command_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     uint64_t command_generation;
     uint64_t command_now_ms;
     bool command_active;
+    char start_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     unsigned start_calls;
     unsigned command_calls;
 };
 
-static int media_start(void *instance, uint64_t now_ms) {
+static int media_start(void *instance, const char *station_id,
+    enum df_media_session_purpose purpose, uint64_t request_generation,
+    uint64_t now_ms) {
     struct media_binding_test *test = instance;
+
+    (void)purpose;
+    (void)request_generation;
+    if (strcmp(station_id, "gate_main") != 0)
+        return DF_MEDIA_ERROR_STATION_NOT_FOUND;
     test->start_calls++;
+    (void)snprintf(test->start_station_id, sizeof(test->start_station_id),
+        "%s", station_id);
     test->command_now_ms = now_ms;
     return DF_OK;
 }
 
 static int media_command(void *instance, enum df_media_module_command command,
-    uint64_t generation, bool active, uint64_t now_ms) {
+    const struct df_media_session_key *key, bool active, uint64_t now_ms) {
     struct media_binding_test *test = instance;
+
+    if (strcmp(key->station_id, "gate_main") != 0)
+        return DF_MEDIA_ERROR_STATION_NOT_FOUND;
+    if (key->generation != 7U)
+        return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     test->command = command;
-    test->command_generation = generation;
+    (void)snprintf(test->command_station_id,
+        sizeof(test->command_station_id), "%s", key->station_id);
+    test->command_generation = key->generation;
     test->command_active = active;
     test->command_now_ms = now_ms;
     test->command_calls++;
@@ -77,15 +96,24 @@ static int media_command(void *instance, enum df_media_module_command command,
 }
 
 static int media_status(const void *instance,
-    struct df_media_module_status *status) {
+    struct df_media_module_status_v3 *status) {
     const struct media_binding_test *test = instance;
+    struct df_media_session_status_v3 *sessions = status->sessions;
+    size_t capacity = status->session_count;
+    size_t copied = test->status.required_session_count < capacity ?
+        test->status.required_session_count : capacity;
+
     *status = test->status;
+    status->sessions = sessions;
+    status->session_count = sessions == NULL ? 0U : copied;
+    if (sessions != NULL && copied > 0U)
+        memcpy(sessions, test->sessions, copied * sizeof(*sessions));
     return DF_OK;
 }
 
-static const struct df_media_module_api_v2 media_api = {
-    .abi_version = DF_MEDIA_MODULE_ABI_VERSION_V2,
-    .struct_size = sizeof(struct df_media_module_api_v2),
+static const struct df_media_module_api_v3 media_api = {
+    .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
+    .struct_size = sizeof(struct df_media_module_api_v3),
     .start = media_start,
     .command = media_command,
     .status = media_status,
@@ -407,18 +435,32 @@ void test_runtime_ubus_media_controls_require_current_generation(void) {
     struct call_binding_test call = {0};
     struct media_binding_test test = {
         .status = {
-            .available = true,
-            .encoder_running = true,
-            .monitor_state = DF_GVS_MONITOR_PUBLISHING,
-            .state = "publishing",
-            .generation = 7,
+            .required_session_count = 1U,
+            .configured_capacity = 2U,
+            .effective_capacity = 2U,
+            .active_encoders = 1U,
             .status_revision = 9,
-            .queue_drops = 2,
+            .preempted_station_id = "gate_side",
+            .preempted_generation = 6U,
         },
+        .sessions = {{
+            .station_id = "gate_main",
+            .stream_name = "doorfast_gate_main",
+            .generation = 7U,
+            .purpose = DF_MEDIA_SESSION_PREVIEW,
+            .state = DF_MEDIA_SESSION_PUBLISHING,
+            .active = true,
+            .ready = true,
+            .encoder_running = true,
+            .queue_drops = 2U,
+        }},
     };
+    struct df_media_session_status_v3 module_snapshot[2];
     struct df_runtime_media_module module = {
         .api = &media_api,
         .instance = &test,
+        .session_snapshot = module_snapshot,
+        .session_snapshot_capacity = 2U,
         .available = true,
     };
     struct df_runtime_media_status status;
@@ -427,61 +469,83 @@ void test_runtime_ubus_media_controls_require_current_generation(void) {
         .rtsp_password = "must-not-write",
     };
     unsigned sync_calls = 0;
+    uint64_t generation = 0U;
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
         &service, provide_runtime_status, &sync_calls, 10));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_stop(&service, 7));
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 7U));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_viewer(&service, 7, true));
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 7U, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(
         &service, &module, "/tmp/doorfast-unused-media-credentials"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_bind_media(
         &service, &module, "/tmp/doorfast-unused-media-credentials"));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_stop(&service, 7));
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 7U));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_viewer(&service, 7, true));
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 7U, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_call(
         &service, provide_call_status, submit_call, &call));
     df_runtime_ubus_set_active_host(&service, true);
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_MEDIA_ERROR_RUNTIME_MISMATCH,
+        df_runtime_ubus_monitor_start(&service, "0000000000000000",
+            "gate_main", &generation));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_STATION_NOT_FOUND,
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "missing", &generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service,
+        service.runtime_id, "gate_main", &generation));
+    TEST_ASSERT_INT_EQ(7, (int)generation);
     TEST_ASSERT_INT_EQ(1, test.start_calls);
     TEST_ASSERT_INT_EQ(10, (int)test.command_now_ms);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_stop(&service, 6));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_stop(&service, 0));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_stop(&service, 8));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 6U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_STATION_NOT_FOUND,
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "missing", 7U));
     TEST_ASSERT_INT_EQ(0, test.command_calls);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_viewer(&service, 0, true));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_viewer(&service, 8, true));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 8U, true));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_update_media_credentials(
             &service, &credentials_update));
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_runtime_ubus_monitor_viewer(&service, 7, true));
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 7U, true));
     TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_VIEWER, test.command);
     TEST_ASSERT_INT_EQ(7, (int)test.command_generation);
     TEST_ASSERT_INT_EQ(1, test.command_active);
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_runtime_ubus_monitor_stop(&service, 7));
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 7U));
     TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_STOP, test.command);
     TEST_ASSERT_INT_EQ(2, test.command_calls);
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_read_media_status(&service, &status));
     TEST_ASSERT_INT_EQ(1, status.available);
-    TEST_ASSERT_INT_EQ(1, status.encoder_running);
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, status.monitor_state);
-    TEST_ASSERT_INT_EQ(7, (int)status.generation);
-    TEST_ASSERT_INT_EQ(2, (int)status.queue_drops);
+    TEST_ASSERT_INT_EQ(2, (int)status.configured_capacity);
+    TEST_ASSERT_INT_EQ(2, (int)status.effective_capacity);
+    TEST_ASSERT_INT_EQ(1, (int)status.active_encoders);
+    TEST_ASSERT_INT_EQ(1, (int)status.session_count);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_side", status.preempted_station_id));
+    TEST_ASSERT_INT_EQ(6, (int)status.preempted_generation);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main",
+        status.sessions[0].station_id));
+    TEST_ASSERT_INT_EQ(7, (int)status.sessions[0].generation);
+    TEST_ASSERT_INT_EQ(2, (int)status.sessions[0].queue_drops);
     TEST_ASSERT_INT_EQ(0, status.has_credential_text);
     df_runtime_ubus_stop(&service);
 }
@@ -490,12 +554,22 @@ void test_runtime_ubus_monitor_start_rejects_active_call(void) {
     struct df_runtime_ubus service = {0};
     struct call_binding_test call = {0};
     struct media_binding_test media = {0};
+    struct df_media_session_status_v3 module_snapshot[1];
     struct df_runtime_media_module module = {
         .api = &media_api,
         .instance = &media,
+        .session_snapshot = module_snapshot,
+        .session_snapshot_capacity = 1U,
         .available = true,
     };
     unsigned sync_calls = 0;
+    uint64_t generation = 0U;
+
+    media.status.required_session_count = 1U;
+    media.sessions[0].active = true;
+    media.sessions[0].generation = 7U;
+    (void)snprintf(media.sessions[0].station_id,
+        sizeof(media.sessions[0].station_id), "%s", "gate_main");
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
         &service, provide_runtime_status, &sync_calls, 10));
@@ -507,14 +581,17 @@ void test_runtime_ubus_monitor_start_rejects_active_call(void) {
 
     call.status.session_state = DF_GVS_RINGING;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     call.status.session_state = DF_GVS_TALKING;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     TEST_ASSERT_INT_EQ(0, (int)media.start_calls);
 
     call.status.session_state = DF_GVS_IDLE;
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service,
+        service.runtime_id, "gate_main", &generation));
     TEST_ASSERT_INT_EQ(1, (int)media.start_calls);
     TEST_ASSERT_INT_EQ(3, (int)call.status_calls);
     df_runtime_ubus_stop(&service);

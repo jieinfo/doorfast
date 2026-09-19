@@ -22,11 +22,29 @@ let credentialFailure = null;
 let applyFailure = null;
 let rpcCalls = [];
 let notifications = [];
+let mediaEnabled = '1';
+let stationRows = [
+    {'.name': 'gate_main', enabled: '1'},
+    {'.name': 'gate_side', enabled: '1'}
+];
 
 class Map {
     constructor(config) {
         this.config = config;
         this.options = [];
+        this.data = {
+            sections: (name, type) => {
+                assert.equal(name, config);
+                return type === 'station' ? stationRows : [];
+            },
+            get: (name, sectionId, option) => {
+                assert.equal(name, config);
+                if (sectionId === 'main' && option === 'media_enabled')
+                    return mediaEnabled;
+                const row = stationRows.find(item => item['.name'] === sectionId);
+                return row === undefined ? null : row[option];
+            }
+        };
     }
 
     section(type, name, configType, title) {
@@ -140,8 +158,8 @@ async function renderPage(values) {
     assert.equal(rendered.page.mediaMap.config, 'doorfast');
     assert.deepEqual(rendered.page.mediaMap.options.map(
         option => option.optionName), [
-        'media_enabled', 'media_station_address', 'media_station_ipv4',
-        'media_go2rtc_host', 'media_go2rtc_port', 'media_stream_name',
+        'media_enabled', 'media_max_encoders', 'media_incoming_call_policy',
+        'media_go2rtc_host', 'media_go2rtc_port',
         'media_rtsp_username', 'media_encoder', 'media_resolution',
         'media_fps', 'media_bitrate_kbps', 'media_profile',
         'media_min_free_kib', 'media_preview_timeout',
@@ -149,10 +167,22 @@ async function renderPage(values) {
         '_media_clear_rtsp_password'
     ]);
     assert.equal(byName('media_enabled').optionType, Flag);
-    assert.equal(byName('media_station_address').validate(
-        'main', '32:02:01:00:02:00'), true);
-    assert.match(byName('media_station_address').validate(
-        'main', '32:02:01:00:00:00'), /无效/);
+    assert.equal(byName('media_max_encoders').validate('main', '2'), true);
+    assert.match(byName('media_max_encoders').validate('main', '0'), /大于等于 1/);
+    assert.match(byName('media_max_encoders').validate('main', '3'),
+        /已启用门口机数量 2/);
+    stationRows = [];
+    assert.match(byName('media_max_encoders').validate('main', '1'),
+        /已启用门口机数量 0/);
+    mediaEnabled = '0';
+    assert.equal(byName('media_max_encoders').validate('main', '64'), true);
+    mediaEnabled = '1';
+    stationRows = [
+        {'.name': 'gate_main', enabled: '1'},
+        {'.name': 'gate_side', enabled: '1'}
+    ];
+    assert.deepEqual(byName('media_incoming_call_policy').values.map(
+        value => value[0]), ['preempt_oldest_preview', 'preserve_previews']);
     assert.equal(byName('media_go2rtc_host').validate('main', 'ha.local'), true);
     assert.match(byName('media_go2rtc_host').validate(
         'main', 'https://ha.local'), /协议/);

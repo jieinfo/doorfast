@@ -30,23 +30,26 @@ function integerInRange(minimum, maximum, label) {
     };
 }
 
-function validateStation(sectionId, value) {
-    var match = /^([0-9a-fA-F]{2}):([0-9a-fA-F]{2}):([0-9a-fA-F]{2}):00:([0-9a-fA-F]{2}):00$/.exec(value);
-    var building;
-    var unit;
-    var station;
+function encoderCapacity(map, label) {
+    return function(sectionId, value) {
+        var parsed;
+        var enabledStations;
 
-    if (match === null || Number.parseInt(match[1], 16) !== 0x32)
-        return '门口机逻辑地址必须是 32:bb:uu:00:gg:00 格式。';
-    building = Number.parseInt(match[2], 16);
-    unit = Number.parseInt(match[3], 16);
-    station = Number.parseInt(match[4], 16);
-    if (building === 0 || unit === 0 || station === 0 ||
-        (building >> 4) > 9 || (building & 0x0f) > 9 ||
-        (unit >> 4) > 9 || (unit & 0x0f) > 9 ||
-        (station >> 4) > 9 || (station & 0x0f) > 9)
-        return '门口机逻辑地址中的楼栋、单元或门口机号无效。';
-    return true;
+        if (!/^[0-9]+$/.test(value))
+            return label + '必须是整数。';
+        parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 1)
+            return label + '必须大于等于 1。';
+        enabledStations = map.data.sections(map.config, 'station').filter(
+            function(station) {
+                return map.data.get(map.config, station['.name'], 'enabled') !== '0';
+            }).length;
+        if (parsed > enabledStations &&
+            (enabledStations > 0 ||
+             map.data.get(map.config, 'main', 'media_enabled') === '1'))
+            return label + '不能超过已启用门口机数量 ' + enabledStations + '。';
+        return true;
+    };
 }
 
 function validateHost(sectionId, value) {
@@ -59,12 +62,6 @@ function validateHost(sectionId, value) {
 function validateIdentifier(sectionId, value) {
     if (!/^[A-Za-z0-9_.-]{1,32}$/.test(value))
         return '只能包含 ASCII 字母、数字、下划线、连字符或句点，且长度不超过 32。';
-    return true;
-}
-
-function validateStreamName(sectionId, value) {
-    if (!/^[A-Za-z0-9_-]{1,64}$/.test(value))
-        return '流名称只能包含 ASCII 字母、数字、下划线或连字符，且长度不超过 64。';
     return true;
 }
 
@@ -108,15 +105,15 @@ function buildMediaMap(page) {
     option.default = option.disabled;
     option.rmempty = false;
 
-    option = addMediaOption(section, form.Value, 'media_station_address', '门口机逻辑地址',
-        '从抓包或物业设备表填写精确的六字节地址，不可由室内机 GVS 逻辑身份推导。');
-    option.placeholder = '32:02:01:00:02:00';
-    option.validate = validateStation;
+    option = addMediaOption(section, form.Value, 'media_max_encoders', '最大并发编码器数',
+        '同时发布的门口机预览数量，上限由已启用门口机数量决定。');
+    option.validate = encoderCapacity(map, '最大并发编码器数');
+    option.datatype = 'uinteger';
 
-    option = addMediaOption(section, form.Value, 'media_station_ipv4', '门口机 IPv4 地址（可选）',
-        '留空时只使用新鲜的 07/86 发现路由；填写后作为明确的单播回退地址。');
-    option.datatype = 'ip4addr';
-    option.rmempty = true;
+    option = addMediaOption(section, form.ListValue, 'media_incoming_call_policy', '来电容量策略',
+        '容量满时可抢占最早预览，或保留已有预览。');
+    option.value('preempt_oldest_preview', '抢占最早预览');
+    option.value('preserve_previews', '保留已有预览');
 
     option = addMediaOption(section, form.Value, 'media_go2rtc_host', 'go2rtc 主机地址',
         '填写 Home Assistant 上 go2rtc 的主机名或 IPv4 地址，不填写协议、端口或路径。');
@@ -126,10 +123,6 @@ function buildMediaMap(page) {
         'Doorfast 仅连接此主机的 TCP 端口，默认 8554。');
     option.validate = integerInRange(1, 65535, 'RTSP 端口');
     option.datatype = 'port';
-
-    option = addMediaOption(section, form.Value, 'media_stream_name', 'go2rtc 流名称',
-        '必须与 go2rtc 中预先创建的空流一致。');
-    option.validate = validateStreamName;
 
     option = addMediaOption(section, form.Value, 'media_rtsp_username', 'RTSP 用户名',
         '与 go2rtc RTSP 认证配置一致。密码单独保存，不写入 UCI。');

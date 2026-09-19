@@ -13,6 +13,18 @@ static void test_parse(void) {
     TEST_ASSERT_INT_EQ(0, df_relay_parse_event(line, strlen(line), &event));
     TEST_ASSERT_INT_EQ(7, (int)event.event_id);
     TEST_ASSERT_INT_EQ(3, (int)event.generation);
+    TEST_ASSERT_INT_EQ(0, event.station_id[0]);
+    line = "{\"schema_version\":1,\"event_id\":8,"
+        "\"event\":\"media_pipeline_failed\","
+        "\"station_id\":\"gate_side\",\"generation\":4,\"timestamp_ms\":43}\n";
+    TEST_ASSERT_INT_EQ(0, df_relay_parse_event(line, strlen(line), &event));
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_side", event.station_id));
+    line = "{\"schema_version\":1,\"event_id\":9,\"event\":\"incoming_call\","
+        "\"logical_address\":\"32:02:01:00:09:00\",\"generation\":5,"
+        "\"timestamp_ms\":44}\n";
+    TEST_ASSERT_INT_EQ(0, df_relay_parse_event(line, strlen(line), &event));
+    TEST_ASSERT_INT_EQ(0, strcmp("32:02:01:00:09:00",
+        event.logical_address));
     TEST_ASSERT_INT_EQ(-1, df_relay_parse_event("{\"schema_version\":2}", 20, &event));
 }
 

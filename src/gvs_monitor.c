@@ -57,21 +57,20 @@ int df_gvs_monitor_set_first_frame_timeout(struct df_gvs_monitor *monitor,
     return DF_OK;
 }
 
-int df_gvs_monitor_start(struct df_gvs_monitor *monitor,
+int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *monitor,
     const uint8_t local[6], const uint8_t station[6], uint32_t station_ipv4,
-    uint64_t now_ms) {
-    uint64_t generation;
+    uint64_t generation, uint64_t now_ms) {
     uint64_t first_frame_timeout_ms;
 
     if (monitor == NULL || !df_gvs_monitor_nonzero(local) ||
         df_gvs_station_validate(station) != DF_OK || station_ipv4 == 0U ||
+        generation == 0U ||
         (monitor->state != DF_GVS_MONITOR_IDLE &&
          monitor->state != DF_GVS_MONITOR_FAILED) ||
         (monitor->generation != 0U && now_ms < monitor->last_now_ms) ||
         monitor->generation == UINT64_MAX) {
         return DF_ERR_INVALID;
     }
-    generation = monitor->generation + 1U;
     first_frame_timeout_ms = monitor->first_frame_timeout_ms == 0U ?
         DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS :
         monitor->first_frame_timeout_ms;
@@ -84,6 +83,56 @@ int df_gvs_monitor_start(struct df_gvs_monitor *monitor,
     monitor->generation = generation;
     monitor->last_now_ms = now_ms;
     monitor->next_action_ms = now_ms;
+    return DF_OK;
+}
+
+int df_gvs_monitor_start(struct df_gvs_monitor *monitor,
+    const uint8_t local[6], const uint8_t station[6], uint32_t station_ipv4,
+    uint64_t now_ms) {
+    uint64_t generation;
+
+    if (monitor == NULL || monitor->generation == UINT64_MAX) return DF_ERR_INVALID;
+    generation = monitor->generation + 1U;
+    return df_gvs_monitor_start_with_generation(monitor, local, station,
+        station_ipv4, generation, now_ms);
+}
+
+int df_gvs_monitor_cancel(struct df_gvs_monitor *monitor, uint64_t now_ms) {
+    if (monitor == NULL || now_ms < monitor->last_now_ms) return DF_ERR_INVALID;
+    monitor->last_now_ms = now_ms;
+    monitor->state = DF_GVS_MONITOR_IDLE;
+    monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+    monitor->next_action_ms = 0U;
+    monitor->first_frame_deadline_ms = 0U;
+    monitor->request_attempts = 0U;
+    monitor->media_ready = false;
+    monitor->stop_sent = false;
+    return DF_OK;
+}
+
+int df_gvs_monitor_bind_call(struct df_gvs_monitor *monitor,
+    const uint8_t local[6], const uint8_t station[6], uint32_t station_ipv4,
+    uint64_t generation, uint64_t now_ms) {
+    uint64_t first_frame_timeout_ms;
+
+    if (monitor == NULL || !df_gvs_monitor_nonzero(local) ||
+        df_gvs_station_validate(station) != DF_OK || station_ipv4 == 0U ||
+        generation == 0U || now_ms < monitor->last_now_ms)
+        return DF_ERR_INVALID;
+    first_frame_timeout_ms = monitor->first_frame_timeout_ms == 0U ?
+        DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS :
+        monitor->first_frame_timeout_ms;
+    if (now_ms > UINT64_MAX - first_frame_timeout_ms)
+        return DF_ERR_INVALID;
+    memset(monitor, 0, sizeof(*monitor));
+    monitor->first_frame_timeout_ms = first_frame_timeout_ms;
+    monitor->state = DF_GVS_MONITOR_AWAITING_VIDEO;
+    memcpy(monitor->local, local, sizeof(monitor->local));
+    memcpy(monitor->station, station, sizeof(monitor->station));
+    monitor->station_ipv4 = station_ipv4;
+    monitor->generation = generation;
+    monitor->last_now_ms = now_ms;
+    monitor->first_frame_deadline_ms = now_ms + first_frame_timeout_ms;
     return DF_OK;
 }
 
@@ -122,6 +171,7 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
         return DF_OK;
     }
     if (monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO &&
+        monitor->first_frame_deadline_ms != 0U &&
         !monitor->media_ready && now_ms >= monitor->first_frame_deadline_ms) {
         df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT);
         return DF_OK;

@@ -61,8 +61,8 @@ flowchart LR
 
 | APK | 当前版本 | 内容 | 架构 |
 |---|---|---|---|
-| `doorfast` | `0.1.0-r53` | 守护进程、记录器、事件 relay、PCM HTTP/CLI、CGI 桥、init/UCI、站点清单工具 | x86_64 |
-| `doorfast-media` | `0.1.0-r3` | 可选的 ABI v2 `/usr/lib/doorfast/media-v2.so`，由主守护进程 `dlopen()`；不安装独立服务 | x86_64 |
+| `doorfast` | `0.1.0-r54` | 守护进程、记录器、事件 relay、PCM HTTP/CLI、CGI 桥、init/UCI、站点清单工具 | x86_64 |
+| `doorfast-media` | `0.1.0-r54` | 可选的 ABI v3 `/usr/lib/doorfast/media-v3.so`，由主守护进程 `dlopen()`；不安装独立服务 | x86_64 |
 | `luci-app-doorfast` | `0.1.0-r17` | 状态、媒体、站点、自动化、部署、HA relay 和日志页面 | all |
 
 `doorfast-media` 中的 `.so` 是本项目为 ImmortalWrt 编译的原生共享模块，不是 Android APK 内提取的二进制。
@@ -330,13 +330,22 @@ Doorfast 需要访问 Home Assistant/go2rtc 的 `8554/TCP` 来发布 RTSP；HA W
 
 分辨率支持源尺寸、480x640、360x480 和 240x320；帧率支持 5、8、10、12、15 FPS；目标码率允许 256–2000 Kbps；Profile 支持 Baseline 和 Main。凭据保存在 `/etc/doorfast/media-credentials`，页面不会回显已保存值，修改后需重启 Doorfast 才进入运行模块。
 
-当前 ABI v2 只允许 1 条主动预览来源编码流，多名观看者由 go2rtc 共享该流。下列 LuCI/UCI 选项已传入媒体模块并实际影响运行行为：
+当前 ABI v3 为每个启用的门口机维护独立媒体会话，并允许在 `media_max_encoders` 配置上限内并发发布来源流；同一门口机的多名观看者仍由 go2rtc 共享一条来源流。下列 LuCI/UCI 选项已传入媒体模块并实际影响运行行为：
 
-- `media_min_free_kib`：发送预览请求前读取 `/proc/meminfo` 的 `MemAvailable`，不足时以 `insufficient_memory` 拒绝启动。
+- `media_min_free_kib`：发送预览请求前读取 `/proc/meminfo` 的 `MemAvailable`，不足时以 `resource_exhausted` 拒绝启动。
 - `media_preview_timeout`：单次预览达到总时限后进入停止状态并发送协议停止请求。
 - `media_first_frame_timeout`：门口机确认预览后等待首个 JPEG 帧的超时。
 
-旧配置中的 `media_max_encoders`、`media_overload_policy`、`media_diagnostics` 和 `media_publish_retries` 仍由解析器接受以兼容升级，但不再出现在默认 UCI 或 LuCI 中，也不改变运行行为。FFmpeg 子进程异常退出会让当前预览失败并回收资源，不会宣称已经执行发布重试。请求间隔 1000 ms、最多 3 次请求和停止确认超时 1000 ms 仍为固定协议常量。多来源并发需要未来的多会话 ABI，当前不能描述为可配置多路编码。
+`media_max_encoders` 控制同时运行的来源编码器上限，`media_incoming_call_policy` 可选择在容量已满时抢占最早的主动预览或保留现有预览并返回 `capacity_busy`。FFmpeg 子进程异常退出只会使对应会话失败并回收其资源。请求间隔 1000 ms、最多 3 次请求和停止确认超时 1000 ms 仍为固定协议常量。
+
+仓库的软件验收先通过 SSH 检查 VM 中 Doorfast 与媒体模块可用，再在 host 上编译与 `doorfast-media` APK 相同的 ABI v3 源码集合。host harness 只通过导出的 `df_media_module_api_v3` 执行 `start/tick/receive_control/push_jpeg/command`：它核对每条 preview 发出的 `03/04`，注入测试用匹配 `03/84`，启动两个独立编码器，并确认 stop 与 preview 抢占均发出 `03/02`。RTSP sink 验证 `doorfast_gate_main` 与 `doorfast_gate_side` 的并发 producer 峰值精确为 2；fake ffmpeg 只记录每个 encoder pipe 的字节数和 SHA-256，用不同 JPEG 标记验证数据没有串流，不保存原始 JPEG：
+
+```sh
+python3 -B tests/run_doorfast_vm_multi_media.py \
+  tests/fixtures/fake-vm-preflight-ssh.sh
+```
+
+这只确认 host 上真实 ABI v3/session manager 在合成控制回复和 JPEG 输入下的并发会话、容量策略、encoder pipe 隔离、进程回收和报告脱敏；它没有向 VM daemon 注入媒体流，也不确认 VM 或实体门口机接受这些控制包。实体门口机的并发验收仍为 pending：必须取得双向现场 PCAP，证明两个门口机同时成功完成独立的 `03/04` 会话，并从不同来源产生 UDP/8303 视频流，才能将设备侧并发标记为已确认。
 
 ## Home Assistant 集成
 
@@ -574,14 +583,15 @@ python3 tests/run_doorfast_vm_stations.py /absolute/path/to/vm/ssh.sh
 - `04/89` 协议完成后门锁实际动作。
 - `08/82`/`08/83` 的完整现场样本，以及电梯实际响应。
 - 门口机主动预览 `03/04`/`03/84` 与持续视频取流。
+- 两个门口机同时成功完成各自的 `03/04` 会话，并由不同来源发送独立 UDP/8303 视频流；此项必须用双向现场 PCAP 验证，当前仍为 pending。
 - 真实音频播放、麦克风上行、回声、延迟和断线恢复。
 - go2rtc/WebRTC 在目标 Home Assistant 上的长时间观看和多次启停。
 
 ### 媒体资源策略
 
-- 当前 ABI 只有一个 station、monitor 和 encoder，因此只支持 1 条来源流，`effective_capacity` 固定为模块可用时的 1。多个 HA 观看者由 go2rtc 共享这条编码流，不需要为每名观看者各启动一个编码器。
-- 最低可用内存、预览总时限和首帧超时已经进入 ABI v2 并由 LuCI 配置。旧的最大编码器数、过载策略、诊断开关和发布重试次数仅为解析兼容，不影响运行。
-- `media_max_encoders > 1` 只有在未来支持多个门口机或多个并行媒体会话时才有实际含义；这需要把单 station/monitor/encoder 模型改成多会话 ABI，不能仅靠传入一个数值实现。
+- ABI v3 按站点隔离 monitor、JPEG 队列和 encoder，`effective_capacity` 取已配置编码器上限与启用站点数的较小值。多个 HA 观看者仍由 go2rtc 共享同一站点来源流，不会额外占用编码器槽位。
+- 最低可用内存、预览总时限、首帧超时、最大编码器数和来电容量策略已经进入 ABI v3 并由 LuCI 配置；诊断开关和发布重试次数仅为旧配置解析兼容，不改变运行。
+- host ABI v3 harness 已通过真实 monitor 状态机验证 `03/04`、合成 `03/84`、`03/02`、两条 encoder pipe 的独立摘要、并发峰值 2、独立停止、满容量保留或抢占以及进程回收；VM 仅接受安装状态预检。它不证明 VM daemon 或实体门口机执行了并发监控。
 - 编码器和 go2rtc 端到端失败处理已测试，但未在真实门口机视频流上调优。
 
 ### 接口边界
@@ -598,10 +608,10 @@ python3 tests/run_doorfast_vm_stations.py /absolute/path/to/vm/ssh.sh
 
 本轮 P0 在线发送、P1 控制可靠性和 P2 媒体配置一致性已经完成代码接线与自动化测试。后续按证据缺口推进：
 
-1. 在 ImmortalWrt VM 安装同一次 CI 生成的 `doorfast r53`、`doorfast-media r3` 和 `luci-app-doorfast r17`，验证升级、ABI v2 加载、ubus 参数拒绝、零包 `sent=0 packets=0` 与真实 UDP 发包。
+1. 在 ImmortalWrt VM 安装同一次 CI 生成的 `doorfast r54`、`doorfast-media r54` 和 `luci-app-doorfast r17`，验证升级、ABI v3 加载、ubus 参数拒绝、零包 `sent=0 packets=0` 与真实 UDP 发包。
 2. 现场抓取冷启动和至少两个同步周期的双向 PCAP，确认 `07/01 → 07/81`、`91/01`/`91/02` 与分片 `91/03` 被物业系统接受，并核对源 IP、目标 IP、端口和厂商头。
 3. 使用新版 `doorfastforha` 依次验证 Doorfast 重启、runtime 切换、来电、接听、挂断、开锁和向上/向下召梯，分别记录协议提交、协议确认和实体结果。
-4. 验证主动发现的候选与人工采用、多门口机媒体配置，再继续媒体 ABI v3 的可配置并发设计；当前 ABI v2 仍只有一条来源编码流。
+4. 软件侧多门口机会话和可配置并发已完成；现场继续验证两个门口机各自成功完成 `03/04`，并通过双向 PCAP 确认 UDP/8303 来自两个独立来源。
 5. 验证主动预览、通话视频和双向音频，再根据实体流量调整内存阈值、超时、码率、缓冲和回声处理；确认可靠的异步发布重启策略前不重新暴露发布重试选项。
 
 ## 后续现场回归和验收

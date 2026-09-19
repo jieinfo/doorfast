@@ -334,6 +334,7 @@ static int df_media_encoder_flush(struct df_media_encoder_process *process)
         df_media_encoder_error(process, "encoder input write failed");
         return DF_ERR_IO;
     }
+    process->frames_written++;
     df_media_encoder_pending_clear(process);
     return DF_OK;
 }

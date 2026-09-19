@@ -56,12 +56,17 @@ int df_relay_parse_event(const char *line, size_t length,
     if (field_u64(event->line, "schema_version", &schema) || schema != 1 ||
         field_string(event->line, "event", name, sizeof(name)) ||
         (strcmp(name, "incoming_call") && strcmp(name, "call_established") &&
-         strcmp(name, "hangup") && strcmp(name, "timeout") && strcmp(name, "preempted")) ||
+         strcmp(name, "hangup") && strcmp(name, "timeout") &&
+         strcmp(name, "preempted") && strcmp(name, "media_pipeline_failed")) ||
         field_u64(event->line, "event_id", &event->event_id) || event->event_id == 0 ||
         field_u64(event->line, "generation", &event->generation) || event->generation == 0 ||
         field_u64(event->line, "timestamp_ms", &event->timestamp_ms) || event->timestamp_ms == 0) {
         return -1;
     }
+    (void)field_string(event->line, "station_id", event->station_id,
+        sizeof(event->station_id));
+    (void)field_string(event->line, "logical_address", event->logical_address,
+        sizeof(event->logical_address));
     return 0;
 }
 

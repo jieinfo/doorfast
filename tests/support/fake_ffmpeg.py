@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+from pathlib import Path
 import signal
 import socket
 import sys
@@ -40,6 +43,8 @@ def main(argv=None) -> int:
     if parsed.hostname is None or parsed.port is None:
         return 2
     stop = False
+    payload_hash = hashlib.sha256()
+    payload_bytes = 0
 
     def handle_signal(_signum, _frame):
         nonlocal stop
@@ -56,15 +61,30 @@ def main(argv=None) -> int:
                "a=rtpmap:96 H264/90000\r\n").encode("ascii")
         _request(sock, "ANNOUNCE", uri, 1, sdp)
         _request(sock, "RECORD", uri, 2)
+        evidence_dir = os.environ.get("DF_FAKE_FFMPEG_EVIDENCE_DIR")
+        if evidence_dir:
+            stream = parsed.path.strip("/").replace("/", "_")
+            (Path(evidence_dir) / f"{stream}.ready").touch()
         while not stop:
             data = os.read(sys.stdin.fileno(), 4096)
             if not data:
                 break
+            payload_hash.update(data)
+            payload_bytes += len(data)
         _request(sock, "TEARDOWN", uri, 3)
     except (ConnectionError, OSError, TimeoutError):
         return 3
     finally:
         sock.close()
+    evidence_dir = os.environ.get("DF_FAKE_FFMPEG_EVIDENCE_DIR")
+    if evidence_dir:
+        stream = parsed.path.strip("/").replace("/", "_")
+        evidence = Path(evidence_dir) / f"{stream}.json"
+        evidence.write_text(json.dumps({
+            "bytes": payload_bytes,
+            "sha256": payload_hash.hexdigest(),
+        }, sort_keys=True) + "\n")
+        (Path(evidence_dir) / f"{stream}.ready").unlink(missing_ok=True)
     return 0
 
 

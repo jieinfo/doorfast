@@ -60,10 +60,10 @@ fixtures.
 - `tests/test_media_session.c`: per-session lifecycle and frame isolation.
 - `tests/test_media_session_manager.c`: capacity, reuse, preemption, memory,
   and generation tests.
-- `tests/support/multi_station_media_fixture.py`: distinct JPEG producers and
-  RTSP announce capture for several stations.
-- `tests/run_doorfast_vm_multi_media.py`: VM acceptance for simultaneous
-  encoders and stream cleanup.
+- `tests/support/media_v3_acceptance.c`: host harness linked to the APK media
+  source set and driven only through the exported ABI v3 API.
+- `tests/run_doorfast_vm_multi_media.py`: VM install preflight plus host ABI v3
+  acceptance for simultaneous encoders and stream cleanup.
 
 **Modify:**
 
@@ -491,7 +491,7 @@ git commit -m "feat: expose station scoped media sessions"
 
 **Files:**
 
-- Create: `tests/support/multi_station_media_fixture.py`
+- Create: `tests/support/media_v3_acceptance.c`
 - Create: `tests/run_doorfast_vm_multi_media.py`
 - Modify: `package/doorfast/Makefile`
 - Modify: `package/doorfast-media/Makefile`
@@ -501,9 +501,14 @@ git commit -m "feat: expose station scoped media sessions"
 
 - [ ] **Step 1: Write a failing two-stream VM acceptance**
 
-The fixture must start two monitor sessions, feed different JPEG markers,
-capture two RTSP ANNOUNCE paths, stop one session, and prove the other stays
-active. Require a result object with:
+The compiled host fixture must use exported ABI v3 `start`, `tick`,
+`receive_control`, `push_jpeg`, and `command` calls. It records each preview's
+`03/04`, injects matching synthetic `03/84` replies, requires stop/preemption to
+emit `03/02`, feeds different JPEG markers, captures two RTSP ANNOUNCE paths,
+stops one session, and proves the other stays active. The two scenarios must be
+fully separated so the observed RTSP producer peak is exactly two. The VM
+portion is an installed-module preflight only; do not describe the host fixture
+as VM daemon injection. Require a result object with:
 
 ```json
 {"configured_capacity":2,"peak_active_encoders":2,"streams":["doorfast_gate_main","doorfast_gate_side"],"isolated_stop":true}
@@ -524,9 +529,11 @@ Expected: failure until the runtime and fixture support two sessions.
 
 Install ABI v3 module sources in `doorfast-media`, bump core/media package
 revisions together, and make upgrade restart the core only after the new module
-is in place. The runner records process IDs, streams, memory floor, per-session
-state, cleanup, and redacted logs. Add a call-at-capacity fixture for both
-priority modes.
+is in place. The runner records ABI status, control counts, RTSP metadata,
+streams, memory floor, per-session state, and cleanup. The fake encoder records
+only per-path byte counts and SHA-256 digests so the test can prove pipe
+isolation without retaining media payloads or credentials. Add a
+call-at-capacity fixture for both priority modes.
 
 - [ ] **Step 4: Run full main-project verification**
 

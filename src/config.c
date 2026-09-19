@@ -152,8 +152,9 @@ static bool df_media_config_is_valid(const struct df_config *config) {
 
     if (config == NULL || !config->media.enabled) return true;
     media = &config->media;
-    if (media->station_address == NULL ||
-        df_gvs_station_parse(media->station_address, (uint8_t[6]){0}) != DF_OK ||
+    if ((media->station_address != NULL && media->station_address[0] != '\0' &&
+         df_gvs_station_parse(media->station_address,
+             (uint8_t[6]){0}) != DF_OK) ||
         (media->station_ipv4 != NULL && media->station_ipv4[0] != '\0' &&
          (!df_ipv4_is_unicast(media->station_ipv4) ||
           df_ipv4_is_directed_broadcast(media->station_ipv4,
@@ -169,7 +170,7 @@ static bool df_media_config_is_valid(const struct df_config *config) {
         media->resolution > DF_MEDIA_RESOLUTION_240X320 ||
         media->profile < DF_MEDIA_PROFILE_BASELINE ||
         media->profile > DF_MEDIA_PROFILE_MAIN ||
-        media->max_encoders > 4U || media->bitrate_kbps < 256U ||
+        media->max_encoders == 0U || media->bitrate_kbps < 256U ||
         media->bitrate_kbps > 2000U || media->min_free_kib < 131072U ||
         media->min_free_kib > 1048576U || media->preview_timeout_s < 15U ||
         media->preview_timeout_s > 600U || media->first_frame_timeout_s < 2U ||
