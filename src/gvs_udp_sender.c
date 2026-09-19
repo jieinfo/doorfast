@@ -73,12 +73,17 @@ static int df_gvs_udp_resolve_destination(
 int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
     uint16_t port, df_gvs_header_provider_fn provider, void *context) {
     struct sockaddr_in local;
+    int broadcast = 1;
 
     if (sender == NULL || host == NULL || provider == NULL || port == 0U)
         return DF_ERR_INVALID;
     memset(sender, 0, sizeof(*sender));
     sender->fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sender->fd < 0) return DF_ERR_IO;
+    if (setsockopt(sender->fd, SOL_SOCKET, SO_BROADCAST, &broadcast,
+            sizeof(broadcast)) != 0) {
+        close(sender->fd); sender->fd = -1; return DF_ERR_IO;
+    }
     memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
     local.sin_port = htons(0);
@@ -324,6 +329,45 @@ int df_gvs_udp_sender_emit_control(struct df_gvs_udp_sender *sender,
     }
     target = sender->peer;
     target.sin_addr.s_addr = destination_ipv4;
+    written = sendto(sender->fd, frame, frame_length, 0,
+        (const struct sockaddr *)&target, sizeof(target));
+    if (written != (ssize_t)frame_length) {
+        if (sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_IO;
+    }
+    if (sender->sent < UINT_MAX) sender->sent++;
+    return DF_OK;
+}
+
+int df_gvs_udp_sender_emit_station_scan(struct df_gvs_udp_sender *sender,
+    const struct df_gvs_station_scan_action *action) {
+    static const uint8_t payload[DF_GVS_STATION_SCAN_PAYLOAD_SIZE] = {
+        0x02U, 0x00U, 0x00U, 0x01U};
+    uint8_t frame[DF_GVS_CONTROL_HEADER_SIZE +
+        DF_GVS_STATION_SCAN_PAYLOAD_SIZE];
+    struct sockaddr_in target;
+    size_t frame_length = 0U;
+    ssize_t written;
+
+    if (sender == NULL || sender->fd < 0 || action == NULL ||
+        action->family != 0x07U || action->opcode != 0x06U ||
+        action->payload_length != sizeof(payload) ||
+        memcmp(action->payload, payload, sizeof(payload)) != 0 ||
+        action->destination[0] != 0x32U ||
+        action->destination[1] != action->source[1] ||
+        action->destination[2] != action->source[2] ||
+        memcmp(action->destination + 3U,
+            (const uint8_t[]){0xffU, 0xffU, 0xffU}, 3U) != 0 ||
+        df_gvs_control_serialize(frame, sizeof(frame), &frame_length,
+            action->destination, action->source, action->family,
+            action->opcode, action->payload, (uint16_t)action->payload_length,
+            sender->provide_fields, sender->fields_context) != DF_OK) {
+        if (sender != NULL && sender->failed < UINT_MAX) sender->failed++;
+        return DF_ERR_INVALID;
+    }
+    target = sender->peer;
+    target.sin_port = htons(8300U);
+    target.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     written = sendto(sender->fd, frame, frame_length, 0,
         (const struct sockaddr *)&target, sizeof(target));
     if (written != (ssize_t)frame_length) {

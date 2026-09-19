@@ -8,6 +8,7 @@
 #include "gvs_incoming_reply.h"
 #include "gvs_presence.h"
 #include "gvs_reply_queue.h"
+#include "gvs_station_discovery.h"
 #include "gvs_sync.h"
 
 #define DF_GVS_OBSERVED_ROUTE_CAPACITY 8U
@@ -76,6 +77,8 @@ int df_gvs_udp_sender_emit_control(struct df_gvs_udp_sender *,
     const uint8_t destination[6], uint32_t destination_ipv4,
     const uint8_t source[6], uint8_t family, uint8_t opcode,
     const uint8_t *payload, size_t payload_length);
+int df_gvs_udp_sender_emit_station_scan(struct df_gvs_udp_sender *,
+    const struct df_gvs_station_scan_action *);
 
 int df_gvs_udp_access_emit(const struct df_gvs_access_request *, void *);
 int df_gvs_udp_elevator_emit(const struct df_gvs_elevator_request *, void *);

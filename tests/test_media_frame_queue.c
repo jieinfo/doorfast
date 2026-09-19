@@ -70,3 +70,40 @@ void test_media_queue_rejects_stale_generation_and_releases_allocations(void)
     TEST_ASSERT_INT_EQ(0, (int)queue.count);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_frame_queue_pop(&queue, &frame));
 }
+
+void test_media_queue_resets_only_its_generation_state(void)
+{
+    struct df_media_frame_queue first;
+    struct df_media_frame_queue second;
+    struct df_media_frame frame;
+    const uint8_t old_frame[] = {0xff, 0xd8, 0x01, 0xff, 0xd9};
+    const uint8_t other_frame[] = {0xff, 0xd8, 0x02, 0xff, 0xd9};
+    const uint8_t new_frame[] = {0xff, 0xd8, 0x03, 0xff, 0xd9};
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_init(
+        &first, 10U, sizeof(old_frame)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_init(
+        &second, 20U, sizeof(other_frame)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_push(
+        &first, old_frame, sizeof(old_frame), 10U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_push(
+        &second, other_frame, sizeof(other_frame), 20U, 101U));
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_reset(&first, 11U));
+    TEST_ASSERT_INT_EQ(0, (int)first.count);
+    TEST_ASSERT_INT_EQ(11, (int)first.generation);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_frame_queue_push(
+        &first, old_frame, sizeof(old_frame), 10U, 102U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_push(
+        &first, new_frame, sizeof(new_frame), 11U, 103U));
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_pop(&second, &frame));
+    TEST_ASSERT_INT_EQ(2, frame.data[2]);
+    TEST_ASSERT_INT_EQ(20, (int)frame.generation);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_pop(&first, &frame));
+    TEST_ASSERT_INT_EQ(3, frame.data[2]);
+    TEST_ASSERT_INT_EQ(11, (int)frame.generation);
+
+    df_media_frame_queue_destroy(&first);
+    df_media_frame_queue_destroy(&second);
+}

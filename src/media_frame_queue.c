@@ -26,6 +26,26 @@ int df_media_frame_queue_init(struct df_media_frame_queue *queue, uint64_t gener
     return DF_OK;
 }
 
+int df_media_frame_queue_reset(struct df_media_frame_queue *queue,
+                               uint64_t generation)
+{
+    size_t index;
+
+    if (queue == NULL || generation == 0U || queue->capacity == 0U ||
+        queue->maximum_frame_length == 0U) return DF_ERR_INVALID;
+    for (index = 0U; index < queue->capacity; index++) {
+        queue->entries[index].length = 0U;
+        queue->entries[index].generation = 0U;
+        queue->entries[index].timestamp_ms = 0U;
+    }
+    queue->read = 0U;
+    queue->write = 0U;
+    queue->count = 0U;
+    queue->generation = generation;
+    queue->dropped_oldest = 0U;
+    return DF_OK;
+}
+
 void df_media_frame_queue_destroy(struct df_media_frame_queue *queue)
 {
     size_t index;

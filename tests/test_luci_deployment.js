@@ -11,6 +11,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'package',
 function NamedSection() {}
 function Flag() {}
 function Value() {}
+function ListValue() {}
 
 class Map {
     constructor(config) {
@@ -27,7 +28,11 @@ class Map {
                 const option = {
                     optionType, optionName, label, title, disabled: '0',
                     depends: (name, value) => {
-                        option.dependency = {name, value};
+                        option.dependency = typeof name === 'object'
+                            ? name : {name, value};
+                    },
+                    value: (value, label) => {
+                        (option.values ??= []).push([value, label]);
                     }
                 };
                 this.options.push(option);
@@ -41,7 +46,7 @@ class Map {
     }
 }
 
-const form = {Map, NamedSection, Flag, Value};
+const form = {Map, NamedSection, Flag, Value, ListValue};
 const view = {extend: value => value};
 const deployment = new Function('form', 'view', source)(form, view);
 const rendered = deployment.render();
@@ -84,4 +89,25 @@ assert.match(byName('access_material', host).validate('main', '0d753ea9'), /16 �
     assert.equal(byName('sync_mini2_secretkey', host).rmempty, true);
     assert.match(byName('sync_mini2_secretkey', host).description, /91\/03/);
 assert.equal(byName('uplink_interface', '可选上行配置').optionType, Value);
+assert.equal(byName('multicast_mode', host).optionType, ListValue);
+assert.deepEqual(byName('multicast_mode', host).values, [
+    ['auto', '自动推导'], ['custom', '自定义']
+]);
+assert.equal(byName('multicast_mode', host).dependency.value, '1');
+assert.equal(byName('multicast_address', host).datatype, 'ip4addr');
+assert.deepEqual(byName('multicast_address', host).dependency, {
+    active_host: '1', multicast_mode: 'custom'
+});
+assert.equal(byName('multicast_address', host).validate(
+    'main', '224.0.0.0'), true);
+assert.equal(byName('multicast_address', host).validate(
+    'main', '239.255.255.255'), true);
+assert.match(byName('multicast_address', host).validate(
+    'main', '223.255.255.255'), /组播/);
+assert.match(byName('multicast_address', host).validate(
+    'main', '240.0.0.0'), /组播/);
+assert.match(byName('multicast_address', host).validate(
+    'main', '192.168.1.1'), /组播/);
+assert.match(byName('multicast_address', host).validate(
+    'main', '239.1.2'), /IPv4/);
 assert.doesNotMatch(source, /require rpc|rpc\.declare|form\.Button/);

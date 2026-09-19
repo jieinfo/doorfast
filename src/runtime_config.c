@@ -2,6 +2,8 @@
 #include "gvs_identity.h"
 
 #include <ctype.h>
+#include <arpa/inet.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,13 +49,12 @@
 #define DF_SEEN_MEDIA_PUBLISH_RETRIES (1ULL << 34)
 #define DF_SEEN_MEDIA_OVERLOAD_POLICY (1ULL << 35)
 #define DF_SEEN_MEDIA_DIAGNOSTICS (1ULL << 36)
-#define DF_SEEN_MEDIA_RELAY_URL (1ULL << 37)
 #define DF_SEEN_SYNC_MINI1_SECRETKEY (1ULL << 38)
 #define DF_SEEN_SYNC_MINI2_SECRETKEY (1ULL << 39)
+#define DF_SEEN_MULTICAST_MODE (1ULL << 40)
+#define DF_SEEN_MULTICAST_ADDRESS (1ULL << 41)
 
-static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
-    memset(runtime, 0, sizeof(*runtime));
-    (void)snprintf(runtime->brand, sizeof(runtime->brand), "%s", "gvs");
+static void df_runtime_config_bind(struct df_runtime_config *runtime) {
     runtime->config.access_material = runtime->access_material;
     runtime->config.brand = runtime->brand;
     runtime->config.capture_interface = runtime->gvs_interface;
@@ -71,7 +72,13 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.media.stream_name = runtime->media_stream_name;
     runtime->config.media.rtsp_username = runtime->media_rtsp_username;
     runtime->config.media.credentials_path = DF_MEDIA_CREDENTIALS_PATH;
-    runtime->config.media.relay_url = runtime->media_relay_url;
+}
+
+static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
+    memset(runtime, 0, sizeof(*runtime));
+    (void)snprintf(runtime->brand, sizeof(runtime->brand), "%s", "gvs");
+    df_runtime_config_bind(runtime);
+    runtime->multicast_mode = DF_GVS_MULTICAST_AUTO;
     (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
                    "%s", "/etc/config/doorfast-sync");
     runtime->config.passive_only = true;
@@ -84,14 +91,15 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.media.fps = 10U;
     runtime->config.media.bitrate_kbps = 800U;
     runtime->config.media.profile = DF_MEDIA_PROFILE_BASELINE;
-    runtime->config.media.max_encoders = 0U;
+    runtime->config.media.max_encoders = 1U;
     runtime->config.media.min_free_kib = 393216U;
     runtime->config.media.preview_timeout_s = 120U;
     runtime->config.media.first_frame_timeout_s = 8U;
     /* Kept only as a legacy parser field; production publication failures
      * are reported asynchronously and are not retried by this option. */
     runtime->config.media.publish_retries = 0U;
-    runtime->config.media.overload_policy = DF_MEDIA_OVERLOAD_REJECT_NEW;
+    runtime->config.media.overload_policy =
+        DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW;
     runtime->config.media.diagnostics = true;
     (void)snprintf(runtime->media_stream_name, sizeof(runtime->media_stream_name),
                    "%s", "doorfast_preview");
@@ -260,6 +268,32 @@ static int df_parse_media_overload_policy(const char *value,
     return DF_OK;
 }
 
+static int df_parse_media_call_policy(const char *value,
+                                      enum df_media_overload_policy *output) {
+    if (strcmp(value, "preempt_oldest_preview") == 0)
+        *output = DF_MEDIA_OVERLOAD_STOP_OLDEST_PREVIEW;
+    else if (strcmp(value, "preserve_previews") == 0)
+        *output = DF_MEDIA_OVERLOAD_REJECT_NEW;
+    else
+        return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static int df_parse_multicast_mode(const char *value,
+                                   enum df_gvs_multicast_mode *output) {
+    if (strcmp(value, "auto") == 0) *output = DF_GVS_MULTICAST_AUTO;
+    else if (strcmp(value, "custom") == 0) *output = DF_GVS_MULTICAST_CUSTOM;
+    else return DF_ERR_INVALID;
+    return DF_OK;
+}
+
+static bool df_multicast_address_is_valid(const char *value) {
+    struct in_addr address;
+
+    return value != NULL && inet_pton(AF_INET, value, &address) == 1 &&
+           IN_MULTICAST(ntohl(address.s_addr));
+}
+
 static bool df_runtime_media_option_is_forbidden(const char *name) {
     if (strcmp(name, "media_credentials_path") == 0) return true;
     return strncmp(name, "media_", sizeof("media_") - 1U) == 0 &&
@@ -312,6 +346,17 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         option = DF_SEEN_GVS_ADDRESS;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_copy_option(runtime->gvs_local_address, sizeof(runtime->gvs_local_address), value);
+    }
+    if (strcmp(name, "multicast_mode") == 0) {
+        option = DF_SEEN_MULTICAST_MODE;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_multicast_mode(value, &runtime->multicast_mode);
+    }
+    if (strcmp(name, "multicast_address") == 0) {
+        option = DF_SEEN_MULTICAST_ADDRESS;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_copy_option(runtime->multicast_address,
+                              sizeof(runtime->multicast_address), value);
     }
     if (strcmp(name, "indoor_ipaddr") == 0) {
         option = DF_SEEN_INDOOR_IPADDR;
@@ -459,14 +504,11 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
     }
     if (strcmp(name, "media_max_encoders") == 0) {
         option = DF_SEEN_MEDIA_MAX_ENCODERS;
-        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
-        if (strcmp(value, "auto") == 0) {
-            runtime->config.media.max_encoders = 0U;
-            return DF_OK;
-        }
-        if (df_parse_unsigned_range(value, 1U, 4U, &parsed) != DF_OK)
+        if (df_claim_option(seen, option) != DF_OK ||
+            df_parse_unsigned_range(value, 1U, ULONG_MAX, &parsed) != DF_OK ||
+            parsed > SIZE_MAX)
             return DF_ERR_INVALID;
-        runtime->config.media.max_encoders = (uint8_t)parsed;
+        runtime->config.media.max_encoders = (size_t)parsed;
         return DF_OK;
     }
     if (strcmp(name, "media_min_free_kib") == 0) {
@@ -507,21 +549,22 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         return df_parse_media_overload_policy(value,
                                               &runtime->config.media.overload_policy);
     }
+    if (strcmp(name, "media_incoming_call_policy") == 0) {
+        option = DF_SEEN_MEDIA_OVERLOAD_POLICY;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_media_call_policy(value,
+            &runtime->config.media.overload_policy);
+    }
     if (strcmp(name, "media_diagnostics") == 0) {
         option = DF_SEEN_MEDIA_DIAGNOSTICS;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_parse_boolean(value, &runtime->config.media.diagnostics);
     }
-    if (strcmp(name, "media_relay_url") == 0) {
-        option = DF_SEEN_MEDIA_RELAY_URL;
-        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
-        return df_copy_option(runtime->media_relay_url,
-                              sizeof(runtime->media_relay_url), value);
-    }
     return result;
 }
 
-int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime) {
+static int df_runtime_config_parse_into(const char *uci_text,
+                                        struct df_runtime_config *runtime) {
     const char *cursor;
     bool in_main = false;
     bool found_main = false;
@@ -535,7 +578,7 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
     while (*cursor != '\0') {
         char line[DF_RUNTIME_LINE_MAX];
         char name[64];
-        char value[DF_RUNTIME_MEDIA_RELAY_URL_MAX];
+        char value[DF_RUNTIME_LINE_MAX];
         const char *line_end = strchr(cursor, '\n');
         const char *trimmed;
         size_t line_length = line_end == NULL ? strlen(cursor) : (size_t)(line_end - cursor);
@@ -578,6 +621,12 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
     if (!found_main) {
         return DF_ERR_INVALID;
     }
+    if ((runtime->multicast_mode == DF_GVS_MULTICAST_AUTO &&
+         runtime->multicast_address[0] != '\0') ||
+        (runtime->multicast_mode == DF_GVS_MULTICAST_CUSTOM &&
+         !df_multicast_address_is_valid(runtime->multicast_address))) {
+        return DF_ERR_INVALID;
+    }
     if (runtime->config.active_host) {
         if (runtime->host_interface[0] != '\0') {
             if (df_copy_option(runtime->gvs_interface,
@@ -598,7 +647,37 @@ int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runt
             return DF_ERR_INVALID;
         }
     }
-    return df_config_validate(&runtime->config);
+    if (df_station_registry_parse(&runtime->stations, uci_text) != DF_OK)
+        return DF_ERR_INVALID;
+    if (df_config_validate(&runtime->config) != DF_OK) return DF_ERR_INVALID;
+    if (runtime->config.media.enabled) {
+        size_t enabled_count = 0U;
+        size_t index;
+
+        for (index = 0U; index < runtime->stations.count; index++) {
+            if (runtime->stations.items[index].enabled) enabled_count++;
+        }
+        if (enabled_count == 0U ||
+            runtime->config.media.max_encoders > enabled_count)
+            return DF_ERR_INVALID;
+    }
+    return DF_OK;
+}
+
+int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime) {
+    struct df_runtime_config parsed = {0};
+    int result;
+
+    if (uci_text == NULL || runtime == NULL) return DF_ERR_INVALID;
+    result = df_runtime_config_parse_into(uci_text, &parsed);
+    if (result != DF_OK) {
+        df_runtime_config_destroy(&parsed);
+        return result;
+    }
+    df_station_registry_destroy(&runtime->stations);
+    *runtime = parsed;
+    df_runtime_config_bind(runtime);
+    return DF_OK;
 }
 
 int df_runtime_config_load(const char *path, struct df_runtime_config *runtime) {
@@ -631,4 +710,10 @@ int df_runtime_config_load(const char *path, struct df_runtime_config *runtime) 
     result = df_runtime_config_parse(contents, runtime);
     free(contents);
     return result;
+}
+
+void df_runtime_config_destroy(struct df_runtime_config *runtime) {
+    if (runtime == NULL) return;
+    df_station_registry_destroy(&runtime->stations);
+    memset(runtime, 0, sizeof(*runtime));
 }

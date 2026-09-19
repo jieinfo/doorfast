@@ -31,6 +31,12 @@ struct df_event_stream {
 int df_event_stream_init(struct df_event_stream *, const char *path);
 int df_event_stream_publish(struct df_event_stream *, const char *event,
                             uint64_t generation, uint64_t now_ms);
+int df_event_stream_publish_station(struct df_event_stream *, const char *event,
+                                    const char *station_id,
+                                    uint64_t generation, uint64_t now_ms);
+int df_event_stream_publish_logical_address(struct df_event_stream *,
+    const char *event, const uint8_t logical_address[6],
+    uint64_t generation, uint64_t now_ms);
 int df_event_stream_process(struct df_event_stream *);
 void df_event_stream_stop(struct df_event_stream *);
 

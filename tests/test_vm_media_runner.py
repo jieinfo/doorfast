@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -14,6 +15,7 @@ class VmMediaRunnerTest(unittest.TestCase):
         self.ssh = self.root / "ssh.sh"
         self.marker = self.root / "route-snapshot-seen"
         self.firewall_counter = self.root / "firewall-counter"
+        self.station_scan_counter = self.root / "station-scan-counter"
         self.core_apk = self.root / "doorfast.apk"
         self.media_apk = self.root / "doorfast-media.apk"
         self.core_apk.write_bytes(b"core-apk-fixture")
@@ -25,7 +27,7 @@ class VmMediaRunnerTest(unittest.TestCase):
                 *"command -v apk"*) exit 0 ;;
                 *"mktemp -d /tmp/doorfast-media-vm"*) cat >/dev/null; exit 0 ;;
                 *"ubus call doorfast status"*)
-                    printf '%s\n' '{"running":true,"media":{"installed":true,"available":true,"state":"idle","generation":0,"encoder_running":false}}'
+                    printf '%s\n' '{"running":true,"runtime_id":"0123456789abcdef","media":{"installed":true,"available":true,"state":"idle","generation":0,"encoder_running":false}}'
                     ;;
                 *"ubus call doorfast monitor_status"*)
                     if [ "${DOORFAST_FAKE_UNAVAILABLE:-0}" = 1 ]; then
@@ -35,6 +37,26 @@ class VmMediaRunnerTest(unittest.TestCase):
                     fi
                     printf '{"installed":true,"available":%s,"state":"idle","generation":0,"encoder_running":false}\n' "$available"
                     ;;
+                *"ubus call doorfast station_scan"*)
+                    count=0
+                    [ ! -r "$DOORFAST_FAKE_STATION_SCAN_COUNTER" ] || read -r count <"$DOORFAST_FAKE_STATION_SCAN_COUNTER"
+                    count=$((count + 1))
+                    printf '%s\n' "$count" >"$DOORFAST_FAKE_STATION_SCAN_COUNTER"
+                    printf '%s\n' '{"runtime_id":"0123456789abcdef","scheduled":true,"frames_sent":3}'
+                    ;;
+                *"ubus call doorfast station_candidates"*)
+                    printf '%s\n' '{"runtime_id":"0123456789abcdef","candidates":[{"logical_address":"32:02:01:00:02:00","ipv4":"10.2.1.20","first_seen_ms":100,"last_seen_ms":200,"reply_count":3,"configured":true},{"logical_address":"32:02:01:00:03:00","ipv4":"10.2.1.30","first_seen_ms":110,"last_seen_ms":210,"reply_count":2,"configured":true},{"logical_address":"32:02:01:00:04:00","ipv4":"10.2.1.40","first_seen_ms":120,"last_seen_ms":220,"reply_count":1,"configured":false}]}'
+                    ;;
+                *"ubus call doorfast stations"*)
+                    printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":7,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"discovered","route_fresh":true,"monitorable":true,"last_seen_ms":200},{"id":"gate_service","name":"Service Gate","logical_address":"32:02:01:00:03:00","enabled":true,"stream_name":"doorfast_gate_service","route_source":"configured","route_fresh":true,"monitorable":true,"last_seen_ms":210}]}'
+                    ;;
+                *"wget -qO- http://127.0.0.1/cgi-bin/doorfast/api/v1/stations"*)
+                    printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":7,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"discovered","route_fresh":true,"monitorable":true,"last_seen_ms":200},{"id":"gate_service","name":"Service Gate","logical_address":"32:02:01:00:03:00","enabled":true,"stream_name":"doorfast_gate_service","route_source":"configured","route_fresh":true,"monitorable":true,"last_seen_ms":210}]}'
+                    ;;
+                *"uci -q get doorfast.main.gvs_local_address"*) printf '%s\n' 'IS:2-1-101-1' ;;
+                *"uci -q get doorfast.main.multicast_mode"*) printf '%s\n' 'auto' ;;
+                *"uci -q get doorfast.main.multicast_address"*) printf '\n' ;;
+                *"uci export network") printf '%s\n' "package 'network'" ;;
                 *"count=0; for comm in /proc/"*) printf '0\n' ;;
                 *"ip -j rule show") printf '[]\n' ;;
                 *"ip -j route show table all")
@@ -66,6 +88,7 @@ class VmMediaRunnerTest(unittest.TestCase):
         environment.update({
             "DOORFAST_FAKE_MARKER": str(self.marker),
             "DOORFAST_FAKE_FIREWALL_COUNTER": str(self.firewall_counter),
+            "DOORFAST_FAKE_STATION_SCAN_COUNTER": str(self.station_scan_counter),
             **environment_overrides,
         })
         return subprocess.run(
@@ -77,6 +100,31 @@ class VmMediaRunnerTest(unittest.TestCase):
             text=True,
             capture_output=True,
             env=environment,
+        )
+
+    def run_station_runner(self):
+        environment = os.environ.copy()
+        environment["DOORFAST_FAKE_STATION_SCAN_COUNTER"] = str(self.station_scan_counter)
+        return subprocess.run(
+            ["python3", "-B", "tests/run_doorfast_vm_stations.py", str(self.ssh),
+             "--output-dir", str(self.root / "stations-output")],
+            text=True,
+            capture_output=True,
+            env=environment,
+        )
+
+    def run_multi_media_runner(self, source_root=None):
+        command = [
+            "python3", "-B", "tests/run_doorfast_vm_multi_media.py",
+            "tests/fixtures/fake-vm-preflight-ssh.sh",
+            "--output-dir", str(self.root / "multi-media-output"),
+        ]
+        if source_root is not None:
+            command.extend(["--source-root", str(source_root)])
+        return subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
         )
 
     def test_vm_summary_does_not_label_unrun_fixture_as_evidence(self):
@@ -101,6 +149,166 @@ class VmMediaRunnerTest(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertIn("network, firewall, or listener state changed", result.stderr)
+
+    def test_vm_station_runner_validates_discovery_and_configured_routes(self):
+        result = self.run_station_runner()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual("vm-software-acceptance", summary["acceptance"])
+        self.assertEqual(3, summary["scan_sent"])
+        self.assertEqual(3, summary["candidate_count"])
+        self.assertEqual(2, summary["configured_station_count"])
+        self.assertEqual(7, summary["configured_revision"])
+        self.assertEqual("unconfirmed", summary["physical_registration"])
+        report = json.loads((self.root / "stations-output" / "stations.json").read_text())
+        self.assertEqual("238.0.201.129", report["multicast"]["derived_group"])
+        self.assertEqual(report["multicast"]["derived_group"], report["multicast"]["effective_group"])
+        self.assertTrue(all(row["route_fresh"] for row in report["configured_stations"]))
+        self.assertNotIn("name", report["configured_stations"][0])
+        self.assertNotIn("stream_name", report["configured_stations"][0])
+        self.assertEqual(
+            {"logical_address_hash", "ipv4_hash", "first_seen_ms", "last_seen_ms",
+             "reply_count", "configured"},
+            set(report["candidates"][0]),
+        )
+
+    def test_multi_media_runner_proves_two_streams_and_isolated_stop(self):
+        result = self.run_multi_media_runner()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            {
+                "configured_capacity": 2,
+                "peak_active_encoders": 2,
+                "streams": ["doorfast_gate_main", "doorfast_gate_side"],
+                "isolated_stop": True,
+            },
+            json.loads(result.stdout),
+        )
+        report = json.loads(
+            (self.root / "multi-media-output" / "acceptance.json").read_text()
+        )
+        self.assertEqual("df_media_module_api_v3", report["engine"])
+        self.assertEqual("publishing", report["states"]["before_stop"]["gate_main"])
+        self.assertEqual("publishing", report["states"]["before_stop"]["gate_side"])
+        self.assertEqual("idle", report["states"]["after_stop"]["gate_main"])
+        self.assertEqual("publishing", report["states"]["after_stop"]["gate_side"])
+        self.assertEqual(0, report["cleanup"]["active_encoders"])
+        self.assertEqual(0, report["rtsp"]["producer_count"])
+        self.assertEqual(2, report["rtsp"]["max_producer_count"])
+        self.assertEqual(
+            {
+                "preserve": {
+                    "preview_03_04": 2,
+                    "confirmation_03_84": 2,
+                    "stop_03_02": 2,
+                },
+                "preempt": {
+                    "preview_03_04": 2,
+                    "confirmation_03_84": 2,
+                    "stop_03_02": 1,
+                },
+            },
+            report["protocol"],
+        )
+        self.assertGreaterEqual(
+            report["memory"]["available_kib"], report["memory"]["minimum_free_kib"]
+        )
+        self.assertEqual(
+            "capacity_busy",
+            report["call_at_capacity"]["preserve_previews"]["result"],
+        )
+        self.assertEqual(
+            "gate_main",
+            report["call_at_capacity"]["preempt_oldest_preview"]["preempted"],
+        )
+        self.assertEqual(
+            "gate_side",
+            report["call_at_capacity"]["preempt_oldest_preview"]["active_preview"],
+        )
+        self.assertEqual(
+            "accepted",
+            report["call_at_capacity"]["preempt_oldest_preview"]["result"],
+        )
+        self.assertEqual(
+            2,
+            report["call_at_capacity"]["preempt_oldest_preview"]["active_before"],
+        )
+        self.assertEqual(
+            "publishing",
+            report["call_at_capacity"]["preempt_oldest_preview"]["victim_state_before"],
+        )
+        self.assertEqual(
+            2,
+            report["call_at_capacity"]["preempt_oldest_preview"]["active_encoders"],
+        )
+        self.assertEqual(
+            "doorfast_gate_call",
+            report["call_at_capacity"]["preempt_oldest_preview"]["call_stream"],
+        )
+        announced = {
+            row["path"] for row in report["rtsp"]["transactions"]
+            if row["method"] == "ANNOUNCE"
+        }
+        self.assertTrue({"/doorfast_gate_main", "/doorfast_gate_side"} <= announced)
+        serialized = json.dumps(report, sort_keys=True)
+        self.assertNotIn("JPEG-MAIN", serialized)
+        self.assertNotIn("JPEG-SIDE", serialized)
+        self.assertNotIn("JPEG-CALL", serialized)
+        self.assertNotIn("password", serialized.lower())
+
+    def test_multi_media_runner_hashes_each_encoder_pipe_independently(self):
+        result = self.run_multi_media_runner()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads(
+            (self.root / "multi-media-output" / "acceptance.json").read_text()
+        )
+        self.assertEqual(
+            {
+                "doorfast_gate_main": {
+                    "bytes": 5,
+                    "sha256": "355809dc46166fd61e20ddbfb70b7afa0d08f73cdf0e88abef99999cc5138bb1",
+                },
+                "doorfast_gate_call": {
+                    "bytes": 5,
+                    "sha256": "dec252baa05e53819b757db5116ec4add03894adafa0aae2f4182beaf257fb41",
+                },
+                "doorfast_gate_side": {
+                    "bytes": 5,
+                    "sha256": "e7df0374e6841e87c72088e3b7ea1cc3277ecef228721714996442ac85241ace",
+                },
+            },
+            report["encoder_pipe_evidence"],
+        )
+
+    def test_multi_media_runner_catches_v3_start_always_failing_mutation(self):
+        source_root = self.root / "mutated-project"
+        shutil.copytree("src", source_root / "src")
+        manager = source_root / "src" / "media_session_manager.c"
+        source = manager.read_text()
+        original = """static int df_media_module_api_start_v3(void *instance, const char *station_id,
+    enum df_media_session_purpose purpose, uint64_t request_generation,
+    uint64_t now_ms) {
+    struct df_media_session_manager *manager = instance;
+"""
+        replacement = original + """    (void)station_id;
+    (void)purpose;
+    (void)request_generation;
+    (void)now_ms;
+    if (manager != NULL) return DF_MEDIA_ERROR_CAPACITY_BUSY;
+"""
+        self.assertIn(original, source)
+        source = source.replace(original, replacement, 1)
+        manager.write_text(source)
+
+        result = self.run_multi_media_runner(source_root)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("media ABI v3 harness failed", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("NameError", result.stderr)
 
 
 if __name__ == "__main__":

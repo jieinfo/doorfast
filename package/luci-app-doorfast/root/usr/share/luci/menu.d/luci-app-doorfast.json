@@ -19,7 +19,7 @@
   },
   "admin/services/doorfast/settings": {
     "title": "来电自动化",
-    "order": 20,
+    "order": 50,
     "action": {
       "type": "view",
       "path": "doorfast/settings"
@@ -33,9 +33,25 @@
       "path": "doorfast/deployment"
     }
   },
+  "admin/services/doorfast/stations": {
+    "title": "门口机",
+    "order": 30,
+    "action": {
+      "type": "view",
+      "path": "doorfast/stations"
+    }
+  },
+  "admin/services/doorfast/media": {
+    "title": "媒体预览",
+    "order": 40,
+    "action": {
+      "type": "view",
+      "path": "doorfast/media"
+    }
+  },
   "admin/services/doorfast/relay": {
     "title": "HA 事件 relay",
-    "order": 30,
+    "order": 60,
     "action": {
       "type": "view",
       "path": "doorfast/relay"
@@ -43,7 +59,7 @@
   },
   "admin/services/doorfast/logs": {
     "title": "日志",
-    "order": 40,
+    "order": 70,
     "action": {
       "type": "view",
       "path": "doorfast/logs"

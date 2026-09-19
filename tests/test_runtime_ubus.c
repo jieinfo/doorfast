@@ -1,3 +1,4 @@
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,27 +49,46 @@ static int submit_call(const struct df_runtime_call_request *request,
 }
 
 struct media_binding_test {
-    struct df_media_module_status status;
+    struct df_media_module_status_v3 status;
+    struct df_media_session_status_v3 sessions[2];
     enum df_media_module_command command;
+    char command_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     uint64_t command_generation;
     uint64_t command_now_ms;
     bool command_active;
+    char start_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     unsigned start_calls;
     unsigned command_calls;
 };
 
-static int media_start(void *instance, uint64_t now_ms) {
+static int media_start(void *instance, const char *station_id,
+    enum df_media_session_purpose purpose, uint64_t request_generation,
+    uint64_t now_ms) {
     struct media_binding_test *test = instance;
+
+    (void)purpose;
+    (void)request_generation;
+    if (strcmp(station_id, "gate_main") != 0)
+        return DF_MEDIA_ERROR_STATION_NOT_FOUND;
     test->start_calls++;
+    (void)snprintf(test->start_station_id, sizeof(test->start_station_id),
+        "%s", station_id);
     test->command_now_ms = now_ms;
     return DF_OK;
 }
 
 static int media_command(void *instance, enum df_media_module_command command,
-    uint64_t generation, bool active, uint64_t now_ms) {
+    const struct df_media_session_key *key, bool active, uint64_t now_ms) {
     struct media_binding_test *test = instance;
+
+    if (strcmp(key->station_id, "gate_main") != 0)
+        return DF_MEDIA_ERROR_STATION_NOT_FOUND;
+    if (key->generation != 7U)
+        return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     test->command = command;
-    test->command_generation = generation;
+    (void)snprintf(test->command_station_id,
+        sizeof(test->command_station_id), "%s", key->station_id);
+    test->command_generation = key->generation;
     test->command_active = active;
     test->command_now_ms = now_ms;
     test->command_calls++;
@@ -76,22 +96,47 @@ static int media_command(void *instance, enum df_media_module_command command,
 }
 
 static int media_status(const void *instance,
-    struct df_media_module_status *status) {
+    struct df_media_module_status_v3 *status) {
     const struct media_binding_test *test = instance;
+    struct df_media_session_status_v3 *sessions = status->sessions;
+    size_t capacity = status->session_count;
+    size_t copied = test->status.required_session_count < capacity ?
+        test->status.required_session_count : capacity;
+
     *status = test->status;
+    status->sessions = sessions;
+    status->session_count = sessions == NULL ? 0U : copied;
+    if (sessions != NULL && copied > 0U)
+        memcpy(sessions, test->sessions, copied * sizeof(*sessions));
     return DF_OK;
 }
 
-static const struct df_media_module_api_v2 media_api = {
+static const struct df_media_module_api_v3 media_api = {
     .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
-    .struct_size = sizeof(struct df_media_module_api_v2),
+    .struct_size = sizeof(struct df_media_module_api_v3),
     .start = media_start,
     .command = media_command,
     .status = media_status,
 };
 
 void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
+    static const char station_config[] =
+        "config station 'gate_main'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Main Gate'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_main'\n";
+    const uint8_t identity[6] = {0x61, 0x02, 0x01, 1, 1, 1};
+    const uint8_t station_address[6] = {0x32, 0x02, 0x01, 0, 0x02, 0};
     struct df_runtime_ubus service = {0};
+    struct df_station_registry registry = {0};
+    struct df_gvs_station_discovery discovery = {0};
+    struct df_gvs_station_scan scan = {0};
+    struct df_station_snapshot stations = {0};
+    struct df_station_candidate_snapshot candidates = {0};
+    struct in_addr observed_ipv4;
     unsigned calls = 0;
 
     TEST_ASSERT_INT_EQ(
@@ -102,6 +147,91 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     TEST_ASSERT_INT_EQ(
         DF_OK,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_station_registry_parse(&registry, station_config));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_stations(&service,
+        &registry, &discovery, &scan, identity, true));
+    memcpy(service.runtime_id, "0123456789abcdef", sizeof(service.runtime_id));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("0123456789abcdef", stations.runtime_id));
+    TEST_ASSERT_INT_EQ(1, (int)stations.revision);
+    TEST_ASSERT_INT_EQ(1, (int)stations.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main", stations.stations[0].id));
+    TEST_ASSERT_INT_EQ(0, strcmp("Main Gate", stations.stations[0].name));
+    TEST_ASSERT_INT_EQ(0, strcmp("32:02:01:00:02:00",
+        stations.stations[0].logical_address));
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].enabled);
+    TEST_ASSERT_INT_EQ(0, strcmp("doorfast_gate_main",
+        stations.stations[0].stream_name));
+    TEST_ASSERT_INT_EQ(0, strcmp("none",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].monitorable);
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].has_last_seen);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_candidates(&service, &candidates));
+    TEST_ASSERT_INT_EQ(0, strcmp("0123456789abcdef", candidates.runtime_id));
+    TEST_ASSERT_INT_EQ(0, (int)candidates.count);
+
+    TEST_ASSERT_INT_EQ(1, inet_pton(AF_INET, "10.2.1.20", &observed_ipv4));
+    memcpy(discovery.candidates[0].logical_address, station_address,
+        sizeof(station_address));
+    discovery.candidates[0].ipv4 = observed_ipv4.s_addr;
+    discovery.candidates[0].first_seen_ms = 90U;
+    discovery.candidates[0].last_seen_ms = 100U;
+    discovery.candidates[0].reply_count = 2U;
+    discovery.candidates[0].valid = true;
+    discovery.count = 1U;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_station_route_observe(&service,
+        station_address, observed_ipv4.s_addr, 100U, true));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 60099U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("discovered",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].monitorable);
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].has_last_seen);
+    TEST_ASSERT_INT_EQ(100, (int)stations.stations[0].last_seen_ms);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_candidates(&service, &candidates));
+    TEST_ASSERT_INT_EQ(1, (int)candidates.count);
+    TEST_ASSERT_INT_EQ(0, strcmp("32:02:01:00:02:00",
+        candidates.candidates[0].logical_address));
+    TEST_ASSERT_INT_EQ(0, strcmp("10.2.1.20",
+        candidates.candidates[0].ipv4));
+    TEST_ASSERT_INT_EQ(1, candidates.candidates[0].configured);
+    TEST_ASSERT_INT_EQ(2, (int)candidates.candidates[0].reply_count);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 60100U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("none",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].monitorable);
+
+    registry.items[0].configured_ipv4 = observed_ipv4.s_addr;
+    registry.items[0].route_preference = DF_STATION_ROUTE_FIXED;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 120100U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, strcmp("configured",
+        stations.stations[0].route_source));
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].route_fresh);
+    TEST_ASSERT_INT_EQ(1, stations.stations[0].monitorable);
+    registry.items[0].enabled = false;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(0, stations.stations[0].monitorable);
+
+    service.station_scan_enabled = false;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_station_scan(&service, 120100U));
+    service.station_scan_enabled = true;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_scan(&service, 120100U));
+    TEST_ASSERT_INT_EQ(1, scan.active);
     TEST_ASSERT_INT_EQ(1, df_runtime_id_is_valid(service.runtime_id) ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_unlock(&service, NULL, 1));
@@ -111,16 +241,100 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
     TEST_ASSERT_INT_EQ(
         DF_ERR_INVALID,
         df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10));
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 10));
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 11));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 120100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 120101U));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-                       df_runtime_ubus_process(&service, 9));
+                       df_runtime_ubus_process(&service, 120099U));
     TEST_ASSERT_INT_EQ(0, (int)calls);
     df_runtime_ubus_stop(&service);
+    df_station_registry_destroy(&registry);
     TEST_ASSERT_INT_EQ(0, service.runtime_id[0]);
     df_runtime_ubus_stop(&service);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_ubus_process(&service, 12));
+}
+
+void test_runtime_ubus_keeps_routes_for_more_than_four_configured_stations(void) {
+    static const char station_config[] =
+        "config station 'gate_1'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 1'\n"
+        "\toption logical_address '32:02:01:00:01:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_1'\n"
+        "config station 'gate_2'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 2'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_2'\n"
+        "config station 'gate_3'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 3'\n"
+        "\toption logical_address '32:02:01:00:03:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_3'\n"
+        "config station 'gate_4'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 4'\n"
+        "\toption logical_address '32:02:01:00:04:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_4'\n"
+        "config station 'gate_5'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Gate 5'\n"
+        "\toption logical_address '32:02:01:00:05:00'\n"
+        "\toption ipv4 ''\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_5'\n";
+    const uint8_t identity[6] = {0x61, 0x02, 0x01, 1, 1, 1};
+    struct df_runtime_ubus service = {0};
+    struct df_station_registry registry = {0};
+    struct df_gvs_station_discovery discovery = {0};
+    struct df_gvs_station_scan scan = {0};
+    struct df_station_snapshot stations = {0};
+    struct in_addr observed_ipv4;
+    unsigned calls = 0;
+    size_t index;
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_start(&service, provide_runtime_status, &calls, 10U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_station_registry_parse(&registry, station_config));
+    TEST_ASSERT_INT_EQ(5, (int)registry.count);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_stations(&service,
+        &registry, &discovery, &scan, identity, true));
+    TEST_ASSERT_INT_EQ(1, inet_pton(AF_INET, "10.2.1.20", &observed_ipv4));
+    for (index = 0U; index < registry.count; index++) {
+        memcpy(discovery.candidates[index].logical_address,
+            registry.items[index].logical_address, 6U);
+        discovery.candidates[index].ipv4 = observed_ipv4.s_addr;
+        discovery.candidates[index].first_seen_ms = 100U;
+        discovery.candidates[index].last_seen_ms = 100U;
+        discovery.candidates[index].reply_count = 1U;
+        discovery.candidates[index].valid = true;
+        discovery.count++;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_station_route_observe(&service,
+            registry.items[index].logical_address, observed_ipv4.s_addr,
+            100U, true));
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_process(&service, 60099U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_station_list(&service, &stations));
+    TEST_ASSERT_INT_EQ(5, (int)stations.count);
+    for (index = 0U; index < stations.count; index++) {
+        TEST_ASSERT_INT_EQ(0,
+            strcmp("discovered", stations.stations[index].route_source));
+        TEST_ASSERT_INT_EQ(1, stations.stations[index].route_fresh);
+        TEST_ASSERT_INT_EQ(1, stations.stations[index].monitorable);
+    }
+
+    df_runtime_ubus_stop(&service);
+    df_station_registry_destroy(&registry);
 }
 
 void test_runtime_ubus_keeps_bounded_redacted_event_log(void) {
@@ -143,8 +357,6 @@ void test_runtime_ubus_keeps_bounded_redacted_event_log(void) {
         &service, 3, "event=unlock access_material=secret"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
         &service, 3, "event=media rtsp_password=secret"));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_log_event(
-        &service, 3, "event=media relay_token=secret"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
                        df_runtime_ubus_log_get(&service,
                            DF_RUNTIME_UBUS_LOG_CAPACITY, &entry));
@@ -223,19 +435,32 @@ void test_runtime_ubus_media_controls_require_current_generation(void) {
     struct call_binding_test call = {0};
     struct media_binding_test test = {
         .status = {
-            .available = true,
-            .encoder_running = true,
-            .monitor_state = DF_GVS_MONITOR_PUBLISHING,
-            .state = "publishing",
-            .generation = 7,
+            .required_session_count = 1U,
+            .configured_capacity = 2U,
+            .effective_capacity = 2U,
+            .active_encoders = 1U,
             .status_revision = 9,
-            .queue_drops = 2,
-            .relay_failures = 1,
+            .preempted_station_id = "gate_side",
+            .preempted_generation = 6U,
         },
+        .sessions = {{
+            .station_id = "gate_main",
+            .stream_name = "doorfast_gate_main",
+            .generation = 7U,
+            .purpose = DF_MEDIA_SESSION_PREVIEW,
+            .state = DF_MEDIA_SESSION_PUBLISHING,
+            .active = true,
+            .ready = true,
+            .encoder_running = true,
+            .queue_drops = 2U,
+        }},
     };
+    struct df_media_session_status_v3 module_snapshot[2];
     struct df_runtime_media_module module = {
         .api = &media_api,
         .instance = &test,
+        .session_snapshot = module_snapshot,
+        .session_snapshot_capacity = 2U,
         .available = true,
     };
     struct df_runtime_media_status status;
@@ -244,61 +469,83 @@ void test_runtime_ubus_media_controls_require_current_generation(void) {
         .rtsp_password = "must-not-write",
     };
     unsigned sync_calls = 0;
+    uint64_t generation = 0U;
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
         &service, provide_runtime_status, &sync_calls, 10));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_stop(&service, 7));
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 7U));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_viewer(&service, 7, true));
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 7U, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(
         &service, &module, "/tmp/doorfast-unused-media-credentials"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_bind_media(
         &service, &module, "/tmp/doorfast-unused-media-credentials"));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_stop(&service, 7));
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 7U));
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_runtime_ubus_monitor_viewer(&service, 7, true));
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 7U, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_call(
         &service, provide_call_status, submit_call, &call));
     df_runtime_ubus_set_active_host(&service, true);
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_MEDIA_ERROR_RUNTIME_MISMATCH,
+        df_runtime_ubus_monitor_start(&service, "0000000000000000",
+            "gate_main", &generation));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_STATION_NOT_FOUND,
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "missing", &generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service,
+        service.runtime_id, "gate_main", &generation));
+    TEST_ASSERT_INT_EQ(7, (int)generation);
     TEST_ASSERT_INT_EQ(1, test.start_calls);
     TEST_ASSERT_INT_EQ(10, (int)test.command_now_ms);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_stop(&service, 6));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_stop(&service, 0));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_stop(&service, 8));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 6U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_STATION_NOT_FOUND,
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "missing", 7U));
     TEST_ASSERT_INT_EQ(0, test.command_calls);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_viewer(&service, 0, true));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_viewer(&service, 8, true));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 8U, true));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_update_media_credentials(
             &service, &credentials_update));
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_runtime_ubus_monitor_viewer(&service, 7, true));
+        df_runtime_ubus_monitor_viewer(&service, service.runtime_id,
+            "gate_main", 7U, true));
     TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_VIEWER, test.command);
     TEST_ASSERT_INT_EQ(7, (int)test.command_generation);
     TEST_ASSERT_INT_EQ(1, test.command_active);
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_runtime_ubus_monitor_stop(&service, 7));
+        df_runtime_ubus_monitor_stop(&service, service.runtime_id,
+            "gate_main", 7U));
     TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_STOP, test.command);
     TEST_ASSERT_INT_EQ(2, test.command_calls);
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_read_media_status(&service, &status));
     TEST_ASSERT_INT_EQ(1, status.available);
-    TEST_ASSERT_INT_EQ(1, status.encoder_running);
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, status.monitor_state);
-    TEST_ASSERT_INT_EQ(7, (int)status.generation);
-    TEST_ASSERT_INT_EQ(2, (int)status.queue_drops);
+    TEST_ASSERT_INT_EQ(2, (int)status.configured_capacity);
+    TEST_ASSERT_INT_EQ(2, (int)status.effective_capacity);
+    TEST_ASSERT_INT_EQ(1, (int)status.active_encoders);
+    TEST_ASSERT_INT_EQ(1, (int)status.session_count);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_side", status.preempted_station_id));
+    TEST_ASSERT_INT_EQ(6, (int)status.preempted_generation);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main",
+        status.sessions[0].station_id));
+    TEST_ASSERT_INT_EQ(7, (int)status.sessions[0].generation);
+    TEST_ASSERT_INT_EQ(2, (int)status.sessions[0].queue_drops);
     TEST_ASSERT_INT_EQ(0, status.has_credential_text);
     df_runtime_ubus_stop(&service);
 }
@@ -307,12 +554,22 @@ void test_runtime_ubus_monitor_start_rejects_active_call(void) {
     struct df_runtime_ubus service = {0};
     struct call_binding_test call = {0};
     struct media_binding_test media = {0};
+    struct df_media_session_status_v3 module_snapshot[1];
     struct df_runtime_media_module module = {
         .api = &media_api,
         .instance = &media,
+        .session_snapshot = module_snapshot,
+        .session_snapshot_capacity = 1U,
         .available = true,
     };
     unsigned sync_calls = 0;
+    uint64_t generation = 0U;
+
+    media.status.required_session_count = 1U;
+    media.sessions[0].active = true;
+    media.sessions[0].generation = 7U;
+    (void)snprintf(media.sessions[0].station_id,
+        sizeof(media.sessions[0].station_id), "%s", "gate_main");
 
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
         &service, provide_runtime_status, &sync_calls, 10));
@@ -324,14 +581,17 @@ void test_runtime_ubus_monitor_start_rejects_active_call(void) {
 
     call.status.session_state = DF_GVS_RINGING;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     call.status.session_state = DF_GVS_TALKING;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_monitor_start(&service));
+        df_runtime_ubus_monitor_start(&service, service.runtime_id,
+            "gate_main", &generation));
     TEST_ASSERT_INT_EQ(0, (int)media.start_calls);
 
     call.status.session_state = DF_GVS_IDLE;
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service,
+        service.runtime_id, "gate_main", &generation));
     TEST_ASSERT_INT_EQ(1, (int)media.start_calls);
     TEST_ASSERT_INT_EQ(3, (int)call.status_calls);
     df_runtime_ubus_stop(&service);
@@ -347,8 +607,6 @@ void test_runtime_ubus_media_credentials_preserve_blank_and_redact(void) {
     struct df_media_credentials_update update = {
         .set_rtsp_password = true,
         .rtsp_password = "secret-rtsp",
-        .set_relay_token = true,
-        .relay_token = "secret-relay",
     };
     unsigned sync_calls = 0;
 
@@ -365,18 +623,15 @@ void test_runtime_ubus_media_credentials_preserve_blank_and_redact(void) {
         df_runtime_ubus_read_media_status(&service, &status));
     TEST_ASSERT_INT_EQ(0, status.available);
     TEST_ASSERT_INT_EQ(1, status.rtsp_password_set);
-    TEST_ASSERT_INT_EQ(1, status.relay_token_set);
     TEST_ASSERT_INT_EQ(0, status.has_credential_text);
 
     memset(&update, 0, sizeof(update));
     update.set_rtsp_password = true;
     update.rtsp_password = "";
-    update.clear_relay_token = true;
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_update_media_credentials(&service, &update));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_credentials_load(path, &credentials));
     TEST_ASSERT_INT_EQ(0, strcmp("secret-rtsp", credentials.rtsp_password));
-    TEST_ASSERT_INT_EQ(0, credentials.relay_token[0]);
 
     update.clear_rtsp_password = true;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,

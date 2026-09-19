@@ -98,6 +98,9 @@ void test_media_encoder_rejects_stale_frame_and_restarts_on_dimension_change(voi
     frame.generation = 18;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_encoder_write_frame(
         &encoder, &frame));
+    frame.generation = 19;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_encoder_write_frame(&encoder, &frame));
+    TEST_ASSERT_INT_EQ(1, (int)encoder.frames_written);
     TEST_ASSERT_INT_EQ(1, df_media_encoder_requires_restart(&encoder, 360, 480) ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, df_media_encoder_requires_restart(&encoder, 480, 640) ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_encoder_stop(&encoder, 100));

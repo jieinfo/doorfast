@@ -264,7 +264,7 @@ else
     exit 127
 fi
 test -x /usr/sbin/doorfast
-test -r /usr/lib/doorfast/media-v2.so
+test -r /usr/lib/doorfast/media-v3.so
 /etc/init.d/doorfast restart
 i=0
 while ! ubus -t 1 call doorfast status '{}' >/dev/null 2>&1; do

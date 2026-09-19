@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 #define DF_MEDIA_CREDENTIALS_FILE_MAX 1024U
-#define DF_MEDIA_CREDENTIALS_CONTENT_MAX (DF_MEDIA_CREDENTIAL_VALUE_MAX * 2U + 32U)
+#define DF_MEDIA_CREDENTIALS_CONTENT_MAX (DF_MEDIA_CREDENTIAL_VALUE_MAX + 16U)
 
 static bool df_media_credential_value_is_valid(const char *value) {
     size_t index;
@@ -76,7 +76,6 @@ static int df_media_credentials_parse(char *contents,
                                       struct df_media_credentials *credentials) {
     char *line = contents;
     bool saw_rtsp_password = false;
-    bool saw_relay_token = false;
 
     while (line != NULL && *line != '\0') {
         char *next = strchr(line, '\n');
@@ -87,11 +86,6 @@ static int df_media_credentials_parse(char *contents,
                 df_media_credentials_copy(credentials->rtsp_password,
                     line + sizeof("rtsp_password=") - 1U) != DF_OK) return DF_ERR_INVALID;
             saw_rtsp_password = true;
-        } else if (strncmp(line, "relay_token=", sizeof("relay_token=") - 1U) == 0) {
-            if (saw_relay_token ||
-                df_media_credentials_copy(credentials->relay_token,
-                    line + sizeof("relay_token=") - 1U) != DF_OK) return DF_ERR_INVALID;
-            saw_relay_token = true;
         } else if (*line != '\0') {
             return DF_ERR_INVALID;
         }
@@ -136,18 +130,13 @@ int df_media_credentials_load(const char *path, struct df_media_credentials *out
 static int df_media_credentials_apply(struct df_media_credentials *credentials,
                                       const struct df_media_credentials_update *update) {
     if (update == NULL) return DF_OK;
-    if ((update->set_rtsp_password && update->clear_rtsp_password) ||
-        (update->set_relay_token && update->clear_relay_token)) return DF_ERR_INVALID;
+    if (update->set_rtsp_password && update->clear_rtsp_password)
+        return DF_ERR_INVALID;
     if (update->clear_rtsp_password) credentials->rtsp_password[0] = '\0';
     else if (update->set_rtsp_password && update->rtsp_password != NULL &&
              update->rtsp_password[0] != '\0' &&
              df_media_credentials_copy(credentials->rtsp_password,
                                        update->rtsp_password) != DF_OK) return DF_ERR_INVALID;
-    if (update->clear_relay_token) credentials->relay_token[0] = '\0';
-    else if (update->set_relay_token && update->relay_token != NULL &&
-             update->relay_token[0] != '\0' &&
-             df_media_credentials_copy(credentials->relay_token,
-                                       update->relay_token) != DF_OK) return DF_ERR_INVALID;
     return DF_OK;
 }
 
@@ -164,15 +153,14 @@ int df_media_credentials_write(const char *path,
     if (!df_media_credentials_path_is_valid(path)) return DF_ERR_INVALID;
     if (replacement != NULL) {
         if (df_media_credentials_copy(credentials.rtsp_password,
-                                      replacement->rtsp_password) != DF_OK ||
-            df_media_credentials_copy(credentials.relay_token,
-                                      replacement->relay_token) != DF_OK) return DF_ERR_INVALID;
+                                      replacement->rtsp_password) != DF_OK)
+            return DF_ERR_INVALID;
     } else if (df_media_credentials_load(path, &credentials) != DF_OK) {
         return DF_ERR_IO;
     }
     if (df_media_credentials_apply(&credentials, update) != DF_OK) return DF_ERR_INVALID;
-    content_length = snprintf(contents, sizeof(contents), "rtsp_password=%s\nrelay_token=%s\n",
-                              credentials.rtsp_password, credentials.relay_token);
+    content_length = snprintf(contents, sizeof(contents), "rtsp_password=%s\n",
+                              credentials.rtsp_password);
     if (content_length < 0 || (size_t)content_length >= sizeof(contents) ||
         snprintf(temporary, sizeof(temporary), "%s.tmp.XXXXXX", path) < 0) return DF_ERR_INVALID;
     descriptor = mkstemp(temporary);
@@ -204,5 +192,4 @@ void df_media_credentials_status(const struct df_media_credentials *credentials,
     memset(status, 0, sizeof(*status));
     if (credentials == NULL) return;
     status->rtsp_password_set = credentials->rtsp_password[0] != '\0';
-    status->relay_token_set = credentials->relay_token[0] != '\0';
 }

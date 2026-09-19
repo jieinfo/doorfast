@@ -46,6 +46,7 @@ struct df_media_encoder_process {
     size_t pending_offset;
     uint64_t pending_generation;
     uint64_t pending_timestamp_ms;
+    uint64_t frames_written;
     char last_error[DF_MEDIA_ENCODER_ERROR_MAX];
 };
 

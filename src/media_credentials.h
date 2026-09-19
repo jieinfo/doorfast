@@ -9,21 +9,16 @@
 
 struct df_media_credentials {
     char rtsp_password[DF_MEDIA_CREDENTIAL_VALUE_MAX];
-    char relay_token[DF_MEDIA_CREDENTIAL_VALUE_MAX];
 };
 
 struct df_media_credentials_update {
     bool set_rtsp_password;
     bool clear_rtsp_password;
     const char *rtsp_password;
-    bool set_relay_token;
-    bool clear_relay_token;
-    const char *relay_token;
 };
 
 struct df_media_credentials_status {
     bool rtsp_password_set;
-    bool relay_token_set;
 };
 
 int df_media_credentials_load(const char *path, struct df_media_credentials *out);

@@ -69,7 +69,7 @@ static int df_run_preflight(const char *path, const char *root) {
 }
 
 static int df_run_config(const char *path, int call_elev_override) {
-    struct df_runtime_config runtime;
+    struct df_runtime_config runtime = {0};
     int result = df_runtime_config_load(path, &runtime);
 
     if (result != DF_OK) {
@@ -80,14 +80,17 @@ static int df_run_config(const char *path, int call_elev_override) {
         runtime.config.call_elev = call_elev_override == 1;
     if (!runtime.config.enabled) {
         (void)fputs("doorfast: disabled\n", stdout);
+        df_runtime_config_destroy(&runtime);
         return 0;
     }
     result = df_runtime_service_run(&runtime);
     if (result != DF_OK) {
         (void)fprintf(stderr, "doorfast: runtime service failed on interface: %s\n",
                       runtime.config.gvs_interface);
+        df_runtime_config_destroy(&runtime);
         return 2;
     }
+    df_runtime_config_destroy(&runtime);
     return 0;
 }
 

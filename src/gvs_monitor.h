@@ -70,6 +70,13 @@ int df_gvs_monitor_set_first_frame_timeout(struct df_gvs_monitor *,
     uint64_t timeout_ms);
 int df_gvs_monitor_start(struct df_gvs_monitor *, const uint8_t local[6],
     const uint8_t station[6], uint32_t station_ipv4, uint64_t now_ms);
+int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *,
+    const uint8_t local[6], const uint8_t station[6], uint32_t station_ipv4,
+    uint64_t generation, uint64_t now_ms);
+int df_gvs_monitor_cancel(struct df_gvs_monitor *, uint64_t now_ms);
+int df_gvs_monitor_bind_call(struct df_gvs_monitor *, const uint8_t local[6],
+    const uint8_t station[6], uint32_t station_ipv4, uint64_t generation,
+    uint64_t now_ms);
 int df_gvs_monitor_step(struct df_gvs_monitor *, uint64_t now_ms,
     struct df_gvs_monitor_action *);
 int df_gvs_monitor_receive(struct df_gvs_monitor *, const struct df_gvs_frame *,

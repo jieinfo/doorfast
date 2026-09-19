@@ -13,7 +13,8 @@
 
 static const char *df_event_stream_valid_event(const char *event) {
     static const char *const names[] = {
-        "incoming_call", "call_established", "hangup", "timeout", "preempted"
+        "incoming_call", "call_established", "hangup", "timeout", "preempted",
+        "media_pipeline_failed"
     };
     size_t index;
 
@@ -137,22 +138,43 @@ int df_event_stream_init(struct df_event_stream *stream, const char *path) {
     return DF_OK;
 }
 
-int df_event_stream_publish(struct df_event_stream *stream, const char *event,
-                            uint64_t generation, uint64_t now_ms) {
+static int df_event_stream_publish_source(struct df_event_stream *stream,
+    const char *event, const char *station_id,
+    const uint8_t logical_address[6], uint64_t generation, uint64_t now_ms) {
     char line[DF_EVENT_STREAM_EVENT_MAX];
     size_t line_length;
     size_t index;
 
     if (stream == NULL || stream->listen_fd < 0 ||
         df_event_stream_valid_event(event) == NULL || generation == 0U ||
+        (station_id != NULL && (station_id[0] == '\0' ||
+            strlen(station_id) >= 33U)) ||
         now_ms < stream->last_timestamp_ms || stream->next_event_id == UINT64_MAX) {
         return DF_ERR_INVALID;
     }
-    line_length = (size_t)snprintf(line, sizeof(line),
-        "{\"schema_version\":1,\"event_id\":%llu,\"event\":\"%s\","
-        "\"generation\":%llu,\"timestamp_ms\":%llu}\n",
-        (unsigned long long)(stream->next_event_id + 1U), event,
-        (unsigned long long)generation, (unsigned long long)now_ms);
+    if (station_id == NULL && logical_address == NULL) {
+        line_length = (size_t)snprintf(line, sizeof(line),
+            "{\"schema_version\":1,\"event_id\":%llu,\"event\":\"%s\","
+            "\"generation\":%llu,\"timestamp_ms\":%llu}\n",
+            (unsigned long long)(stream->next_event_id + 1U), event,
+            (unsigned long long)generation, (unsigned long long)now_ms);
+    } else if (station_id != NULL) {
+        line_length = (size_t)snprintf(line, sizeof(line),
+            "{\"schema_version\":1,\"event_id\":%llu,\"event\":\"%s\","
+            "\"station_id\":\"%s\",\"generation\":%llu,"
+            "\"timestamp_ms\":%llu}\n",
+            (unsigned long long)(stream->next_event_id + 1U), event, station_id,
+            (unsigned long long)generation, (unsigned long long)now_ms);
+    } else {
+        line_length = (size_t)snprintf(line, sizeof(line),
+            "{\"schema_version\":1,\"event_id\":%llu,\"event\":\"%s\","
+            "\"logical_address\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+            "\"generation\":%llu,\"timestamp_ms\":%llu}\n",
+            (unsigned long long)(stream->next_event_id + 1U), event,
+            logical_address[0], logical_address[1], logical_address[2],
+            logical_address[3], logical_address[4], logical_address[5],
+            (unsigned long long)generation, (unsigned long long)now_ms);
+    }
     if (line_length == 0U || line_length >= sizeof(line)) {
         return DF_ERR_IO;
     }
@@ -183,6 +205,27 @@ int df_event_stream_publish(struct df_event_stream *stream, const char *event,
         client->queue_count++;
     }
     return DF_OK;
+}
+
+int df_event_stream_publish(struct df_event_stream *stream, const char *event,
+                            uint64_t generation, uint64_t now_ms) {
+    return df_event_stream_publish_source(stream, event, NULL, NULL,
+        generation, now_ms);
+}
+
+int df_event_stream_publish_station(struct df_event_stream *stream,
+                                    const char *event, const char *station_id,
+                                    uint64_t generation, uint64_t now_ms) {
+    return df_event_stream_publish_source(stream, event, station_id, NULL,
+        generation, now_ms);
+}
+
+int df_event_stream_publish_logical_address(struct df_event_stream *stream,
+    const char *event, const uint8_t logical_address[6],
+    uint64_t generation, uint64_t now_ms) {
+    if (logical_address == NULL) return DF_ERR_INVALID;
+    return df_event_stream_publish_source(stream, event, NULL,
+        logical_address, generation, now_ms);
 }
 
 static void df_event_stream_accept(struct df_event_stream *stream) {

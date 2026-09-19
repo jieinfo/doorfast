@@ -11,19 +11,15 @@ assert.deepEqual(formatMediaStatus({
     effective_capacity: 1,
     queue_drops: 2,
     rtsp_password_set: true,
-    relay_token_set: false,
     encoder_running: true,
-    failure: '',
-    relay_failures: 0
+    failure: ''
 }), [
     ['State', 'Publishing'],
     ['Generation', '9'],
     ['Effective capacity', '1'],
     ['Queue drops', '2'],
     ['RTSP password', 'Set'],
-    ['Relay token', 'Not set'],
     ['Encoder', 'Running'],
-    ['Relay failures', '0'],
     ['Failure', 'None']
 ]);
 
@@ -35,9 +31,7 @@ assert.throws(function() {
         effective_capacity: 1,
         queue_drops: 2,
         rtsp_password_set: 'secret',
-        relay_token_set: false,
         encoder_running: true,
-        failure: '',
-        relay_failures: 0
+        failure: ''
     });
 }, /boolean/);

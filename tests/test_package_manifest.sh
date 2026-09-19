@@ -3,15 +3,19 @@ set -eu
 
 test -f package/doorfast/Makefile
 test -f package/doorfast-media/Makefile
-grep -Fq 'DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libcurl +ca-bundle +libx264' package/doorfast-media/Makefile
-grep -Fq '/usr/lib/doorfast/media-v2.so' package/doorfast-media/Makefile
+grep -Fq 'DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libx264' package/doorfast-media/Makefile
+! grep -Fq 'libcurl' package/doorfast-media/Makefile
+grep -Eq 'DEPENDS:=.*\+ca-bundle' package/doorfast/Makefile
+grep -Fq '/usr/lib/doorfast/media-v3.so' package/doorfast-media/Makefile
 test "$(grep -Ec '^\s*\$\(INSTALL_(BIN|DATA|CONF)\)' package/doorfast-media/Makefile)" -eq 1
 ! find package/doorfast-media -name '*init*' -print -quit | grep .
 grep -Fq -- '-fPIC -shared' package/doorfast-media/Makefile
 grep -Fq -- '-Wl,-z,defs' package/doorfast-media/Makefile
 grep -Fq 'gvs_video_reassembly.c' package/doorfast-media/Makefile
-grep -Fq 'media_module.c' package/doorfast-media/Makefile
-grep -Fq 'media_relay.c' package/doorfast-media/Makefile
+grep -Fq 'media_session.c' package/doorfast-media/Makefile
+grep -Fq 'media_session_manager.c' package/doorfast-media/Makefile
+! grep -Fq 'media_relay.c' package/doorfast-media/Makefile
+! grep -Fq 'media_relay.h' package/doorfast-media/Makefile
 ! grep -Fq '$(wildcard $(PKG_BUILD_DIR)/src/*.c)' package/doorfast/Makefile
 grep -Fq '$(RM) $(DF_MEDIA_MODULE_SOURCES)' package/doorfast/Makefile
 test "$(grep -Fc '$(PKG_BUILD_DIR)/src/*.c' package/doorfast/Makefile)" -eq 2
@@ -37,16 +41,20 @@ test -f package/luci-app-doorfast/root/usr/share/luci/menu.d/luci-app-doorfast.j
 test -f package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/stations.js
+test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/media.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/deployment.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
 test -f package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 grep -q 'PKGARCH:=x86_64' package/doorfast/Makefile
 grep -q 'PKGARCH:=all' package/luci-app-doorfast/Makefile
-grep -q 'PKG_RELEASE:=15' package/luci-app-doorfast/Makefile
+grep -q 'PKG_RELEASE:=17' package/luci-app-doorfast/Makefile
 grep -q '+doorfast +luci-base +rpcd' package/luci-app-doorfast/Makefile
 grep -q 'preview media configuration' package/luci-app-doorfast/Makefile
 grep -Fq 'deployment.js $(1)/www/luci-static/resources/view/doorfast/deployment.js' package/luci-app-doorfast/Makefile
+grep -Fq 'stations.js $(1)/www/luci-static/resources/view/doorfast/stations.js' package/luci-app-doorfast/Makefile
+grep -Fq 'media.js $(1)/www/luci-static/resources/view/doorfast/media.js' package/luci-app-doorfast/Makefile
 grep -Fq 'relay.js $(1)/www/luci-static/resources/view/doorfast/relay.js' package/luci-app-doorfast/Makefile
 grep -Fq 'logs.js $(1)/www/luci-static/resources/view/doorfast/logs.js' package/luci-app-doorfast/Makefile
 grep -q '+libubus +libubox +libblobmsg-json' package/doorfast/Makefile
@@ -65,8 +73,12 @@ import json
 acl = json.load(open('package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-app-doorfast.json'))['luci-app-doorfast']
 assert acl['read']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
 assert acl['write']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
-assert set(acl['read']['ubus']['doorfast']) == {'status', 'logs'}
-assert set(acl['write']['ubus']['doorfast']) == {'media_credentials'}
+assert set(acl['read']['ubus']['doorfast']) == {
+    'status', 'stations', 'station_candidates', 'logs'
+}
+assert set(acl['write']['ubus']['doorfast']) == {
+    'station_scan', 'media_credentials'
+}
 assert set(acl['read']) == {'uci', 'ubus'}
 assert set(acl['write']) == {'uci', 'ubus'}
 
@@ -75,17 +87,35 @@ assert menu['admin/services/doorfast']['action']['type'] == 'firstchild'
 assert menu['admin/services/doorfast/status']['action']['path'] == 'doorfast/status'
 assert menu['admin/services/doorfast/settings']['action']['path'] == 'doorfast/settings'
 assert menu['admin/services/doorfast/deployment']['action']['path'] == 'doorfast/deployment'
+assert menu['admin/services/doorfast/stations']['action']['path'] == 'doorfast/stations'
+assert menu['admin/services/doorfast/media']['action']['path'] == 'doorfast/media'
 assert menu['admin/services/doorfast/relay']['action']['path'] == 'doorfast/relay'
 assert menu['admin/services/doorfast/logs']['action']['path'] == 'doorfast/logs'
+orders = {
+    key: value['order'] for key, value in menu.items()
+    if key.startswith('admin/services/doorfast/')
+}
+assert orders == {
+    'admin/services/doorfast/status': 10,
+    'admin/services/doorfast/deployment': 20,
+    'admin/services/doorfast/stations': 30,
+    'admin/services/doorfast/media': 40,
+    'admin/services/doorfast/settings': 50,
+    'admin/services/doorfast/relay': 60,
+    'admin/services/doorfast/logs': 70,
+}
 PY
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/doorfast/status_model.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/status.js
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/stations.js
+node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/media.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/settings.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/deployment.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 node tests/test_luci_settings.js
-node tests/test_luci_media_view.js
+node tests/test_luci_media.js
+node tests/test_luci_stations.js
 node tests/test_luci_deployment.js
 node tests/test_luci_relay.js
 node tests/test_luci_logs.js
@@ -93,6 +123,11 @@ grep -q 'scripts/feeds install libpcap libuci libjson-c libopenssl' .github/work
 grep -q 'actions/cache@v4' .github/workflows/build-apk.yml
 grep -q 'cancel-in-progress: true' .github/workflows/build-apk.yml
 grep -q 'sh tests/test_site_inventory.sh' .github/workflows/build-apk.yml
+grep -Fq 'node tests/test_luci_media.js' .github/workflows/build-apk.yml
+grep -Fq 'sh tests/test_media_credential_migration.sh' .github/workflows/build-apk.yml
+grep -Fq 'node tests/test_luci_deployment.js' .github/workflows/build-apk.yml
+grep -Fq 'node tests/test_luci_stations.js' .github/workflows/build-apk.yml
+! grep -Fq 'node tests/test_luci_media_view.js' .github/workflows/build-apk.yml
 grep -Fq -- "-name 'doorfast-[0-9]*.apk'" .github/workflows/build-apk.yml
 ! grep -q 'bin/packages/\*\*/\*.apk' .github/workflows/build-apk.yml
 grep -q 'config_load doorfast' package/doorfast/files/doorfast.init
@@ -114,6 +149,7 @@ grep -F "option media_enabled '0'" package/doorfast/files/doorfast.config
 grep -F "option media_go2rtc_port '8554'" package/doorfast/files/doorfast.config
 ! grep -Fq 'media_rtsp_password' package/doorfast/files/doorfast.config
 ! grep -Fq 'media_relay_token' package/doorfast/files/doorfast.config
+! grep -Fq 'media_relay_url' package/doorfast/files/doorfast.config
 ! grep -Fq 'media_publish_retries' package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-automation.config
 grep -F "config automation 'main'" package/doorfast/files/doorfast-automation.config
@@ -130,8 +166,11 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=52' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=2' package/doorfast-media/Makefile
+grep -q 'PKG_RELEASE:=54' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=54' package/doorfast-media/Makefile
+doorfast_release=$(sed -n 's/^PKG_RELEASE:=//p' package/doorfast/Makefile)
+doorfast_media_release=$(sed -n 's/^PKG_RELEASE:=//p' package/doorfast-media/Makefile)
+test "$doorfast_release" = "$doorfast_media_release"
 grep -Fq "option token ''" package/doorfast/files/doorfast-events.config
 grep -Fq 'store_token "$token" "$token_file"' package/doorfast/files/doorfast-event-relay.init
 grep -Fq 'http://*) ;;' package/doorfast/files/doorfast-event-relay.init
@@ -190,6 +229,9 @@ grep -Fq 'CONFIG_BUILD_PATENTED=y' .github/workflows/build-apk.yml
 grep -Fq 'CONFIG_PACKAGE_libx264=y' .github/workflows/build-apk.yml
 grep -Fq 'doorfast-media.apk' .github/workflows/build-apk.yml
 grep -Fq 'wc -l <"$media_list"' .github/workflows/build-apk.yml
+grep -Fq "grep -Fxq '/usr/lib/doorfast/media-v3.so' \"\$media_list\"" \
+  .github/workflows/build-apk.yml
+! grep -Fq '/usr/lib/doorfast/media-v2.so' .github/workflows/build-apk.yml
 node tests/js/test_media_status.mjs
 grep -Fq -- '-DDF_WITH_UBUS -DDF_PCM_HTTP_PROGRAM' package/doorfast/Makefile
 grep -Fq 'src/pcm_http.c' package/doorfast/Makefile
@@ -219,10 +261,67 @@ grep -F "option evidence_root '/mnt/doorfast'" package/doorfast/files/doorfast-d
 grep -F "option observation ''" package/doorfast/files/doorfast-deployment.config
 grep -F "option reserve_mib '6144'" package/doorfast/files/doorfast-deployment.config
 ! grep -q -- '--preflight' package/doorfast/files/doorfast.init
-grep -q 'define Package/doorfast/postinst' package/doorfast/Makefile
-grep -Fq '[ -z "$${IPKG_INSTROOT}" ]' package/doorfast/Makefile
-grep -Fq '[ "$${PKG_UPGRADE}" = "1" ]' package/doorfast/Makefile
-grep -q '/etc/init.d/doorfast restart' package/doorfast/Makefile
+python3 - <<'PACKAGE_LIFECYCLE'
+from pathlib import Path
+import re
+
+core = Path('package/doorfast/Makefile').read_text()
+media = Path('package/doorfast-media/Makefile').read_text()
+runtime = Path('src/runtime_media_module.h').read_text()
+
+source_block = media.split('DF_MEDIA_SOURCES:=', 1)[1].split('\n\ndefine ', 1)[0]
+sources = re.findall(r'/src/([a-z0-9_]+\.c)', source_block)
+assert sources == [
+    'gvs_video_reassembly.c',
+    'gvs_monitor.c',
+    'gvs_station.c',
+    'media_capacity.c',
+    'media_credentials.c',
+    'media_encoder.c',
+    'media_frame_queue.c',
+    'media_module_config.c',
+    'media_session.c',
+    'media_session_manager.c',
+], sources
+assert 'media-v2.so' not in media
+assert 'media-v3.so' in media
+assert '/usr/lib/doorfast/media-v3.so' in runtime
+
+core_postinst = core.split('define Package/doorfast/postinst\n', 1)[1].split('\nendef', 1)[0]
+media_postinst = media.split('define Package/doorfast-media/postinst\n', 1)[1].split('\nendef', 1)[0]
+module_check = 'test -r /usr/lib/doorfast/media-v3.so'
+restart = '/etc/init.d/doorfast restart'
+core_module_absent = '[ ! -r /usr/lib/doorfast/media-v3.so ]'
+assert core_module_absent in core_postinst
+assert restart in core_postinst
+assert core_postinst.index(core_module_absent) < core_postinst.index(restart)
+assert module_check in media_postinst
+assert restart in media_postinst
+assert media_postinst.index(module_check) < media_postinst.index(restart)
+assert '[ -z "$${IPKG_INSTROOT}" ]' in media_postinst
+assert '[ "$${PKG_UPGRADE}" = "1" ]' in media_postinst
+PACKAGE_LIFECYCLE
+
+media_link_dir=$(mktemp -d "${TMPDIR:-/tmp}/doorfast-media-link.XXXXXX")
+trap 'rm -rf "$media_link_dir"' EXIT HUP INT TERM
+media_sources=$(python3 - <<'MEDIA_SOURCES'
+from pathlib import Path
+import re
+
+manifest = Path('package/doorfast-media/Makefile').read_text()
+block = manifest.split('DF_MEDIA_SOURCES:=', 1)[1].split('\n\ndefine ', 1)[0]
+print(' '.join('src/' + source for source in re.findall(r'/src/([a-z0-9_]+\.c)', block)))
+MEDIA_SOURCES
+)
+case "$(uname -s)" in
+    Darwin) media_link_flags='-dynamiclib -Wl,-undefined,error' ;;
+    *) media_link_flags='-shared -Wl,-z,defs' ;;
+esac
+# shellcheck disable=SC2086
+${CC:-cc} -D_DEFAULT_SOURCE -std=c17 -Wall -Wextra -Werror -pedantic \
+    -fPIC $media_link_flags -Isrc $media_sources -o "$media_link_dir/media-v3.so"
+nm -g "$media_link_dir/media-v3.so" | grep -q 'df_media_module_api_v3'
+! nm -g "$media_link_dir/media-v3.so" | grep -q 'df_media_module_api_v2'
 
 reload_trace=''
 trigger_name=''

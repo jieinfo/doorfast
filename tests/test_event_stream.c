@@ -61,6 +61,69 @@ void test_event_stream_serializes_exact_json(void) {
     (void)unlink(path);
 }
 
+void test_event_stream_serializes_station_identity(void) {
+    struct df_event_stream stream;
+    char path[108];
+    char line[256] = {0};
+    int client;
+    ssize_t length;
+
+    event_stream_path(path);
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_init(&stream, path));
+    client = event_stream_connect(path);
+    TEST_ASSERT_INT_EQ(1, client >= 0);
+    if (client >= 0)
+        (void)fcntl(client, F_SETFL, fcntl(client, F_GETFL, 0) | O_NONBLOCK);
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_process(&stream));
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_publish_station(&stream,
+        "preempted", "gate_side", 8U, 42U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_process(&stream));
+    length = read(client, line, sizeof(line) - 1U);
+    TEST_ASSERT_INT_EQ(112, (int)length);
+    if (length > 0) {
+        line[length] = '\0';
+        TEST_ASSERT_INT_EQ(0, strcmp(line,
+            "{\"schema_version\":1,\"event_id\":1,\"event\":\"preempted\","
+            "\"station_id\":\"gate_side\",\"generation\":8,"
+            "\"timestamp_ms\":42}\n"));
+    }
+    (void)close(client);
+    df_event_stream_stop(&stream);
+    (void)unlink(path);
+}
+
+void test_event_stream_serializes_unknown_logical_address(void) {
+    const uint8_t peer[6] = {0x32U, 2U, 1U, 0U, 9U, 0U};
+    struct df_event_stream stream;
+    char path[108];
+    char line[256] = {0};
+    int client;
+    ssize_t length;
+
+    event_stream_path(path);
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_init(&stream, path));
+    client = event_stream_connect(path);
+    TEST_ASSERT_INT_EQ(1, client >= 0);
+    if (client >= 0)
+        (void)fcntl(client, F_SETFL, fcntl(client, F_GETFL, 0) | O_NONBLOCK);
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_process(&stream));
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_publish_logical_address(&stream,
+        "incoming_call", peer, 9U, 43U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_event_stream_process(&stream));
+    length = read(client, line, sizeof(line) - 1U);
+    TEST_ASSERT_INT_EQ(129, (int)length);
+    if (length > 0) {
+        line[length] = '\0';
+        TEST_ASSERT_INT_EQ(0, strcmp(line,
+            "{\"schema_version\":1,\"event_id\":1,\"event\":\"incoming_call\","
+            "\"logical_address\":\"32:02:01:00:09:00\",\"generation\":9,"
+            "\"timestamp_ms\":43}\n"));
+    }
+    (void)close(client);
+    df_event_stream_stop(&stream);
+    (void)unlink(path);
+}
+
 void test_event_stream_rejects_unknown_event(void) {
     struct df_event_stream stream;
     char path[108];

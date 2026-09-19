@@ -46,6 +46,70 @@ void test_gvs_udp_sender_binds_configured_source_address(void) {
     df_gvs_udp_sender_close(&sender);
 }
 
+void test_gvs_udp_sender_broadcasts_exact_station_scan_frame(void) {
+    const uint8_t identity[6] = {0x61U, 0x02U, 0x01U, 0x01U, 0x01U, 0x01U};
+    const uint8_t logical_broadcast[6] = {
+        0x32U, 0x02U, 0x01U, 0xffU, 0xffU, 0xffU};
+    const uint8_t payload[4] = {0x02U, 0x00U, 0x00U, 0x01U};
+    struct df_gvs_station_scan scan = {0};
+    struct df_gvs_station_scan_action action = {0};
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    struct sockaddr_in address;
+    struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
+    uint8_t received[128];
+    int broadcast = 0;
+    socklen_t broadcast_length = sizeof(broadcast);
+    int receiver;
+    ssize_t received_length;
+
+    receiver = socket(AF_INET, SOCK_DGRAM, 0);
+    TEST_ASSERT_INT_EQ(1, receiver >= 0);
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_port = htons(8300U);
+    TEST_ASSERT_INT_EQ(0, bind(receiver, (const struct sockaddr *)&address,
+        sizeof(address)));
+    TEST_ASSERT_INT_EQ(0, setsockopt(receiver, SOL_SOCKET, SO_RCVTIMEO,
+        &timeout, sizeof(timeout)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "0.0.0.0",
+        8301U, udp_sender_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(0, getsockopt(sender.fd, SOL_SOCKET, SO_BROADCAST,
+        &broadcast, &broadcast_length));
+    TEST_ASSERT_INT_EQ(1, broadcast != 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_station_scan_start(&scan, identity, 1U));
+    TEST_ASSERT_INT_EQ(1, df_gvs_station_scan_next(&scan, 1U, &action));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_gvs_udp_sender_emit_station_scan(&sender, &action));
+    received_length = recv(receiver, received, sizeof(received), 0);
+
+    TEST_ASSERT_INT_EQ(46, (int)received_length);
+    if (received_length == 46) {
+        TEST_ASSERT_INT_EQ(0,
+            memcmp(received, "GVSGVS\xA5\xA5\xA5\xA5", 10U));
+        TEST_ASSERT_INT_EQ(0,
+            memcmp(received + 10U, logical_broadcast, 6U));
+        TEST_ASSERT_INT_EQ(0, memcmp(received + 16U, identity, 6U));
+        TEST_ASSERT_INT_EQ(0,
+            memcmp(received + 22U, (const uint8_t[]){
+                0x31U, 0x31U, 0x31U, 0x31U,
+                0x31U, 0x31U, 0x31U, 0x31U}, 8U));
+        TEST_ASSERT_INT_EQ(0,
+            memcmp(received + 30U, (const uint8_t[]){
+                0x41U, 0x41U, 0x41U, 0x41U,
+                0x41U, 0x41U, 0x41U, 0x41U}, 8U));
+        TEST_ASSERT_INT_EQ(0x07, received[38]);
+        TEST_ASSERT_INT_EQ(0x06, received[39]);
+        TEST_ASSERT_INT_EQ(4, received[40]);
+        TEST_ASSERT_INT_EQ(0, received[41]);
+        TEST_ASSERT_INT_EQ(0, memcmp(received + 42U, payload, sizeof(payload)));
+    }
+    TEST_ASSERT_INT_EQ(1, (int)sender.sent);
+    TEST_ASSERT_INT_EQ(0, (int)sender.failed);
+    df_gvs_udp_sender_close(&sender);
+    close(receiver);
+}
+
 void test_gvs_udp_presence_treats_unsendable_presence_actions_as_local_only(void) {
     const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
     struct df_gvs_udp_sender sender = {.fd = -1};

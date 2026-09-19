@@ -14,11 +14,21 @@ json_field() {
 }
 
 http_error() {
-  local status="$1" message="$2" allow="${3:-}"
+  local status="$1" message="$2" allow="${3:-}" code
+  case "$message" in
+    'method not allowed') code=method_not_allowed ;;
+    'application/json required') code=unsupported_media_type ;;
+    'monitor generation mismatch') code=generation_mismatch ;;
+    'monitor state does not allow operation') code=invalid_state ;;
+    'monitor service unavailable'|'station service unavailable')
+      code=service_unavailable ;;
+    'unknown endpoint') code=not_found ;;
+    *) code=invalid_request ;;
+  esac
   printf 'Status: %s\r\n' "$status"
   [ -z "$allow" ] || printf 'Allow: %s\r\n' "$allow"
   printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
-  printf '{"error":"%s"}\n' "$message"
+  printf '{"error":{"code":"%s","message":"%s"}}\n' "$code" "$message"
 }
 
 uint64_nonzero() {
@@ -59,6 +69,86 @@ monitor_json_content_type() {
   esac
 }
 
+monitor_validate_keys() {
+  local expected="$1"
+  printf '%s\n' "$MONITOR_COMPACT" | awk -v expected="$expected" '
+    BEGIN {
+      count = split(expected, names, ",")
+      for (i = 1; i <= count; i++) allowed[names[i]] = 1
+    }
+    {
+      if (substr($0, 1, 1) != "{" ||
+          substr($0, length($0), 1) != "}") exit 1
+      rest = substr($0, 2, length($0) - 2)
+      found = 0
+      while (length(rest) > 0) {
+        if (substr(rest, 1, 1) != "\"") exit 1
+        rest = substr(rest, 2)
+        quote = index(rest, "\"")
+        if (quote == 0) exit 1
+        key = substr(rest, 1, quote - 1)
+        rest = substr(rest, quote + 1)
+        if (substr(rest, 1, 1) != ":") exit 1
+        rest = substr(rest, 2)
+        if (!(key in allowed) || seen[key]++) exit 1
+        if (key == "runtime_id" || key == "station_id") {
+          if (substr(rest, 1, 1) != "\"") exit 1
+          rest = substr(rest, 2)
+          quote = index(rest, "\"")
+          if (quote == 0) exit 1
+          value = substr(rest, 1, quote - 1)
+          rest = substr(rest, quote + 1)
+          if (key == "runtime_id" &&
+              (length(value) != 16 || value !~ /^[0-9a-f]+$/)) exit 1
+          if (key == "station_id" &&
+              (length(value) > 32 || value !~ /^[a-z][a-z0-9_]*$/)) exit 1
+        } else if (key == "generation") {
+          if (match(rest, /^[0-9]+/) != 1) exit 1
+          rest = substr(rest, RLENGTH + 1)
+        } else if (key == "active") {
+          if (substr(rest, 1, 4) == "true") rest = substr(rest, 5)
+          else if (substr(rest, 1, 5) == "false") rest = substr(rest, 6)
+          else exit 1
+        } else exit 1
+        found++
+        if (length(rest) == 0) break
+        if (substr(rest, 1, 1) != ",") exit 1
+        rest = substr(rest, 2)
+        if (length(rest) == 0) exit 1
+      }
+      if (found != count) exit 1
+    }
+  '
+}
+
+monitor_string_field() {
+  local expression="$1" value
+  value="$(json_field "$MONITOR_BODY" "$expression")" || return 1
+  [ -n "$value" ] || return 1
+  printf '%s' "$value"
+}
+
+monitor_identity_fields() {
+  runtime_id="$(monitor_string_field '@.runtime_id')" || return 1
+  station_id="$(monitor_string_field '@.station_id')" || return 1
+  [ "${#runtime_id}" -eq 16 ] || return 1
+  case "$runtime_id" in *[!0-9a-f]*) return 1 ;; esac
+  [ "${#station_id}" -le 32 ] || return 1
+  case "$station_id" in
+    ''|[!a-z]*|*[!a-z0-9_]*) return 1 ;;
+  esac
+}
+
+monitor_error_status() {
+  case "$1" in
+    runtime_mismatch|generation_mismatch|capacity_busy) printf '%s' '409 Conflict' ;;
+    station_not_found) printf '%s' '404 Not Found' ;;
+    resource_exhausted|encoder_failed|service_unavailable) printf '%s' '503 Service Unavailable' ;;
+    invalid_request) printf '%s' '400 Bad Request' ;;
+    *) printf '%s' '503 Service Unavailable' ;;
+  esac
+}
+
 monitor_call() {
   local method="$1" arguments="$2" output status
   if [ -n "$arguments" ]; then
@@ -77,10 +167,19 @@ monitor_call() {
   if [ "$status" -ne 0 ]; then
     case "$status" in
       2) http_error '400 Bad Request' 'invalid monitor request' ;;
-      4) http_error '409 Conflict' 'monitor generation mismatch' ;;
-      8) http_error '409 Conflict' 'monitor state does not allow operation' ;;
       *) http_error '503 Service Unavailable' 'monitor service unavailable' ;;
     esac
+    return
+  fi
+  if [ -z "$output" ] || ! jsonfilter -s "$output" -e '@' >/dev/null 2>&1; then
+    http_error '503 Service Unavailable' 'monitor service unavailable'
+    return
+  fi
+  error_code="$(json_field "$output" '@.error.code' || true)"
+  if [ -n "$error_code" ]; then
+    printf 'Status: %s\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n' \
+      "$(monitor_error_status "$error_code")"
+    printf '%s\n' "$output"
     return
   fi
   printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
@@ -160,6 +259,39 @@ select_audio_chunk() {
   done
   return 1
 }
+
+if [ "$path" = /api/v1/stations ]; then
+  [ "${REQUEST_METHOD:-}" = GET ] || {
+    http_error '405 Method Not Allowed' 'method not allowed' GET
+    exit 0
+  }
+  case "${CONTENT_LENGTH:-0}" in
+    ''|*[!0-9]*)
+      http_error '400 Bad Request' 'invalid station request'
+      exit 0
+      ;;
+    0) ;;
+    *)
+      http_error '400 Bad Request' 'invalid station request'
+      exit 0
+      ;;
+  esac
+  [ -z "${QUERY_STRING:-}" ] || {
+    http_error '400 Bad Request' 'invalid station request'
+    exit 0
+  }
+  stations="$(ubus call doorfast stations 2>/dev/null)" || {
+    http_error '503 Service Unavailable' 'station service unavailable'
+    exit 0
+  }
+  [ -n "$stations" ] && jsonfilter -s "$stations" -e '@' >/dev/null 2>&1 || {
+    http_error '503 Service Unavailable' 'station service unavailable'
+    exit 0
+  }
+  printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+  printf '%s\n' "$stations"
+  exit 0
+fi
 
 if [ "$path" = /api/v1/video/latest.jpg ]; then
   snapshot="${DOORFAST_VIDEO_SNAPSHOT:-/tmp/doorfast-latest.jpg}"
@@ -316,11 +448,11 @@ case "$path" in
       http_error '400 Bad Request' 'invalid monitor request'
       exit 0
     }
-    [ -z "$MONITOR_COMPACT" ] || [ "$MONITOR_COMPACT" = '{}' ] || {
+    monitor_validate_keys 'runtime_id,station_id' && monitor_identity_fields || {
       http_error '400 Bad Request' 'invalid monitor request'
       exit 0
     }
-    monitor_call monitor_start '{}'
+    monitor_call monitor_start "{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\"}"
     exit 0
     ;;
   /api/v1/monitor/stop)
@@ -336,16 +468,17 @@ case "$path" in
       http_error '400 Bad Request' 'invalid monitor request'
       exit 0
     }
+    monitor_validate_keys 'runtime_id,station_id,generation' &&
+      monitor_identity_fields || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
     generation="$(json_field "$MONITOR_BODY" '@.generation')" || generation=''
     uint64_nonzero "$generation" || {
       http_error '400 Bad Request' 'invalid monitor request'
       exit 0
     }
-    [ "$MONITOR_COMPACT" = "{\"generation\":$generation}" ] || {
-      http_error '400 Bad Request' 'invalid monitor request'
-      exit 0
-    }
-    monitor_call monitor_stop "{\"generation\":$generation}"
+    monitor_call monitor_stop "{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\",\"generation\":$generation}"
     exit 0
     ;;
   /api/v1/monitor/viewer)
@@ -361,6 +494,11 @@ case "$path" in
       http_error '400 Bad Request' 'invalid monitor request'
       exit 0
     }
+    monitor_validate_keys 'runtime_id,station_id,generation,active' &&
+      monitor_identity_fields || {
+      http_error '400 Bad Request' 'invalid monitor request'
+      exit 0
+    }
     generation="$(json_field "$MONITOR_BODY" '@.generation')" || generation=''
     active="$(json_field "$MONITOR_BODY" '@.active')" || active=''
     uint64_nonzero "$generation" || {
@@ -372,15 +510,8 @@ case "$path" in
       exit 0
       ;;
     esac
-    [ "$MONITOR_COMPACT" = \
-        "{\"generation\":$generation,\"active\":$active}" ] ||
-      [ "$MONITOR_COMPACT" = \
-        "{\"active\":$active,\"generation\":$generation}" ] || {
-        http_error '400 Bad Request' 'invalid monitor request'
-        exit 0
-      }
     monitor_call monitor_viewer \
-      "{\"generation\":$generation,\"active\":$active}"
+      "{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\",\"generation\":$generation,\"active\":$active}"
     exit 0
     ;;
   /api/v1/monitor/status)

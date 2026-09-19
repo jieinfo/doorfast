@@ -166,3 +166,35 @@ assert.deepEqual(model.formatStatus({...payload, deployment}).at(-1), {
 });
 deployment.recorder.state = 'stale';
 assert.equal(model.formatStatus({...payload, deployment}).at(-1).rows.at(-1)[1], '陈旧');
+
+const statusViewPath = path.join(__dirname, '..', 'package',
+    'luci-app-doorfast', 'htdocs', 'luci-static', 'resources', 'view',
+    'doorfast', 'status.js');
+const statusViewSource = fs.readFileSync(statusViewPath, 'utf8');
+assert.doesNotMatch(statusViewSource, /form\.Map/);
+assert.doesNotMatch(statusViewSource, /media_enabled|media_credentials/);
+
+const statusPollQueue = [];
+const statusPoll = {
+    add: callback => {
+        if (statusPollQueue.includes(callback))
+            return false;
+        statusPollQueue.push(callback);
+        return true;
+    }
+};
+const statusRpc = {declare: () => () => Promise.resolve(payload)};
+const statusView = {extend: properties => properties};
+const statusDom = {content: () => {}};
+const statusElement = () => ({});
+const statusViewModel = {
+    unavailableLabel: 'unavailable', staleLabel: 'stale',
+    formatStatus: () => []
+};
+const statusPageDefinition = new Function('dom', 'poll', 'rpc', 'view',
+    'statusModel', 'E', statusViewSource)(statusDom, statusPoll, statusRpc,
+    statusView, statusViewModel, statusElement);
+const statusPage = {...statusPageDefinition};
+statusPage.render(payload);
+statusPage.render(payload);
+assert.equal(statusPollQueue.length, 1);

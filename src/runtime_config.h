@@ -2,6 +2,8 @@
 #define DOORFAST_RUNTIME_CONFIG_H
 
 #include "config.h"
+#include "gvs_identity.h"
+#include "station_registry.h"
 
 #define DF_RUNTIME_BRAND_MAX 16
 #define DF_RUNTIME_INTERFACE_MAX 64
@@ -13,7 +15,11 @@
 #define DF_RUNTIME_MEDIA_HOST_MAX 64
 #define DF_RUNTIME_MEDIA_STREAM_MAX 65
 #define DF_RUNTIME_MEDIA_USERNAME_MAX 33
-#define DF_RUNTIME_MEDIA_RELAY_URL_MAX 256
+
+enum df_gvs_multicast_mode {
+    DF_GVS_MULTICAST_AUTO = 0,
+    DF_GVS_MULTICAST_CUSTOM,
+};
 
 struct df_runtime_config {
     struct df_config config;
@@ -23,6 +29,9 @@ struct df_runtime_config {
     char passive_interface[DF_RUNTIME_INTERFACE_MAX];
     char host_interface[DF_RUNTIME_INTERFACE_MAX];
     char gvs_local_address[DF_RUNTIME_ADDRESS_MAX];
+    enum df_gvs_multicast_mode multicast_mode;
+    char multicast_address[DF_GVS_IPV4_TEXT_SIZE];
+    struct df_station_registry stations;
     char indoor_ipaddr[DF_RUNTIME_IPV4_MAX];
     char indoor_netmask[DF_RUNTIME_IPV4_MAX];
     char uplink_interface[DF_RUNTIME_INTERFACE_MAX];
@@ -34,10 +43,10 @@ struct df_runtime_config {
     char media_go2rtc_host[DF_RUNTIME_MEDIA_HOST_MAX];
     char media_stream_name[DF_RUNTIME_MEDIA_STREAM_MAX];
     char media_rtsp_username[DF_RUNTIME_MEDIA_USERNAME_MAX];
-    char media_relay_url[DF_RUNTIME_MEDIA_RELAY_URL_MAX];
 };
 
 int df_runtime_config_parse(const char *uci_text, struct df_runtime_config *runtime);
 int df_runtime_config_load(const char *path, struct df_runtime_config *runtime);
+void df_runtime_config_destroy(struct df_runtime_config *runtime);
 
 #endif
