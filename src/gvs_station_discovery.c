@@ -12,6 +12,14 @@
 #define DF_GVS_STATION_SCAN_INTERVAL_MS 500U
 #define DF_GVS_STATION_SCAN_COUNT 3U
 #define DF_GVS_STATION_REPLY_SIZE 42U
+#define DF_GVS_STATION_REPLY_STATUS_SIZE 44U
+
+static bool df_gvs_station_reply_payload_valid(const struct df_gvs_frame *frame) {
+    if (frame == NULL) return false;
+    if (frame->payload_length == 0U) return true;
+    return frame->payload_length == 2U && frame->payload[0] == 0x02U &&
+        frame->payload[1] == 0x00U;
+}
 
 static bool df_gvs_station_ipv4_is_unicast(uint32_t ipv4) {
     uint32_t host = ntohl(ipv4);
@@ -120,13 +128,14 @@ int df_gvs_station_discovery_observe(struct df_gvs_station_discovery *discovery,
     if (discovery == NULL || packet == NULL ||
         !df_gvs_station_identity_is_valid(identity) ||
         df_gvs_inspect_udp_prefix(packet, packet_length, &prefix) != 1 ||
-        !prefix.payload_complete || prefix.destination_port != 8300U ||
-        prefix.declared_payload_length != DF_GVS_STATION_REPLY_SIZE ||
+        !prefix.payload_complete || prefix.destination_port == 0U ||
+        (prefix.declared_payload_length != DF_GVS_STATION_REPLY_SIZE &&
+            prefix.declared_payload_length != DF_GVS_STATION_REPLY_STATUS_SIZE) ||
         !df_gvs_station_ipv4_is_unicast(prefix.source_ipv4) ||
         df_gvs_frame_parse(packet + prefix.payload_offset,
             prefix.declared_payload_length, &frame, &event) != DF_OK ||
         frame.family != 0x07U || frame.opcode != 0x86U ||
-        frame.payload_length != 0U ||
+        !df_gvs_station_reply_payload_valid(&frame) ||
         memcmp(frame.destination, identity, 6U) != 0 ||
         df_gvs_station_validate(frame.source) != DF_OK ||
         frame.source[1] != identity[1] || frame.source[2] != identity[2])
