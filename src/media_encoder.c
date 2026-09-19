@@ -254,7 +254,7 @@ static int df_media_encoder_command_build(
         APPEND("-bsf:v"); APPEND("dump_extra=freq=keyframe");
     }
     APPEND("-f"); APPEND("rtsp"); APPEND("-rtsp_transport"); APPEND("tcp");
-    APPEND("-rtsp_flags"); APPEND("send_bye"); APPEND(command->destination);
+    APPEND(command->destination);
 #undef APPEND
     command->argv[count] = NULL;
     *selected = encoder;
