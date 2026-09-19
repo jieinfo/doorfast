@@ -240,7 +240,7 @@ void test_media_encoder_exec_uses_complete_rtsp_arguments(void)
     TEST_ASSERT_INT_EQ(1, strstr(contents,
         "-x264-params\nrepeat-headers=1:scenecut=0\n") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, strstr(contents, "-rtsp_transport\ntcp\n") != NULL ? 1 : 0);
-    TEST_ASSERT_INT_EQ(1, strstr(contents, "-rtsp_flags\nsend_bye\n") != NULL ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, strstr(contents, "-rtsp_flags\n") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, strstr(contents,
         "rtsp://doorfast:secret%20value@ha.local:8554/doorfast_preview\n") != NULL ? 1 : 0);
 }
