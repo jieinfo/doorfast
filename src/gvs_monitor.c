@@ -240,9 +240,8 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         return DF_OK;
     }
     if (monitor->state == DF_GVS_MONITOR_REQUESTING && frame->opcode == 0x50U) {
+        if (frame->payload_length != 0U) return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
-        df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_UNCONFIRMED);
-        result->failed = true;
         return DF_OK;
     }
     if (monitor->state == DF_GVS_MONITOR_STOPPING && frame->opcode == 0x82U &&

@@ -50,14 +50,16 @@ void test_gvs_monitor_retries_captured_request_and_accepts_confirmation(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, monitor.state);
 }
 
-void test_gvs_monitor_rejects_wrong_reply_and_marks_unconfirmed_response(void) {
+void test_gvs_monitor_retries_after_unconfirmed_response(void) {
     const uint8_t local[6] = {0x61, 0x02, 0x01, 0x01, 0x01, 0x01};
     const uint8_t station[6] = {0x32, 0x02, 0x01, 0x00, 0x02, 0x00};
     const uint8_t other_station[6] = {0x32, 0x02, 0x01, 0x00, 0x03, 0x00};
     const uint8_t invalid_station[6] = {0x32, 0x02, 0x01, 0x01, 0x03, 0x00};
     const uint8_t confirmation[] = {0x1e, 0x00, 0x01};
     const uint8_t malformed_confirmation[] = {0x1e, 0x00, 0x00};
+    const uint8_t malformed_unconfirmed[] = {0x00};
     struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_action action = {0};
     struct df_gvs_monitor_result result = {0};
 
     df_gvs_monitor_init(&monitor);
@@ -65,6 +67,8 @@ void test_gvs_monitor_rejects_wrong_reply_and_marks_unconfirmed_response(void) {
         &monitor, local, invalid_station, 0x01020304U, 100U));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(
         &monitor, local, station, 0x01020304U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 100U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, monitor_receive(&monitor, other_station,
         local, 0x84, confirmation, sizeof(confirmation), 0x01020304U, 101U,
         &result));
@@ -78,11 +82,56 @@ void test_gvs_monitor_rejects_wrong_reply_and_marks_unconfirmed_response(void) {
         local, 0x84, malformed_confirmation, sizeof(malformed_confirmation),
         0x01020304U, 101U, &result));
     TEST_ASSERT_INT_EQ(100, (int)monitor.last_now_ms);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, monitor_receive(&monitor, station,
+        local, 0x50, malformed_unconfirmed, sizeof(malformed_unconfirmed),
+        0x01020304U, 101U, &result));
+    TEST_ASSERT_INT_EQ(100, (int)monitor.last_now_ms);
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x50,
         NULL, 0U, 0x01020304U, 102U, &result));
-    TEST_ASSERT_INT_EQ(1, result.failed ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, result.failed ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_FAILURE_NONE, monitor.failure);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 1100U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x04, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x50,
+        NULL, 0U, 0x01020304U, 1102U, &result));
+    TEST_ASSERT_INT_EQ(0, result.failed ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 2100U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x04, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84,
+        confirmation, sizeof(confirmation), 0x01020304U, 2150U, &result));
+    TEST_ASSERT_INT_EQ(1, result.confirmed ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, monitor.state);
+}
+
+void test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit(void) {
+    const uint8_t local[6] = {0x61, 0x02, 0x01, 0x01, 0x01, 0x01};
+    const uint8_t station[6] = {0x32, 0x02, 0x01, 0x00, 0x02, 0x00};
+    struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_action action = {0};
+    struct df_gvs_monitor_result result = {0};
+    uint64_t now_ms = 100U;
+    unsigned attempt;
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(
+        &monitor, local, station, 0x01020304U, now_ms));
+    for (attempt = 0U; attempt < DF_GVS_MONITOR_MAX_REQUESTS; attempt++) {
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_gvs_monitor_step(&monitor, now_ms, &action));
+        TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+        TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local,
+            0x50, NULL, 0U, 0x01020304U, now_ms + 2U, &result));
+        TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+        now_ms += DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, now_ms, &action));
+    TEST_ASSERT_INT_EQ(0, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_FAILED, monitor.state);
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_UNCONFIRMED, monitor.failure);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_TIMEOUT, monitor.failure);
 }
 
 void test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout(void) {
