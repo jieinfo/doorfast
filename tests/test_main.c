@@ -217,6 +217,7 @@ void test_gvs_station_parses_only_door_station_shape(void);
 void test_gvs_station_route_requires_fresh_discovery_reply(void);
 void test_gvs_station_scan_emits_exact_three_frame_intents(void);
 void test_gvs_station_discovery_strictly_admits_and_refreshes_replies(void);
+void test_gvs_station_discovery_accepts_captured_status_payload(void);
 void test_gvs_station_discovery_evicts_least_recently_seen_candidate(void);
 void test_gvs_monitor_retries_captured_request_and_accepts_confirmation(void);
 void test_gvs_monitor_rejects_wrong_reply_and_marks_unconfirmed_response(void);
@@ -586,6 +587,7 @@ int main(int argc, char **argv) {
     test_gvs_station_route_requires_fresh_discovery_reply();
     test_gvs_station_scan_emits_exact_three_frame_intents();
     test_gvs_station_discovery_strictly_admits_and_refreshes_replies();
+    test_gvs_station_discovery_accepts_captured_status_payload();
     test_gvs_station_discovery_evicts_least_recently_seen_candidate();
     test_gvs_monitor_retries_captured_request_and_accepts_confirmation();
     test_gvs_monitor_rejects_wrong_reply_and_marks_unconfirmed_response();

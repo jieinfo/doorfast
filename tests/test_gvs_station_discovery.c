@@ -11,6 +11,9 @@ enum {
     DISCOVERY_CONTROL_SIZE = 42,
     DISCOVERY_PACKET_SIZE = DISCOVERY_ETHERNET_SIZE + DISCOVERY_IPV4_SIZE +
         DISCOVERY_UDP_SIZE + DISCOVERY_CONTROL_SIZE,
+    DISCOVERY_STATUS_PAYLOAD_SIZE = 2,
+    DISCOVERY_STATUS_PACKET_SIZE = DISCOVERY_PACKET_SIZE +
+        DISCOVERY_STATUS_PAYLOAD_SIZE,
 };
 
 static uint8_t discovery_bcd(unsigned value) {
@@ -53,6 +56,29 @@ static size_t discovery_reply_packet(uint8_t *packet, size_t capacity,
     packet[control + 40U] = 0U;
     packet[control + 41U] = 0U;
     return DISCOVERY_PACKET_SIZE;
+}
+
+static size_t discovery_reply_status_packet(uint8_t *packet, size_t capacity,
+    const uint8_t destination[6], const uint8_t source[6],
+    const uint8_t source_ipv4[4], uint16_t destination_port) {
+    const size_t udp = DISCOVERY_ETHERNET_SIZE + DISCOVERY_IPV4_SIZE;
+    const size_t control = udp + DISCOVERY_UDP_SIZE;
+    const uint16_t ip_length = DISCOVERY_IPV4_SIZE + DISCOVERY_UDP_SIZE +
+        DISCOVERY_CONTROL_SIZE + DISCOVERY_STATUS_PAYLOAD_SIZE;
+    const uint16_t udp_length = DISCOVERY_UDP_SIZE + DISCOVERY_CONTROL_SIZE +
+        DISCOVERY_STATUS_PAYLOAD_SIZE;
+    size_t length = discovery_reply_packet(packet, capacity, destination,
+        source, source_ipv4, destination_port, 0x86U);
+
+    if (length == 0U || capacity < DISCOVERY_STATUS_PACKET_SIZE) return 0U;
+    packet[16] = (uint8_t)(ip_length >> 8U);
+    packet[17] = (uint8_t)ip_length;
+    packet[udp + 4U] = (uint8_t)(udp_length >> 8U);
+    packet[udp + 5U] = (uint8_t)udp_length;
+    packet[control + 40U] = 2U;
+    packet[control + 42U] = 0x02U;
+    packet[control + 43U] = 0x00U;
+    return DISCOVERY_STATUS_PACKET_SIZE;
 }
 
 static const struct df_gvs_station_candidate *discovery_find_candidate(
@@ -143,7 +169,7 @@ void test_gvs_station_discovery_strictly_admits_and_refreshes_replies(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_station_discovery_observe(
         &discovery, packet, length, identity, 6U));
     length = discovery_reply_packet(packet, sizeof(packet), identity, station,
-        source_ipv4, 8301U, 0x86U);
+        source_ipv4, 0U, 0x86U);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_station_discovery_observe(
         &discovery, packet, length, identity, 7U));
 
@@ -175,6 +201,21 @@ void test_gvs_station_discovery_strictly_admits_and_refreshes_replies(void) {
         TEST_ASSERT_INT_EQ(110, (int)candidate->last_seen_ms);
         TEST_ASSERT_INT_EQ(2, (int)candidate->reply_count);
     }
+}
+
+void test_gvs_station_discovery_accepts_captured_status_payload(void) {
+    const uint8_t identity[6] = {0x61U, 0x02U, 0x01U, 0x19U, 0x01U, 0x01U};
+    const uint8_t station[6] = {0x32U, 0x02U, 0x01U, 0U, 0x03U, 0U};
+    const uint8_t source_ipv4[4] = {10U, 5U, 64U, 16U};
+    struct df_gvs_station_discovery discovery = {0};
+    uint8_t packet[DISCOVERY_STATUS_PACKET_SIZE];
+    size_t length = discovery_reply_status_packet(packet, sizeof(packet),
+        identity, station, source_ipv4, 56938U);
+
+    TEST_ASSERT_INT_EQ(DISCOVERY_STATUS_PACKET_SIZE, (int)length);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_station_discovery_observe(
+        &discovery, packet, length, identity, 100U));
+    TEST_ASSERT_INT_EQ(1, (int)discovery.count);
 }
 
 void test_gvs_station_discovery_evicts_least_recently_seen_candidate(void) {
