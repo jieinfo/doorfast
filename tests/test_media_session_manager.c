@@ -532,7 +532,7 @@ void test_media_session_manager_upgrades_preview_for_incoming_call(void) {
             generation, UINT64_MAX - 4999U));
     session = df_media_session_manager_find(&manager, "gate_main");
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW,
-        session == NULL ? -1 : session->purpose);
+        session == NULL ? -1 : (int)session->purpose);
     TEST_ASSERT_INT_EQ((int)generation,
         session == NULL ? 0 : (int)session->generation);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_incoming_call(
@@ -540,7 +540,7 @@ void test_media_session_manager_upgrades_preview_for_incoming_call(void) {
     session = df_media_session_manager_find(&manager, "gate_main");
     TEST_ASSERT_INT_EQ(1, session != NULL);
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL,
-        session == NULL ? -1 : session->purpose);
+        session == NULL ? -1 : (int)session->purpose);
     TEST_ASSERT_INT_EQ(1, session != NULL &&
         session->generation != generation);
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
@@ -548,7 +548,7 @@ void test_media_session_manager_upgrades_preview_for_incoming_call(void) {
         session == NULL ? 0 : (int)session->queue.generation);
     TEST_ASSERT_INT_EQ(0, session == NULL ? -1 : (int)session->queue.count);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO,
-        session == NULL ? -1 : session->monitor.state);
+        session == NULL ? -1 : (int)session->monitor.state);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_incoming_call(
         &manager, "gate_main", generation + 1U, 501U));
     TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
@@ -621,7 +621,7 @@ void test_media_session_manager_preempts_oldest_preview_for_call(void) {
     call = df_media_session_manager_find(&manager, "gate_garage");
     TEST_ASSERT_INT_EQ(1, call != NULL);
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL,
-        call == NULL ? -1 : call->purpose);
+        call == NULL ? -1 : (int)call->purpose);
     TEST_ASSERT_INT_EQ(2, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(0x02, trace.last_control_opcode);
     df_media_session_manager_destroy(&manager);
