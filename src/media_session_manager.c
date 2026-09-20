@@ -7,6 +7,24 @@
 
 #include "doorfast.h"
 
+static void df_media_video_reject_log(const char *reason,
+    const struct df_gvs_video_packet *packet, uint32_t source_ipv4) {
+    static unsigned diagnostic_logs;
+
+    if (diagnostic_logs >= 64U) return;
+    (void)fprintf(stderr,
+        "doorfast: event=media_video_rejected reason=%s source_ipv4=%u"
+        " frame=%u full=%u count=%u index=%u chunk=%u capacity=%u\n",
+        reason == NULL ? "unknown" : reason, (unsigned)source_ipv4,
+        packet == NULL ? 0U : (unsigned)packet->frame_no,
+        packet == NULL ? 0U : (unsigned)packet->full_length,
+        packet == NULL ? 0U : (unsigned)packet->chunk_count,
+        packet == NULL ? 0U : (unsigned)packet->chunk_index,
+        packet == NULL ? 0U : (unsigned)packet->chunk_length,
+        packet == NULL ? 0U : (unsigned)packet->capacity);
+    diagnostic_logs++;
+}
+
 static void df_media_session_manager_advance_revisions(
     struct df_media_session_manager *manager,
     struct df_media_session *session) {
@@ -720,8 +738,10 @@ int df_media_session_manager_push_video(
     if (manager == NULL || !manager->initialized || packet == NULL ||
         source_ipv4 == 0U ||
         memcmp(packet->destination, manager->config.local,
-            sizeof(manager->config.local)) != 0)
+            sizeof(manager->config.local)) != 0) {
+        df_media_video_reject_log("destination_mismatch", packet, source_ipv4);
         return DF_ERR_INVALID;
+    }
     for (index = 0U; index < manager->capacity; index++) {
         struct df_media_session *session = &manager->sessions[index];
         const uint8_t *jpeg = NULL;
@@ -734,21 +754,35 @@ int df_media_session_manager_push_video(
             memcmp(packet->source, session->station,
                 sizeof(session->station)) != 0)
             continue;
-        if (source_ipv4 != session->station_ipv4) return DF_ERR_INVALID;
+        if (source_ipv4 != session->station_ipv4) {
+            df_media_video_reject_log("source_ipv4_mismatch", packet,
+                source_ipv4);
+            return DF_ERR_INVALID;
+        }
         result = df_gvs_video_reassembly_push(
             &session->video, packet, &jpeg, &length);
         if (result == DF_GVS_VIDEO_REASSEMBLY_INCOMPLETE ||
             result == DF_GVS_VIDEO_REASSEMBLY_DUPLICATE ||
             result == DF_GVS_VIDEO_REASSEMBLY_LATE)
             return DF_OK;
-        if (result != DF_GVS_VIDEO_REASSEMBLY_COMPLETE ||
-            df_gvs_jpeg_validate(jpeg, length) != 0 ||
-            df_gvs_jpeg_dimensions(jpeg, length, &width, &height) != 0)
+        if (result != DF_GVS_VIDEO_REASSEMBLY_COMPLETE) {
+            df_media_video_reject_log("reassembly_failed", packet, source_ipv4);
             return DF_ERR_INVALID;
+        }
+        if (df_gvs_jpeg_validate(jpeg, length) != 0) {
+            df_media_video_reject_log("jpeg_invalid", packet, source_ipv4);
+            return DF_ERR_INVALID;
+        }
+        if (df_gvs_jpeg_dimensions(jpeg, length, &width, &height) != 0) {
+            df_media_video_reject_log("jpeg_dimensions_invalid", packet,
+                source_ipv4);
+            return DF_ERR_INVALID;
+        }
         return df_media_session_manager_push_jpeg(manager, packet->source,
             packet->destination, source_ipv4, jpeg, length, width, height,
             timestamp_ms);
     }
+    df_media_video_reject_log("session_not_found", packet, source_ipv4);
     return DF_ERR_INVALID;
 }
 
