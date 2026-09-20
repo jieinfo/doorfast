@@ -415,6 +415,38 @@ void test_runtime_media_capacity_busy_does_not_block_call_controls(void) {
         "generation=1 error=capacity_busy", log_entry.message));
 }
 
+void test_runtime_media_forwards_preview_keepalive_control(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    struct df_gvs_session session = {0};
+    struct df_gvs_deadline deadline = {0};
+    struct runtime_media_trace trace = {0};
+    const struct df_media_module_api_v3 api = {
+        .receive_control = runtime_media_fake_control,
+    };
+    struct df_runtime_media_module media = {
+        .api = &api,
+        .instance = &trace,
+        .available = true,
+    };
+    uint8_t packet[DF_GVS_CONTROL_HEADER_SIZE];
+    size_t packet_length = 0U;
+    int media_result = DF_ERR_INVALID;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(&control, 0U,
+        df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_control_serialize(packet, sizeof(packet),
+        &packet_length, station, local, 0x03U, 0x51U, NULL, 0U,
+        df_gvs_placeholder_header_fields, NULL));
+    (void)df_runtime_receive_control_with_media(
+        &media, NULL, NULL, NULL, &control, packet, packet_length, local,
+        &session, &deadline, htonl(0x0a054000U), 100U, &result,
+        &media_result);
+    TEST_ASSERT_INT_EQ(1, (int)trace.control_calls);
+}
+
 void test_runtime_media_video_failure_is_logged_with_station_identity(void) {
     struct df_station station = {
         .id = "gate_main",

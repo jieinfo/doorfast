@@ -83,6 +83,7 @@ void test_runtime_ubus_keeps_routes_for_more_than_four_configured_stations(void)
 void test_runtime_media_builds_module_config_without_guessing_route(void);
 void test_runtime_media_preempts_before_incoming_call_state_changes(void);
 void test_runtime_media_capacity_busy_does_not_block_call_controls(void);
+void test_runtime_media_forwards_preview_keepalive_control(void);
 void test_runtime_media_video_failure_is_logged_with_station_identity(void);
 void test_runtime_media_async_failure_is_logged_once_with_station_identity(void);
 void test_event_stream_serializes_exact_json(void);
@@ -165,6 +166,8 @@ void test_media_session_manager_status_revisions_are_monotonic(void);
 void test_media_session_manager_revisions_advance_without_status_reads(void);
 void test_media_session_manager_rejects_preview_key_after_call_upgrade(void);
 void test_media_session_manager_dispatches_independent_monitor_controls(void);
+void test_media_session_manager_replies_to_preview_keepalive(void);
+void test_media_session_manager_leaves_call_keepalive_to_call_control(void);
 void test_media_session_manager_upgrades_preview_for_incoming_call(void);
 void test_media_session_manager_preempts_oldest_preview_for_call(void);
 void test_media_session_manager_preserves_previews_when_policy_requests_it(void);
@@ -385,6 +388,8 @@ int main(int argc, char **argv) {
     test_media_session_manager_revisions_advance_without_status_reads();
     test_media_session_manager_rejects_preview_key_after_call_upgrade();
     test_media_session_manager_dispatches_independent_monitor_controls();
+    test_media_session_manager_replies_to_preview_keepalive();
+    test_media_session_manager_leaves_call_keepalive_to_call_control();
     test_media_session_manager_upgrades_preview_for_incoming_call();
     test_media_session_manager_preempts_oldest_preview_for_call();
     test_media_session_manager_preserves_previews_when_policy_requests_it();
@@ -402,6 +407,7 @@ int main(int argc, char **argv) {
     test_runtime_media_builds_module_config_without_guessing_route();
     test_runtime_media_preempts_before_incoming_call_state_changes();
     test_runtime_media_capacity_busy_does_not_block_call_controls();
+    test_runtime_media_forwards_preview_keepalive_control();
     test_runtime_media_video_failure_is_logged_with_station_identity();
     test_runtime_media_async_failure_is_logged_once_with_station_identity();
     test_gvs_replay_handshake_gap_and_eof();

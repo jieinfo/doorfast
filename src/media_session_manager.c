@@ -416,6 +416,7 @@ int df_media_session_manager_receive_control(
     for (index = 0U; index < manager->capacity; index++) {
         struct df_media_session *session = &manager->sessions[index];
         struct df_gvs_monitor_result result;
+        struct df_gvs_monitor previous_monitor;
 
         if (!session->active || memcmp(session->station, frame->source,
                 sizeof(session->station)) != 0 ||
@@ -424,9 +425,20 @@ int df_media_session_manager_receive_control(
         if (memcmp(frame->destination, manager->config.local,
                 sizeof(manager->config.local)) != 0)
             return DF_ERR_INVALID;
+        if (frame->family == 0x03U && frame->opcode == 0x51U &&
+            session->purpose != DF_MEDIA_SESSION_PREVIEW)
+            return DF_ERR_INVALID;
+        previous_monitor = session->monitor;
         if (df_gvs_monitor_receive(&session->monitor, frame, source_ipv4,
                 now_ms, &result) != DF_OK)
             return DF_ERR_INVALID;
+        if (result.keepalive_reply && manager->callbacks.emit_control(
+                session->station, session->station_ipv4,
+                manager->config.local, 0x03U, 0x52U, NULL, 0U,
+                manager->callbacks.context) != DF_OK) {
+            session->monitor = previous_monitor;
+            return DF_ERR_IO;
+        }
         if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
         if (result.failed) {
             session->state = DF_MEDIA_SESSION_FAILED;

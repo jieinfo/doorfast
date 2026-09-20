@@ -44,6 +44,7 @@ struct df_gvs_monitor_action {
 
 struct df_gvs_monitor_result {
     bool confirmed;
+    bool keepalive_reply;
     bool media_ready;
     bool stopped;
     bool failed;
