@@ -421,7 +421,8 @@ int df_media_encoder_start(struct df_media_encoder_process *process,
         if (pipe_fds[0] != STDIN_FILENO) (void)close(pipe_fds[0]);
         if (pipe_fds[1] != STDIN_FILENO) (void)close(pipe_fds[1]);
         null_fd = open("/dev/null", O_WRONLY | O_CLOEXEC);
-        if (null_fd < 0 || dup2(null_fd, STDOUT_FILENO) < 0 ||
+        if (null_fd < 0 || dup2(null_fd, STDOUT_FILENO) < 0) _exit(127);
+        if (strcmp(command.argv[0], "ffmpeg") != 0 &&
             dup2(null_fd, STDERR_FILENO) < 0) _exit(127);
         if (null_fd > STDERR_FILENO) (void)close(null_fd);
         (void)execvp(command.argv[0], command.argv);
