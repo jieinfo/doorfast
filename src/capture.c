@@ -12,6 +12,10 @@ const char *df_capture_default_filter(void) {
     return "udp and (port 8300 or port 8302 or port 8303 or port 8304)";
 }
 
+const char *df_capture_runtime_filter(void) {
+    return "udp and (port 8300 or port 8304)";
+}
+
 int df_capture_open(const char *device, bool promiscuous, struct df_capture **capture) {
     char error_buffer[PCAP_ERRBUF_SIZE] = {0};
     struct df_capture *opened;

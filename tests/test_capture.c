@@ -11,6 +11,11 @@ void test_default_capture_filter(void) {
                                  df_capture_default_filter()));
 }
 
+void test_runtime_capture_filter_excludes_owned_media_ports(void) {
+    TEST_ASSERT_INT_EQ(0, strcmp("udp and (port 8300 or port 8304)",
+                                 df_capture_runtime_filter()));
+}
+
 void test_capture_next_rejects_invalid_arguments(void) {
     const uint8_t *packet = NULL;
     size_t length = 0;
