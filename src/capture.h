@@ -24,6 +24,7 @@ enum df_capture_result {
 };
 
 const char *df_capture_default_filter(void);
+const char *df_capture_runtime_filter(void);
 int df_capture_open(const char *device, bool promiscuous, struct df_capture **capture);
 int df_capture_open_offline(const char *path, struct df_capture **capture);
 int df_capture_set_filter(struct df_capture *capture, const char *bpf);

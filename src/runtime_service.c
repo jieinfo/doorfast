@@ -23,6 +23,7 @@
 #include "gvs_runtime_sync.h"
 #include "gvs_send_transaction.h"
 #include "gvs_udp_sender.h"
+#include "gvs_media_receiver.h"
 #include "gvs_elevator_query.h"
 #include "gvs_media.h"
 #include "gvs_media_admission.h"
@@ -43,6 +44,7 @@
 #include "runtime_ubus.h"
 
 #define DF_RUNTIME_IDLE_POLL_MS 10U
+#define DF_RUNTIME_MEDIA_DRAIN_MAX 64U
 #define DF_RUNTIME_AUDIO_SNAPSHOT "/tmp/doorfast-latest.wav"
 #define DF_RUNTIME_AUDIO_CHUNKS "/tmp/doorfast-audio-chunks"
 #define DF_RUNTIME_VIDEO_SNAPSHOT "/tmp/doorfast-latest.jpg"
@@ -319,6 +321,7 @@ static void df_runtime_memory_frame_log(
 }
 
 static int df_runtime_capture_open(const struct df_runtime_config *runtime,
+                                   bool media_socket_owned,
                                    struct df_capture **capture) {
     int status = df_capture_open(runtime->config.gvs_interface,
                                  runtime->config.capture_promiscuous, capture);
@@ -326,7 +329,8 @@ static int df_runtime_capture_open(const struct df_runtime_config *runtime,
     if (status != DF_OK) {
         return status;
     }
-    if (df_capture_set_filter(*capture, df_capture_default_filter()) != DF_OK) {
+    if (df_capture_set_filter(*capture, media_socket_owned ?
+            df_capture_runtime_filter() : df_capture_default_filter()) != DF_OK) {
         df_capture_close(*capture);
         *capture = NULL;
         return DF_ERR_IO;
@@ -684,6 +688,100 @@ static int df_runtime_media_available_memory(uint64_t *available_kib,
     return DF_ERR_IO;
 }
 
+static void df_runtime_receive_audio_payload(
+    const uint8_t *payload, size_t payload_length,
+    struct df_gvs_session *session, const uint8_t identity[6],
+    struct df_gvs_audio_buffer *audio, uint64_t now_ms,
+    uint64_t *last_audio_export_ms) {
+    struct df_gvs_audio_packet audio_packet;
+
+    if (payload == NULL || session == NULL || identity == NULL ||
+        audio == NULL || last_audio_export_ms == NULL ||
+        session->state == DF_GVS_IDLE || session->state == DF_GVS_ENDED ||
+        df_gvs_parse_audio(payload, payload_length, &audio_packet) != 0 ||
+        df_gvs_media_admit(session, identity, audio_packet.destination,
+            audio_packet.source) != DF_GVS_MEDIA_ACCEPTED ||
+        df_gvs_audio_buffer_push(audio, audio_packet.payload,
+            audio_packet.payload_length, audio_packet.sequence,
+            session->generation, now_ms) != 0) return;
+    (void)printf(
+        "doorfast: event=audio_frame generation=%llu bytes=%zu sequence=%u\n",
+        (unsigned long long)session->generation, audio_packet.payload_length,
+        (unsigned)audio_packet.sequence);
+    if (audio->length >= 8000U &&
+        now_ms >= *last_audio_export_ms + 1000U) {
+        size_t export_length = 0U;
+        uint64_t previous_revision = audio->snapshot_packet_count;
+        uint64_t revision = audio->packet_count;
+        uint64_t pending = audio->byte_count - audio->snapshot_source_bytes;
+
+        if (df_gvs_audio_buffer_copy_pending(audio, df_runtime_audio_export,
+                sizeof(df_runtime_audio_export), &export_length) == 0 &&
+            export_length > 0U) {
+            uint64_t dropped = pending > export_length ?
+                pending - export_length : 0U;
+
+            if (df_g711_alaw_write_wav(DF_RUNTIME_AUDIO_SNAPSHOT,
+                    df_runtime_audio_export, export_length) == 0 &&
+                df_gvs_audio_chunk_store_publish(DF_RUNTIME_AUDIO_CHUNKS,
+                    DF_RUNTIME_AUDIO_SNAPSHOT, session->generation,
+                    previous_revision, revision, 44U + export_length * 2U,
+                    dropped) == 0 &&
+                df_gvs_audio_buffer_mark_snapshot(audio, session->generation,
+                    export_length, now_ms) == 0)
+                *last_audio_export_ms = now_ms;
+        }
+    }
+}
+
+static void df_runtime_receive_video_payload(
+    const uint8_t *payload, size_t payload_length, uint32_t source_ipv4,
+    struct df_runtime_media_module *media_module, struct df_runtime_ubus *ubus,
+    const struct df_station_registry *stations,
+    struct df_gvs_session *session, const uint8_t identity[6],
+    struct df_gvs_video_reassembly *video,
+    struct df_gvs_video_frame_cache *video_cache, uint64_t now_ms) {
+    struct df_gvs_video_packet video_packet;
+
+    if (payload == NULL || media_module == NULL || session == NULL ||
+        identity == NULL || video == NULL || video_cache == NULL ||
+        df_gvs_parse_video(payload, payload_length, &video_packet) != 0) return;
+    if (media_module->available) {
+        (void)df_runtime_media_push_video_with_event(media_module, ubus,
+            stations, &video_packet, source_ipv4, now_ms);
+        return;
+    }
+    if (session->state != DF_GVS_IDLE && session->state != DF_GVS_ENDED &&
+        df_gvs_media_admit(session, identity, video_packet.destination,
+            video_packet.source) == DF_GVS_MEDIA_ACCEPTED) {
+        const uint8_t *frame = NULL;
+        size_t frame_length = 0U;
+        int frame_status = df_gvs_video_reassembly_push(video, &video_packet,
+            &frame, &frame_length);
+
+        if (frame_status == DF_GVS_VIDEO_REASSEMBLY_COMPLETE &&
+            df_gvs_jpeg_validate(frame, frame_length) == 0) {
+            int cache_status = df_gvs_video_frame_cache_store(video_cache,
+                frame, frame_length, session->generation,
+                video_packet.frame_no, now_ms);
+            int snapshot_status = cache_status == 0 ?
+                df_gvs_video_snapshot_write(DF_RUNTIME_VIDEO_SNAPSHOT,
+                    frame, frame_length) : -1;
+
+            if (cache_status == 0 && snapshot_status == 0) {
+                (void)printf(
+                    "doorfast: event=video_frame generation=%llu "
+                    "bytes=%zu frame=%u\n",
+                    (unsigned long long)session->generation, frame_length,
+                    (unsigned)video_packet.frame_no);
+            } else {
+                df_gvs_video_frame_cache_invalidate(video_cache);
+                (void)remove(DF_RUNTIME_VIDEO_SNAPSHOT);
+            }
+        }
+    }
+}
+
 int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_capture *capture = NULL;
     struct df_gvs_session session = {0};
@@ -697,6 +795,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_elevator_control elevator = {0};
     struct df_gvs_elevator_query elevator_query = {0};
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
+    struct df_gvs_media_receiver media_receiver = {
+        .audio_fd = -1,
+        .video_fd = -1,
+    };
     struct df_gvs_station_discovery station_discovery = {0};
     struct df_gvs_station_scan station_scan = {0};
     struct df_gvs_multicast multicast = {.fd = -1};
@@ -720,6 +822,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         .station_scan_context = &udp_sender,
     };
     uint8_t identity[6];
+    uint8_t media_datagram_buffer[DF_GVS_MEDIA_DATAGRAM_CAPACITY];
     char derived_multicast_group[DF_GVS_IPV4_TEXT_SIZE];
     const char *effective_multicast_group;
     struct df_runtime_call_binding call_binding = {
@@ -815,6 +918,13 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 df_gvs_vendor_header_fields, NULL) != DF_OK) {
             return DF_ERR_IO;
         }
+        if (df_gvs_media_receiver_open(&media_receiver,
+                runtime->config.indoor_ipaddr, DF_GVS_AUDIO_PORT,
+                DF_GVS_VIDEO_PORT) != DF_OK) {
+            df_gvs_udp_sender_close(&udp_sender);
+            df_gvs_runtime_sync_stop(&sync);
+            return DF_ERR_IO;
+        }
         df_gvs_call_control_set_sender(&call_control,
             df_gvs_udp_send_attempt, &udp_sender);
         df_gvs_call_control_set_handshake_sender(&call_control,
@@ -827,6 +937,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         reply_send_mode = "udp";
         if (df_gvs_multicast_open_group(&multicast, effective_multicast_group,
                                         runtime->config.indoor_ipaddr) != DF_OK) {
+            df_gvs_media_receiver_close(&media_receiver);
             df_gvs_udp_sender_close(&udp_sender);
             df_gvs_runtime_sync_stop(&sync);
             return DF_ERR_IO;
@@ -851,6 +962,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 &media_callbacks) != DF_OK) {
             free(media_stations);
             df_gvs_multicast_close(&multicast);
+            df_gvs_media_receiver_close(&media_receiver);
             df_gvs_udp_sender_close(&udp_sender);
             df_gvs_runtime_sync_stop(&sync);
             return DF_ERR_IO;
@@ -862,13 +974,16 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             df_gvs_udp_elevator_emit, &udp_sender) != DF_OK) {
         df_runtime_media_module_stop(&media_module);
         df_gvs_multicast_close(&multicast);
+        df_gvs_media_receiver_close(&media_receiver);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_INVALID;
     }
-    if (df_runtime_capture_open(runtime, &capture) != DF_OK) {
+    if (df_runtime_capture_open(runtime, media_receiver.video_fd >= 0,
+            &capture) != DF_OK) {
         df_runtime_media_module_stop(&media_module);
         df_gvs_multicast_close(&multicast);
+        df_gvs_media_receiver_close(&media_receiver);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
@@ -879,6 +994,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_media_module_stop(&media_module);
         df_capture_close(capture);
         df_gvs_multicast_close(&multicast);
+        df_gvs_media_receiver_close(&media_receiver);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
@@ -920,6 +1036,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_gvs_pcm_ingress_close(&pcm_ingress);
         df_capture_close(capture);
         df_gvs_multicast_close(&multicast);
+        df_gvs_media_receiver_close(&media_receiver);
         df_gvs_udp_sender_close(&udp_sender);
         df_gvs_runtime_sync_stop(&sync);
         return DF_ERR_IO;
@@ -937,6 +1054,14 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     if (multicast.joined) {
         (void)printf("doorfast: event=multicast_joined group=%s port=%u\n",
                      multicast.group, (unsigned)multicast.port);
+    }
+    if (media_receiver.video_fd >= 0) {
+        (void)printf(
+            "doorfast: event=media_udp_bound address=%s audio_port=%u "
+            "video_port=%u\n",
+            runtime->config.indoor_ipaddr,
+            (unsigned)media_receiver.audio_port,
+            (unsigned)media_receiver.video_port);
     }
     while (!df_runtime_stopping) {
         struct df_capture_record capture_record;
@@ -1100,7 +1225,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 status = DF_ERR_IO;
                 goto done;
             }
-            continue;
+            goto iteration_end;
         }
         if (captured == DF_CAPTURE_ERROR) {
             bool ended = false;
@@ -1153,7 +1278,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (df_runtime_stopping) {
                     break;
                 }
-                if (df_runtime_capture_open(runtime, &capture) == DF_OK) {
+                if (df_runtime_capture_open(runtime,
+                        media_receiver.video_fd >= 0, &capture) == DF_OK) {
                     if (df_gvs_runtime_sync_restart(&sync,
                                                     df_monotonic_ms()) != DF_OK) {
                         df_capture_close(capture);
@@ -1171,123 +1297,32 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 status = DF_OK;
                 goto done;
             }
-            continue;
+            goto iteration_end;
         }
         {
             struct df_udp_prefix media_prefix;
             int media_status = df_gvs_inspect_udp_prefix(
                 packet, packet_length, &media_prefix);
+
             if (media_status == 1 && media_prefix.payload_complete &&
-                (media_prefix.source_port == 8302 ||
-                 media_prefix.destination_port == 8302) &&
-                session.state != DF_GVS_IDLE && session.state != DF_GVS_ENDED) {
-                struct df_gvs_audio_packet audio_packet;
-                const uint8_t *media_payload = packet + media_prefix.payload_offset;
-                if (df_gvs_parse_audio(media_payload,
-                        media_prefix.declared_payload_length,
-                        &audio_packet) == 0 &&
-                    df_gvs_media_admit(&session, identity,
-                        audio_packet.destination,
-                        audio_packet.source) == DF_GVS_MEDIA_ACCEPTED &&
-                    df_gvs_audio_buffer_push(&audio, audio_packet.payload,
-                        audio_packet.payload_length, audio_packet.sequence,
-                        session.generation, now_ms) == 0) {
-                    (void)printf("doorfast: event=audio_frame generation=%llu bytes=%zu sequence=%u\n",
-                        (unsigned long long)session.generation,
-                        audio_packet.payload_length,
-                        (unsigned)audio_packet.sequence);
-                    if (audio.length >= 8000U &&
-                        now_ms >= last_audio_export_ms + 1000U) {
-                        size_t export_length = 0;
-                        uint64_t previous_revision =
-                            audio.snapshot_packet_count;
-                        uint64_t revision = audio.packet_count;
-                        uint64_t pending =
-                            audio.byte_count - audio.snapshot_source_bytes;
-                        if (df_gvs_audio_buffer_copy_pending(&audio,
-                                df_runtime_audio_export,
-                                sizeof(df_runtime_audio_export),
-                                &export_length) == 0 &&
-                            export_length > 0U) {
-                            uint64_t dropped = pending > export_length
-                                ? pending - export_length : 0U;
-                            if (df_g711_alaw_write_wav(
-                                    DF_RUNTIME_AUDIO_SNAPSHOT,
-                                    df_runtime_audio_export,
-                                    export_length) == 0 &&
-                                df_gvs_audio_chunk_store_publish(
-                                    DF_RUNTIME_AUDIO_CHUNKS,
-                                    DF_RUNTIME_AUDIO_SNAPSHOT,
-                                    session.generation, previous_revision,
-                                    revision, 44U + export_length * 2U,
-                                    dropped) == 0 &&
-                                df_gvs_audio_buffer_mark_snapshot(
-                                    &audio, session.generation,
-                                    export_length, now_ms) == 0)
-                                last_audio_export_ms = now_ms;
-                        }
-                    }
-                }
-                continue;
+                (media_prefix.source_port == DF_GVS_AUDIO_PORT ||
+                 media_prefix.destination_port == DF_GVS_AUDIO_PORT)) {
+                df_runtime_receive_audio_payload(
+                    packet + media_prefix.payload_offset,
+                    media_prefix.declared_payload_length, &session, identity,
+                    &audio, now_ms, &last_audio_export_ms);
+                goto iteration_end;
             }
             if (media_status == 1 && media_prefix.payload_complete &&
-                (media_prefix.source_port == 8303 ||
-                 media_prefix.destination_port == 8303) &&
-                media_module.available) {
-                struct df_gvs_video_packet preview_packet;
-                const uint8_t *media_payload =
-                    packet + media_prefix.payload_offset;
-
-                if (df_gvs_parse_video(media_payload,
-                        media_prefix.declared_payload_length,
-                        &preview_packet) == 0) {
-                    (void)df_runtime_media_push_video_with_event(
-                        &media_module, &ubus, &runtime->stations,
-                        &preview_packet, media_prefix.source_ipv4, now_ms);
-                    continue;
-                }
-            }
-            if (media_status == 1 && media_prefix.payload_complete &&
-                (media_prefix.source_port == 8303 ||
-                 media_prefix.destination_port == 8303) &&
-                session.state != DF_GVS_IDLE && session.state != DF_GVS_ENDED) {
-                struct df_gvs_video_packet video_packet;
-                const uint8_t *frame = NULL;
-                size_t frame_length = 0;
-                const uint8_t *media_payload =
-                    packet + media_prefix.payload_offset;
-                if (df_gvs_parse_video(media_payload,
-                        media_prefix.declared_payload_length,
-                        &video_packet) == 0 &&
-                    df_gvs_media_admit(&session, identity,
-                        video_packet.destination,
-                        video_packet.source) == DF_GVS_MEDIA_ACCEPTED) {
-                    int frame_status = df_gvs_video_reassembly_push(
-                        &video, &video_packet, &frame, &frame_length);
-                    if (frame_status == DF_GVS_VIDEO_REASSEMBLY_COMPLETE &&
-                        df_gvs_jpeg_validate(frame, frame_length) == 0) {
-                        int cache_status = df_gvs_video_frame_cache_store(
-                            &video_cache, frame, frame_length,
-                            session.generation, video_packet.frame_no,
-                            now_ms);
-                        int snapshot_status = cache_status == 0
-                            ? df_gvs_video_snapshot_write(
-                                DF_RUNTIME_VIDEO_SNAPSHOT, frame, frame_length)
-                            : -1;
-
-                        if (cache_status == 0 && snapshot_status == 0) {
-                            (void)printf(
-                                "doorfast: event=video_frame generation=%llu "
-                                "bytes=%zu frame=%u\n",
-                                (unsigned long long)session.generation,
-                                frame_length, (unsigned)video_packet.frame_no);
-                        } else {
-                            df_gvs_video_frame_cache_invalidate(&video_cache);
-                            (void)remove(DF_RUNTIME_VIDEO_SNAPSHOT);
-                        }
-                    }
-                }
-                continue;
+                (media_prefix.source_port == DF_GVS_VIDEO_PORT ||
+                 media_prefix.destination_port == DF_GVS_VIDEO_PORT)) {
+                df_runtime_receive_video_payload(
+                    packet + media_prefix.payload_offset,
+                    media_prefix.declared_payload_length,
+                    media_prefix.source_ipv4, &media_module, &ubus,
+                    &runtime->stations, &session, identity, &video,
+                    &video_cache, now_ms);
+                goto iteration_end;
             }
         }
         if (df_gvs_extract_control_payload(packet, packet_length,
@@ -1315,7 +1350,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         &station_event) == DF_OK)
                     (void)df_runtime_ubus_station_route_observe(&ubus,
                         station_frame.source, control_source_ipv4, now_ms, true);
-                continue;
+                goto iteration_end;
             }
             if (payload_length >= 40U && payload[38] == 0x07 &&
                 payload[39] == 0x01) {
@@ -1340,7 +1375,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     df_gvs_reply_queue_count(&reply_queue),
                     coalesced ? 1U : 0U,
                     peer_status == DF_OK && queue_status == DF_ERR_IO ? 1U : 0U);
-                continue;
+                goto iteration_end;
             }
             if (payload_length >= 40U && payload[38] == 0x07 &&
                 payload[39] == 0x81) {
@@ -1351,7 +1386,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         NULL : &presence_context);
                 (void)printf("doorfast: event=peer_reply accepted=%u mode=passive\n",
                              peer_status == DF_OK ? 1U : 0U);
-                continue;
+                goto iteration_end;
             }
             struct df_gvs_runtime_sync_result sync_result;
             struct df_gvs_call_control_result call_result;
@@ -1369,7 +1404,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                                   "doorfast: event=sync_state_save_failed path=%s\n",
                                   runtime->config.sync_state_path);
                 }
-                continue;
+                goto iteration_end;
             }
             {
                 struct df_gvs_frame access_frame;
@@ -1382,7 +1417,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                         (void)fprintf(stdout, "doorfast: event=access_result state=%s raw_status=%u\n",
                             df_gvs_access_state_name(access.result.state),
                             (unsigned)access.result.raw_status);
-                    continue;
+                    goto iteration_end;
                 }
             }
             {
@@ -1405,7 +1440,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                             (void)printf("doorfast: event=elevator_status count=%zu "
                                          "status_valid=1\n", elevator_status.count);
                     }
-                    continue;
+                    goto iteration_end;
                 }
             }
             {
@@ -1548,14 +1583,54 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 }
             }
         }
+        /* Process the captured control packet before draining media UDP. */
+iteration_end:
+        if (media_receiver.video_fd >= 0) {
+            unsigned media_count;
+
+            for (media_count = 0U;
+                 media_count < DF_RUNTIME_MEDIA_DRAIN_MAX; media_count++) {
+                struct df_gvs_media_datagram datagram;
+                int media_result = df_gvs_media_receiver_next(&media_receiver,
+                    media_datagram_buffer, sizeof(media_datagram_buffer),
+                    &datagram);
+
+                if (media_result == DF_GVS_MEDIA_RECEIVER_EMPTY) break;
+                if (media_result == DF_GVS_MEDIA_RECEIVER_ERROR) {
+                    (void)fputs(
+                        "doorfast: event=media_udp_receive_failed\n", stderr);
+                    break;
+                }
+                if (media_result == DF_GVS_MEDIA_RECEIVER_DROPPED) continue;
+                if (datagram.channel == DF_GVS_MEDIA_AUDIO) {
+                    df_runtime_receive_audio_payload(media_datagram_buffer,
+                        datagram.length, &session, identity, &audio, now_ms,
+                        &last_audio_export_ms);
+                } else {
+                    df_runtime_receive_video_payload(media_datagram_buffer,
+                        datagram.length, datagram.source_ipv4, &media_module,
+                        &ubus, &runtime->stations, &session, identity, &video,
+                        &video_cache, now_ms);
+                }
+            }
+        }
+        continue;
     }
     status = DF_OK;
 
 done:
+    (void)printf(
+        "doorfast: event=media_udp_stats audio_received=%llu "
+        "video_received=%llu truncated=%llu receive_errors=%llu\n",
+        (unsigned long long)media_receiver.audio_received,
+        (unsigned long long)media_receiver.video_received,
+        (unsigned long long)media_receiver.truncated,
+        (unsigned long long)media_receiver.receive_errors);
     df_runtime_media_module_stop(&media_module);
     df_runtime_media_clear(&video, &video_cache, &audio, 0);
     df_gvs_pcm_ingress_close(&pcm_ingress);
     df_gvs_multicast_close(&multicast);
+    df_gvs_media_receiver_close(&media_receiver);
     df_gvs_udp_sender_close(&udp_sender);
     df_event_stream_stop(&event_stream);
     df_runtime_ubus_stop(&ubus);

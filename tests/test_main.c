@@ -275,8 +275,11 @@ void test_gvs_session_abort_clears_active_exchange(void);
 void test_policy_decisions(void);
 void test_session_rejects_different_call_id(void);
 void test_default_capture_filter(void);
+void test_runtime_capture_filter_excludes_owned_media_ports(void);
 void test_capture_next_rejects_invalid_arguments(void);
 void test_capture_record_preserves_timestamp_and_wire_length(void);
+void test_gvs_media_receiver_binds_and_routes_complete_datagrams(void);
+void test_gvs_media_receiver_rejects_truncation_and_duplicate_ownership(void);
 void test_capture_retry_is_bounded_and_resets_after_recovery(void);
 void test_gvs_deadline_expires_without_another_packet(void);
 void test_gvs_deadline_does_not_end_a_new_generation(void);
@@ -299,7 +302,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 169;
+    return 173;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -409,7 +412,7 @@ int main(int argc, char **argv) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(169, test_suite_count());
+    TEST_ASSERT_INT_EQ(173, test_suite_count());
     test_runtime_id_encodes_random_bytes_and_validates_exact_lowercase_hex();
     test_runtime_id_clears_output_when_random_fill_fails_or_is_short();
     test_event_stream_serializes_exact_json();
@@ -615,8 +618,11 @@ int main(int argc, char **argv) {
     test_policy_decisions();
     test_session_rejects_different_call_id();
     test_default_capture_filter();
+    test_runtime_capture_filter_excludes_owned_media_ports();
     test_capture_next_rejects_invalid_arguments();
     test_capture_record_preserves_timestamp_and_wire_length();
+    test_gvs_media_receiver_binds_and_routes_complete_datagrams();
+    test_gvs_media_receiver_rejects_truncation_and_duplicate_ownership();
     test_capture_retry_is_bounded_and_resets_after_recovery();
     test_gvs_deadline_expires_without_another_packet();
     test_gvs_deadline_does_not_end_a_new_generation();

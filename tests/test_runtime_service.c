@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "capture.h"
 #include "gvs_memory_sender.h"
 #include "gvs_serialize.h"
 #include "runtime_service.h"
