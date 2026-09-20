@@ -44,6 +44,8 @@ void test_gvs_media_receiver_binds_and_routes_complete_datagrams(void) {
         .video_fd = -1,
     };
     struct df_gvs_media_datagram datagram;
+    struct sockaddr_in bound = {0};
+    socklen_t bound_length = sizeof(bound);
     uint8_t buffer[32];
     bool saw_audio = false;
     bool saw_video = false;
@@ -56,6 +58,9 @@ void test_gvs_media_receiver_binds_and_routes_complete_datagrams(void) {
     TEST_ASSERT_INT_EQ(1, receiver.audio_port != 0U);
     TEST_ASSERT_INT_EQ(1, receiver.video_port != 0U);
     TEST_ASSERT_INT_EQ(1, receiver.audio_port != receiver.video_port);
+    TEST_ASSERT_INT_EQ(0, getsockname(receiver.video_fd,
+        (struct sockaddr *)&bound, &bound_length));
+    TEST_ASSERT_INT_EQ((int)htonl(INADDR_ANY), (int)bound.sin_addr.s_addr);
     TEST_ASSERT_INT_EQ(DF_GVS_MEDIA_RECEIVER_EMPTY,
         df_gvs_media_receiver_next(&receiver, buffer, sizeof(buffer),
             &datagram));
