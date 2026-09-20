@@ -742,13 +742,35 @@ static void df_runtime_receive_video_payload(
     struct df_gvs_video_reassembly *video,
     struct df_gvs_video_frame_cache *video_cache, uint64_t now_ms) {
     struct df_gvs_video_packet video_packet;
+    static unsigned diagnostic_logs;
 
     if (payload == NULL || media_module == NULL || session == NULL ||
         identity == NULL || video == NULL || video_cache == NULL ||
-        df_gvs_parse_video(payload, payload_length, &video_packet) != 0) return;
+        df_gvs_parse_video(payload, payload_length, &video_packet) != 0) {
+        if (diagnostic_logs < 16U) {
+            (void)fprintf(stderr,
+                "doorfast: event=video_datagram_rejected reason=parse "
+                "bytes=%zu\n", payload_length);
+            diagnostic_logs++;
+        }
+        return;
+    }
     if (media_module->available) {
-        (void)df_runtime_media_push_video_with_event(media_module, ubus,
+        int result = df_runtime_media_push_video_with_event(media_module, ubus,
             stations, &video_packet, source_ipv4, now_ms);
+        if (result != DF_OK && diagnostic_logs < 16U) {
+            (void)fprintf(stderr,
+                "doorfast: event=video_datagram_rejected reason=pipeline "
+                "result=%d source_ipv4=%u frame=%u full=%u count=%u index=%u "
+                "chunk=%u capacity=%u\n", result, (unsigned)source_ipv4,
+                (unsigned)video_packet.frame_no,
+                (unsigned)video_packet.full_length,
+                (unsigned)video_packet.chunk_count,
+                (unsigned)video_packet.chunk_index,
+                (unsigned)video_packet.chunk_length,
+                (unsigned)video_packet.capacity);
+            diagnostic_logs++;
+        }
         return;
     }
     if (session->state != DF_GVS_IDLE && session->state != DF_GVS_ENDED &&
