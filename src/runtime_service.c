@@ -639,7 +639,7 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
     }
     if (media != NULL && media->available && frame.family == 0x03U &&
         (frame.opcode == 0x84U || frame.opcode == 0x50U ||
-         frame.opcode == 0x82U)) {
+         frame.opcode == 0x51U || frame.opcode == 0x82U)) {
         (void)df_runtime_media_module_receive_control(media, &frame,
             source_ipv4, now_ms);
     }

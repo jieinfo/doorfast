@@ -244,6 +244,15 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         monitor->last_now_ms = now_ms;
         return DF_OK;
     }
+    if ((monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO ||
+         monitor->state == DF_GVS_MONITOR_PUBLISHING ||
+         monitor->state == DF_GVS_MONITOR_VIEWING) &&
+        frame->opcode == 0x51U) {
+        if (frame->payload_length != 0U) return DF_ERR_INVALID;
+        monitor->last_now_ms = now_ms;
+        result->keepalive_reply = true;
+        return DF_OK;
+    }
     if (monitor->state == DF_GVS_MONITOR_STOPPING && frame->opcode == 0x82U &&
         frame->payload_length == 0U) {
         monitor->last_now_ms = now_ms;
