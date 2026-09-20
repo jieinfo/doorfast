@@ -12,6 +12,7 @@
 static int df_gvs_media_receiver_open_socket(const char *host, uint16_t port,
     int *fd, uint16_t *bound_port) {
     struct sockaddr_in local = {0};
+    struct in_addr requested_address;
     socklen_t local_length = sizeof(local);
     int receive_buffer = DF_GVS_MEDIA_RECEIVE_BUFFER;
     int flags;
@@ -28,8 +29,20 @@ static int df_gvs_media_receiver_open_socket(const char *host, uint16_t port,
     }
     local.sin_family = AF_INET;
     local.sin_port = htons(port);
-    if (inet_pton(AF_INET, host, &local.sin_addr) != 1 ||
-        bind(*fd, (const struct sockaddr *)&local, sizeof(local)) != 0 ||
+    /*
+     * The configured address may be a non-canonical host address such as
+     * 10.5.83.0/8.  The station packets are addressed to that value, but
+     * binding a socket to it can leave the kernel socket receive path empty.
+     * Validate the configured IPv4 text, then bind wildcard and enforce the
+     * GVS destination/source identity in the media pipeline instead.
+     */
+    if (inet_pton(AF_INET, host, &requested_address) != 1) {
+        (void)close(*fd);
+        *fd = -1;
+        return DF_ERR_IO;
+    }
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(*fd, (const struct sockaddr *)&local, sizeof(local)) != 0 ||
         getsockname(*fd, (struct sockaddr *)&local, &local_length) != 0 ||
         local_length != sizeof(local)) {
         (void)close(*fd);
