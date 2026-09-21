@@ -9,6 +9,7 @@
 #include "gvs_audio_tx.h"
 #include "gvs_elevator.h"
 #include "gvs_media.h"
+#include "gvs_multicast.h"
 #include "gvs_pcm_ingress.h"
 #include "gvs_pcm_pump.h"
 #include "gvs_serialize.h"
@@ -34,15 +35,25 @@ static int udp_sender_header_fields(
 
 void test_gvs_udp_sender_binds_configured_source_address(void) {
     struct df_gvs_udp_sender sender = {.fd = -1};
+    struct df_gvs_multicast multicast = {.fd = -1};
     struct sockaddr_in address;
     socklen_t length = sizeof(address);
+    int reuse = 0;
+    socklen_t reuse_length = sizeof(reuse);
 
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "127.0.0.1",
-        8300, udp_sender_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open_bound(&sender,
+        "127.0.0.1", 8300U, 8300U, udp_sender_header_fields, NULL));
     TEST_ASSERT_INT_EQ(0, getsockname(sender.fd,
         (struct sockaddr *)&address, &length));
     TEST_ASSERT_INT_EQ(AF_INET, address.sin_family);
     TEST_ASSERT_INT_EQ(htonl(INADDR_LOOPBACK), address.sin_addr.s_addr);
+    TEST_ASSERT_INT_EQ(8300, ntohs(address.sin_port));
+    TEST_ASSERT_INT_EQ(0, getsockopt(sender.fd, SOL_SOCKET, SO_REUSEADDR,
+        &reuse, &reuse_length));
+    TEST_ASSERT_INT_EQ(1, reuse != 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_multicast_open_group(&multicast,
+        "239.1.2.3", "127.0.0.1"));
+    df_gvs_multicast_close(&multicast);
     df_gvs_udp_sender_close(&sender);
 }
 
