@@ -70,12 +70,14 @@ static int df_gvs_udp_resolve_destination(
     return DF_OK;
 }
 
-int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
-    uint16_t port, df_gvs_header_provider_fn provider, void *context) {
+static int df_gvs_udp_sender_open_ports(struct df_gvs_udp_sender *sender,
+    const char *host, uint16_t source_port, uint16_t peer_port,
+    df_gvs_header_provider_fn provider, void *context) {
     struct sockaddr_in local;
     int broadcast = 1;
+    int reuse = 1;
 
-    if (sender == NULL || host == NULL || provider == NULL || port == 0U)
+    if (sender == NULL || host == NULL || provider == NULL || peer_port == 0U)
         return DF_ERR_INVALID;
     memset(sender, 0, sizeof(*sender));
     sender->fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -84,19 +86,37 @@ int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
             sizeof(broadcast)) != 0) {
         close(sender->fd); sender->fd = -1; return DF_ERR_IO;
     }
+    if (setsockopt(sender->fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
+            sizeof(reuse)) != 0) {
+        close(sender->fd); sender->fd = -1; return DF_ERR_IO;
+    }
     memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
-    local.sin_port = htons(0);
+    local.sin_port = htons(source_port);
     if (inet_pton(AF_INET, host, &local.sin_addr) != 1 ||
         bind(sender->fd, (const struct sockaddr *)&local, sizeof(local)) != 0) {
         close(sender->fd); sender->fd = -1; return DF_ERR_INVALID;
     }
     sender->peer.sin_family = AF_INET;
-    sender->peer.sin_port = htons(port);
+    sender->peer.sin_port = htons(peer_port);
     sender->peer.sin_addr.s_addr = htonl(INADDR_ANY);
     sender->provide_fields = provider;
     sender->fields_context = context;
     return DF_OK;
+}
+
+int df_gvs_udp_sender_open(struct df_gvs_udp_sender *sender, const char *host,
+    uint16_t port, df_gvs_header_provider_fn provider, void *context) {
+    return df_gvs_udp_sender_open_ports(sender, host, 0U, port, provider,
+        context);
+}
+
+int df_gvs_udp_sender_open_bound(struct df_gvs_udp_sender *sender,
+    const char *host, uint16_t source_port, uint16_t peer_port,
+    df_gvs_header_provider_fn provider, void *context) {
+    if (source_port == 0U) return DF_ERR_INVALID;
+    return df_gvs_udp_sender_open_ports(sender, host, source_port, peer_port,
+        provider, context);
 }
 
 void df_gvs_udp_sender_close(struct df_gvs_udp_sender *sender) {

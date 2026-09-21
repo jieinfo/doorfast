@@ -48,6 +48,8 @@ struct df_gvs_udp_sender {
 
 int df_gvs_udp_sender_open(struct df_gvs_udp_sender *, const char *, uint16_t,
     df_gvs_header_provider_fn, void *);
+int df_gvs_udp_sender_open_bound(struct df_gvs_udp_sender *, const char *,
+    uint16_t, uint16_t, df_gvs_header_provider_fn, void *);
 void df_gvs_udp_sender_close(struct df_gvs_udp_sender *);
 enum df_gvs_send_attempt_result df_gvs_udp_send_attempt(
     const struct df_gvs_call_command *, unsigned, uint64_t, void *);
