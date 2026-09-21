@@ -280,7 +280,8 @@ int df_gvs_monitor_admit_jpeg(struct df_gvs_monitor *monitor,
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_GENERATION;
     else if (source_ipv4 != monitor->station_ipv4)
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_SOURCE_IPV4;
-    else if (monitor->state != DF_GVS_MONITOR_AWAITING_VIDEO &&
+    else if (monitor->state != DF_GVS_MONITOR_REQUESTING &&
+             monitor->state != DF_GVS_MONITOR_AWAITING_VIDEO &&
              monitor->state != DF_GVS_MONITOR_PUBLISHING &&
              monitor->state != DF_GVS_MONITOR_VIEWING)
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_STATE;
@@ -291,6 +292,10 @@ int df_gvs_monitor_admit_jpeg(struct df_gvs_monitor *monitor,
     if (result->admit_reject != DF_GVS_MONITOR_ADMIT_REJECT_NONE)
         return DF_ERR_INVALID;
     monitor->last_now_ms = now_ms;
+    if (monitor->state == DF_GVS_MONITOR_REQUESTING) {
+        monitor->state = DF_GVS_MONITOR_AWAITING_VIDEO;
+        monitor->next_action_ms = 0U;
+    }
     if (!monitor->media_ready) {
         monitor->media_ready = true;
         result->media_ready = true;

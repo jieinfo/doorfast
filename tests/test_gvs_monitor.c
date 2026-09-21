@@ -202,6 +202,24 @@ void test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout(
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOP_TIMEOUT, monitor.failure);
 }
 
+void test_gvs_monitor_admits_video_before_confirmation(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_result result = {0};
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start_with_generation(
+        &monitor, local, station, 0x01020304U, 7U, 100U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
+        local, 0x01020304U, 7U, 101U, &result));
+    TEST_ASSERT_INT_EQ(1, result.media_ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_mark_publishing(&monitor, 7U,
+        102U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, monitor.state);
+}
+
 void test_gvs_monitor_instances_reject_cross_station_and_stale_operations(void) {
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
     const uint8_t main_station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
