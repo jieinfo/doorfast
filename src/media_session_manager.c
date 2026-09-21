@@ -7,6 +7,8 @@
 
 #include "doorfast.h"
 
+#define DF_MEDIA_SESSION_FRAME_STALL_TIMEOUT_MS 5000U
+
 const char *df_media_video_reject_reason_name(
     enum df_media_video_reject_reason reason) {
     switch (reason) {
@@ -871,6 +873,18 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
                 df_media_session_reset(session);
                 if (manager->active_count > 0U) manager->active_count--;
             }
+            continue;
+        }
+        if ((session->state == DF_MEDIA_SESSION_PUBLISHING ||
+             session->state == DF_MEDIA_SESSION_VIEWING) &&
+            session->frames_received != 0U && now_ms >= session->last_frame_ms &&
+            now_ms - session->last_frame_ms >=
+                DF_MEDIA_SESSION_FRAME_STALL_TIMEOUT_MS) {
+            session->state = DF_MEDIA_SESSION_FAILED;
+            session->last_error = DF_MEDIA_ERROR_VIDEO_STALLED;
+            if (df_media_session_manager_release_failed(manager, session) !=
+                    DF_OK)
+                overall = DF_ERR_IO;
             continue;
         }
         if (df_media_encoder_is_running(&session->encoder) &&

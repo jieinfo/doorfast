@@ -135,6 +135,7 @@ static const char *df_runtime_media_error_code(int result) {
     case DF_MEDIA_ERROR_STATION_DISABLED: return "station_disabled";
     case DF_MEDIA_ERROR_GENERATION_MISMATCH: return "generation_mismatch";
     case DF_MEDIA_ERROR_ENCODER_FAILED: return "encoder_failed";
+    case DF_MEDIA_ERROR_VIDEO_STALLED: return "video_stalled";
     default: return "service_unavailable";
     }
 }
@@ -936,8 +937,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         return DF_ERR_INVALID;
     }
     if (!runtime->config.passive_only || runtime->config.active_host) {
-        if (df_gvs_udp_sender_open_bound(&udp_sender,
-                runtime->config.indoor_ipaddr, 8300U, 8300U,
+        if (df_gvs_udp_sender_open(&udp_sender, runtime->config.indoor_ipaddr, 8300,
                 df_gvs_vendor_header_fields, NULL) != DF_OK) {
             return DF_ERR_IO;
         }

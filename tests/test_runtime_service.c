@@ -517,4 +517,13 @@ void test_runtime_media_async_failure_is_logged_once_with_station_identity(void)
         "error=encoder_failed", log_entry.message));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_log_get(&ubus, 1U, &log_entry));
+
+    trace.failed_generation = 13U;
+    trace.failed_error = DF_MEDIA_ERROR_VIDEO_STALLED;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_media_tick_with_event(&media, &ubus, NULL, 902U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_log_get(&ubus, 1U, &log_entry));
+    TEST_ASSERT_INT_EQ(0, strcmp(
+        "event=media_pipeline_failed station_id=gate_side generation=13 "
+        "error=video_stalled", log_entry.message));
 }

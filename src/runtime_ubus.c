@@ -1130,6 +1130,7 @@ static const char *df_runtime_ubus_media_error_code(int result) {
     case DF_MEDIA_ERROR_ENCODER_FAILED: return "encoder_failed";
     case DF_MEDIA_ERROR_GENERATION_MISMATCH: return "generation_mismatch";
     case DF_MEDIA_ERROR_SESSION_PREEMPTED: return "session_preempted";
+    case DF_MEDIA_ERROR_VIDEO_STALLED: return "video_stalled";
     case DF_ERR_INVALID: return "invalid_request";
     default: return "service_unavailable";
     }
@@ -1155,6 +1156,8 @@ static const char *df_runtime_ubus_media_error_message(int result) {
         return "The media session generation no longer matches";
     case DF_MEDIA_ERROR_SESSION_PREEMPTED:
         return "The media session was preempted";
+    case DF_MEDIA_ERROR_VIDEO_STALLED:
+        return "The media stream stopped producing video frames";
     case DF_ERR_INVALID:
         return "The media request is invalid";
     default:
