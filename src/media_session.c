@@ -55,6 +55,20 @@ static int df_media_session_flush_pending(struct df_media_session *session) {
     return df_media_encoder_write_frame(&session->encoder, &frame);
 }
 
+static enum df_media_session_state_v3 df_media_session_state_after_viewer(
+    const struct df_media_session *session) {
+    if (session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO)
+        return DF_MEDIA_SESSION_AWAITING_VIDEO;
+    if (session->monitor.state == DF_GVS_MONITOR_REQUESTING)
+        return DF_MEDIA_SESSION_REQUESTING;
+    if (session->monitor.state == DF_GVS_MONITOR_PUBLISHING ||
+        session->monitor.state == DF_GVS_MONITOR_VIEWING ||
+        (session->frames_received != 0U &&
+         df_media_encoder_is_running(&session->encoder)))
+        return DF_MEDIA_SESSION_PUBLISHING;
+    return DF_MEDIA_SESSION_REQUESTING;
+}
+
 void df_media_session_reset(struct df_media_session *session) {
     if (session != NULL) {
         uint64_t status_fingerprint = session->status_fingerprint;
@@ -153,7 +167,7 @@ int df_media_session_command(struct df_media_session *session,
         session->viewer_active = active;
         if (active) session->state = DF_MEDIA_SESSION_VIEWING;
         else if (session->state == DF_MEDIA_SESSION_VIEWING)
-            session->state = DF_MEDIA_SESSION_REQUESTING;
+            session->state = df_media_session_state_after_viewer(session);
         return DF_OK;
     }
     return DF_ERR_INVALID;

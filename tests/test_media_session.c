@@ -37,3 +37,68 @@ void test_media_session_binds_commands_to_station_and_generation(void) {
             &current, true, 102U));
     TEST_ASSERT_INT_EQ(1, session.viewer_active);
 }
+
+void test_media_session_viewer_release_preserves_publishing_state(void) {
+    const struct df_media_station_config_v3 station = {
+        .id = "gate_main",
+        .stream_name = "doorfast_gate_main",
+        .enabled = true,
+        .logical_address = {0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U},
+    };
+    const struct df_media_session_key current = {
+        .station_id = "gate_main",
+        .generation = 7U,
+    };
+    struct df_media_session session = {0};
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_publish(&session, &station,
+        0x01020304U, DF_MEDIA_SESSION_PREVIEW, 7U, 100U));
+    session.state = DF_MEDIA_SESSION_PUBLISHING;
+    session.frames_received = 1U;
+    session.encoder.running = true;
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_command(&session, DF_MEDIA_MODULE_COMMAND_VIEWER,
+            &current, true, 101U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_VIEWING, session.state);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_command(&session, DF_MEDIA_MODULE_COMMAND_VIEWER,
+            &current, false, 102U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PUBLISHING, session.state);
+    TEST_ASSERT_INT_EQ(0, session.viewer_active);
+}
+
+void test_media_session_viewer_release_preserves_pre_media_state(void) {
+    const struct df_media_station_config_v3 station = {
+        .id = "gate_main",
+        .stream_name = "doorfast_gate_main",
+        .enabled = true,
+        .logical_address = {0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U},
+    };
+    const struct df_media_session_key current = {
+        .station_id = "gate_main",
+        .generation = 7U,
+    };
+    struct df_media_session session = {0};
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_publish(&session, &station,
+        0x01020304U, DF_MEDIA_SESSION_PREVIEW, 7U, 100U));
+    session.monitor.state = DF_GVS_MONITOR_REQUESTING;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_command(&session, DF_MEDIA_MODULE_COMMAND_VIEWER,
+            &current, true, 101U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_command(&session, DF_MEDIA_MODULE_COMMAND_VIEWER,
+            &current, false, 102U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_REQUESTING, session.state);
+
+    session.state = DF_MEDIA_SESSION_AWAITING_VIDEO;
+    session.monitor.state = DF_GVS_MONITOR_AWAITING_VIDEO;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_command(&session, DF_MEDIA_MODULE_COMMAND_VIEWER,
+            &current, true, 103U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_command(&session, DF_MEDIA_MODULE_COMMAND_VIEWER,
+            &current, false, 104U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_AWAITING_VIDEO, session.state);
+}
