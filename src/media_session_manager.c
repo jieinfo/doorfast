@@ -81,6 +81,25 @@ static int df_media_session_manager_stop_resources(
     return result;
 }
 
+static int df_media_session_manager_emit_stop_best_effort(
+    struct df_media_session_manager *manager,
+    struct df_media_session *session, uint64_t now_ms) {
+    struct df_gvs_monitor_action action;
+
+    if (manager == NULL || session == NULL) return DF_ERR_INVALID;
+    if (session->monitor.state == DF_GVS_MONITOR_IDLE) return DF_OK;
+    if (df_gvs_monitor_stop(&session->monitor, session->generation,
+            now_ms) != DF_OK ||
+        df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
+        return DF_ERR_IO;
+    if (action.send && manager->callbacks.emit_control(action.destination,
+            session->station_ipv4, action.source, action.family,
+            action.opcode, action.payload, action.payload_length,
+            manager->callbacks.context) != DF_OK)
+        return DF_ERR_IO;
+    return DF_OK;
+}
+
 static int df_media_session_manager_release_failed(
     struct df_media_session_manager *manager,
     struct df_media_session *session) {
@@ -880,6 +899,9 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
             session->frames_received != 0U && now_ms >= session->last_frame_ms &&
             now_ms - session->last_frame_ms >=
                 DF_MEDIA_SESSION_FRAME_STALL_TIMEOUT_MS) {
+            if (df_media_session_manager_emit_stop_best_effort(manager,
+                    session, now_ms) != DF_OK)
+                overall = DF_ERR_IO;
             session->state = DF_MEDIA_SESSION_FAILED;
             session->last_error = DF_MEDIA_ERROR_VIDEO_STALLED;
             if (df_media_session_manager_release_failed(manager, session) !=
@@ -965,9 +987,12 @@ static int df_media_module_api_tick_v3(void *instance, uint64_t now_ms) {
 }
 
 static bool df_media_session_status_ready(
-    enum df_media_session_state_v3 state) {
-    return state == DF_MEDIA_SESSION_PUBLISHING ||
-        state == DF_MEDIA_SESSION_VIEWING;
+    const struct df_media_session *session) {
+    return session != NULL &&
+        (session->state == DF_MEDIA_SESSION_PUBLISHING ||
+         session->state == DF_MEDIA_SESSION_VIEWING) &&
+        session->frames_received != 0U &&
+        df_media_encoder_is_running(&session->encoder);
 }
 
 static uint64_t df_media_status_mix(uint64_t hash, uint64_t value) {
@@ -1007,6 +1032,8 @@ static uint64_t df_media_session_status_fingerprint(
         session->viewer_active ? 1U : 0U);
     fingerprint = df_media_status_mix(fingerprint,
         df_media_encoder_is_running(&session->encoder) ? 1U : 0U);
+    fingerprint = df_media_status_mix(fingerprint,
+        session->frames_received != 0U ? 1U : 0U);
     fingerprint = df_media_status_mix(fingerprint, session->started_ms);
     fingerprint = df_media_status_mix(fingerprint,
         session->queue.dropped_oldest);
@@ -1064,7 +1091,7 @@ static int df_media_module_api_status_v3(const void *instance,
         entry->state = session->state;
         entry->last_error = session->last_error;
         entry->active = session->active;
-        entry->ready = df_media_session_status_ready(session->state);
+        entry->ready = df_media_session_status_ready(session);
         entry->viewer_active = session->viewer_active;
         entry->encoder_running =
             df_media_encoder_is_running(&session->encoder);

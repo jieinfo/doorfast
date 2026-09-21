@@ -864,6 +864,8 @@ void test_media_session_manager_releases_stalled_video_session(void) {
     struct df_media_session *session;
     uint64_t first_generation = 0U;
     uint64_t second_generation = 0U;
+    uint64_t third_generation = 0U;
+    unsigned controls_before_stall;
 
     manager_fixture(&config, &callbacks, &trace);
     config.stations = stations;
@@ -898,6 +900,7 @@ void test_media_session_manager_releases_stalled_video_session(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
         session->station, config.local, session->station_ipv4, jpeg,
         sizeof(jpeg), 640U, 480U, 5199U));
+    controls_before_stall = trace.control_count;
     TEST_ASSERT_INT_EQ(DF_OK,
         df_media_session_manager_tick(&manager, 10198U));
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
@@ -910,9 +913,106 @@ void test_media_session_manager_releases_stalled_video_session(void) {
     TEST_ASSERT_INT_EQ(1,
         manager.failed_generation == first_generation);
     TEST_ASSERT_INT_EQ(1, trace.resource_stops);
+    TEST_ASSERT_INT_EQ((int)(controls_before_stall + 1U),
+        (int)trace.control_count);
+    TEST_ASSERT_INT_EQ(0x03, trace.last_control_family);
+    TEST_ASSERT_INT_EQ(0x02, trace.last_control_opcode);
+    TEST_ASSERT_INT_EQ(0,
+        memcmp(trace.last_control_destination, stations[0].logical_address,
+            sizeof(trace.last_control_destination)));
+    TEST_ASSERT_INT_EQ(0,
+        memcmp(trace.last_control_source, config.local,
+            sizeof(trace.last_control_source)));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
         "gate_main", DF_MEDIA_SESSION_PREVIEW, 10200U, &second_generation));
     TEST_ASSERT_INT_EQ(1, second_generation > first_generation);
+    session = &manager.sessions[0];
+    memcpy(frame.source, session->station, sizeof(frame.source));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            session->station_ipv4, 10201U));
+    session->encoder.input_fd = open("/dev/null", O_WRONLY);
+    TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
+    session->encoder.input_owned = true;
+    session->encoder.running = true;
+    session->encoder.generation = second_generation;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
+        session->station, config.local, session->station_ipv4, jpeg,
+        sizeof(jpeg), 640U, 480U, 10300U));
+    trace.fail_control = true;
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_media_session_manager_tick(&manager, 15300U));
+    TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
+    TEST_ASSERT_INT_EQ(0,
+        df_media_encoder_is_running(&session->encoder) ? 1 : 0);
+    TEST_ASSERT_INT_EQ(2, trace.resource_stops);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_VIDEO_STALLED, manager.failed_error);
+    TEST_ASSERT_INT_EQ(1,
+        manager.failed_generation == second_generation);
+    trace.fail_control = false;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 15301U, &third_generation));
+    TEST_ASSERT_INT_EQ(1, third_generation > second_generation);
+
+    df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_reports_ready_only_after_media_flows(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    struct df_media_session_status_v3 entry;
+    struct df_media_module_status_v3 status = {
+        .sessions = &entry,
+        .session_count = 1U,
+    };
+    struct df_media_session_key key = {.station_id = "gate_main"};
+    struct df_media_session *session;
+    uint64_t revision_before_frame;
+    uint64_t revision_after_frame;
+
+    manager_fixture(&config, &callbacks, &trace);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &key.generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_VIEWER, &key, true, 101U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_module_api_v3.status(&manager, &status));
+    TEST_ASSERT_INT_EQ(1, entry.viewer_active ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, entry.encoder_running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, entry.ready ? 1 : 0);
+    revision_before_frame = entry.status_revision;
+
+    session = &manager.sessions[0];
+    session->frames_received = 1U;
+    status.session_count = 1U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_module_api_v3.status(&manager, &status));
+    TEST_ASSERT_INT_EQ(0, entry.encoder_running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, entry.ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, entry.status_revision > revision_before_frame);
+    revision_after_frame = entry.status_revision;
+
+    session->encoder.input_fd = open("/dev/null", O_WRONLY);
+    TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
+    session->encoder.input_owned = true;
+    session->encoder.running = true;
+    session->encoder.generation = key.generation;
+    status.session_count = 1U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_module_api_v3.status(&manager, &status));
+    TEST_ASSERT_INT_EQ(1, entry.encoder_running ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, entry.ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, entry.status_revision > revision_after_frame);
+
+    session->encoder.running = false;
+    status.session_count = 1U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_module_api_v3.status(&manager, &status));
+    TEST_ASSERT_INT_EQ(0, entry.ready ? 1 : 0);
 
     df_media_session_manager_destroy(&manager);
 }
