@@ -642,6 +642,7 @@ void test_media_session_manager_acknowledges_short_preview_and_retries(void) {
     session->state = DF_MEDIA_SESSION_PUBLISHING;
     session->frames_received = 1U;
     session->last_frame_ms = 102U;
+    session->viewer_active = true;
     memcpy(frame.source, stations[0].logical_address, sizeof(frame.source));
     memcpy(frame.destination, local, sizeof(frame.destination));
     memcpy(packet.source, stations[0].logical_address, sizeof(packet.source));
@@ -665,6 +666,11 @@ void test_media_session_manager_acknowledges_short_preview_and_retries(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, session->monitor.state);
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_REQUESTING, session->state);
     TEST_ASSERT_INT_EQ((int)generation, (int)session->generation);
+    TEST_ASSERT_INT_EQ(0, (int)session->frames_received);
+    TEST_ASSERT_INT_EQ(0, (int)session->last_frame_ms);
+    TEST_ASSERT_INT_EQ(0, session->viewer_active ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, session->queue_initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, df_media_encoder_is_running(&session->encoder) ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(DF_OK,
         df_media_session_manager_receive_control(&manager, &frame,

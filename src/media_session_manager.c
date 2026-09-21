@@ -539,10 +539,11 @@ int df_media_session_manager_receive_control(
         }
         if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
         if (result.retrying) {
-            df_gvs_video_reassembly_reset(&session->video);
-            df_gvs_video_reassembly_init(&session->video);
+            if (df_media_session_reset_pipeline(session) != DF_OK) {
+                session->monitor = previous_monitor;
+                return DF_ERR_IO;
+            }
             session->state = DF_MEDIA_SESSION_REQUESTING;
-            session->last_error = DF_MEDIA_ERROR_NONE;
         }
         if (result.failed) {
             session->state = DF_MEDIA_SESSION_FAILED;
