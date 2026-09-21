@@ -75,6 +75,7 @@ static int df_gvs_udp_sender_open_ports(struct df_gvs_udp_sender *sender,
     df_gvs_header_provider_fn provider, void *context) {
     struct sockaddr_in local;
     int broadcast = 1;
+    int reuse = 1;
 
     if (sender == NULL || host == NULL || provider == NULL || peer_port == 0U)
         return DF_ERR_INVALID;
@@ -83,6 +84,10 @@ static int df_gvs_udp_sender_open_ports(struct df_gvs_udp_sender *sender,
     if (sender->fd < 0) return DF_ERR_IO;
     if (setsockopt(sender->fd, SOL_SOCKET, SO_BROADCAST, &broadcast,
             sizeof(broadcast)) != 0) {
+        close(sender->fd); sender->fd = -1; return DF_ERR_IO;
+    }
+    if (setsockopt(sender->fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
+            sizeof(reuse)) != 0) {
         close(sender->fd); sender->fd = -1; return DF_ERR_IO;
     }
     memset(&local, 0, sizeof(local));
