@@ -7,6 +7,20 @@
 
 #include "doorfast.h"
 
+const char *df_media_video_reject_reason_name(
+    enum df_media_video_reject_reason reason) {
+    switch (reason) {
+    case DF_MEDIA_VIDEO_REJECT_DESTINATION: return "destination_mismatch";
+    case DF_MEDIA_VIDEO_REJECT_SOURCE_IPV4: return "source_ipv4_mismatch";
+    case DF_MEDIA_VIDEO_REJECT_SESSION: return "session_not_found";
+    case DF_MEDIA_VIDEO_REJECT_MONITOR: return "monitor_mismatch";
+    case DF_MEDIA_VIDEO_REJECT_JPEG: return "jpeg_invalid";
+    case DF_MEDIA_VIDEO_REJECT_DIMENSIONS: return "jpeg_dimensions_invalid";
+    case DF_MEDIA_VIDEO_REJECT_ENCODER: return "encoder_failed";
+    }
+    return "unknown";
+}
+
 static void df_media_video_reject_log(const char *reason,
     const struct df_gvs_video_packet *packet, uint32_t source_ipv4) {
     static unsigned diagnostic_logs;
@@ -707,14 +721,24 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
     if (manager == NULL || !manager->initialized || source == NULL ||
         destination == NULL || jpeg == NULL || source_ipv4 == 0U ||
         memcmp(destination, manager->config.local,
-            sizeof(manager->config.local)) != 0) return DF_ERR_INVALID;
+            sizeof(manager->config.local)) != 0) {
+        df_media_video_reject_log(
+            df_media_video_reject_reason_name(DF_MEDIA_VIDEO_REJECT_DESTINATION),
+            NULL, source_ipv4);
+        return DF_ERR_INVALID;
+    }
     for (index = 0U; index < manager->capacity; index++) {
         struct df_media_session *session = &manager->sessions[index];
 
         if (!session->active ||
             memcmp(source, session->station, sizeof(session->station)) != 0)
             continue;
-        if (source_ipv4 != session->station_ipv4) return DF_ERR_INVALID;
+        if (source_ipv4 != session->station_ipv4) {
+            df_media_video_reject_log(
+                df_media_video_reject_reason_name(
+                    DF_MEDIA_VIDEO_REJECT_SOURCE_IPV4), NULL, source_ipv4);
+            return DF_ERR_INVALID;
+        }
         {
             struct df_gvs_monitor_result monitor_result;
             int result;
@@ -722,8 +746,12 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
             if (session->monitor.state != DF_GVS_MONITOR_IDLE &&
                 df_gvs_monitor_admit_jpeg(&session->monitor, source,
                     destination, source_ipv4, session->generation,
-                    timestamp_ms, &monitor_result) != DF_OK)
+                    timestamp_ms, &monitor_result) != DF_OK) {
+                df_media_video_reject_log(
+                    df_media_video_reject_reason_name(
+                        DF_MEDIA_VIDEO_REJECT_MONITOR), NULL, source_ipv4);
                 return DF_ERR_INVALID;
+            }
             result = df_media_session_push_jpeg(session, &manager->config,
                 &manager->credentials, jpeg, length, width, height,
                 timestamp_ms);
@@ -735,6 +763,11 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
                 df_gvs_monitor_mark_publishing(&session->monitor,
                     session->generation, timestamp_ms) != DF_OK)
                 return DF_ERR_IO;
+            if (result != DF_OK) {
+                df_media_video_reject_log(
+                    df_media_video_reject_reason_name(
+                        DF_MEDIA_VIDEO_REJECT_ENCODER), NULL, source_ipv4);
+            }
             return result;
         }
     }

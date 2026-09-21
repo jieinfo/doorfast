@@ -18,6 +18,19 @@ struct df_media_session_resource_hooks {
     void *context;
 };
 
+enum df_media_video_reject_reason {
+    DF_MEDIA_VIDEO_REJECT_DESTINATION = 0,
+    DF_MEDIA_VIDEO_REJECT_SOURCE_IPV4,
+    DF_MEDIA_VIDEO_REJECT_SESSION,
+    DF_MEDIA_VIDEO_REJECT_MONITOR,
+    DF_MEDIA_VIDEO_REJECT_JPEG,
+    DF_MEDIA_VIDEO_REJECT_DIMENSIONS,
+    DF_MEDIA_VIDEO_REJECT_ENCODER,
+};
+
+const char *df_media_video_reject_reason_name(
+    enum df_media_video_reject_reason);
+
 struct df_media_session_manager {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
