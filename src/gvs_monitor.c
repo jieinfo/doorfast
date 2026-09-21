@@ -269,18 +269,27 @@ int df_gvs_monitor_admit_jpeg(struct df_gvs_monitor *monitor,
     const uint8_t source[6], const uint8_t destination[6],
     uint32_t source_ipv4, uint64_t generation, uint64_t now_ms,
     struct df_gvs_monitor_result *result) {
-    if (monitor == NULL || source == NULL || destination == NULL ||
-        result == NULL || now_ms < monitor->last_now_ms ||
-        generation == 0U || generation != monitor->generation ||
-        source_ipv4 != monitor->station_ipv4 ||
-        (monitor->state != DF_GVS_MONITOR_AWAITING_VIDEO &&
-         monitor->state != DF_GVS_MONITOR_PUBLISHING &&
-         monitor->state != DF_GVS_MONITOR_VIEWING) ||
-        memcmp(source, monitor->station, sizeof(monitor->station)) != 0 ||
-        memcmp(destination, monitor->local, sizeof(monitor->local)) != 0) {
+    if (result == NULL) return DF_ERR_INVALID;
+    memset(result, 0, sizeof(*result));
+    if (monitor == NULL || source == NULL || destination == NULL) {
         return DF_ERR_INVALID;
     }
-    memset(result, 0, sizeof(*result));
+    if (now_ms < monitor->last_now_ms)
+        result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_CLOCK;
+    else if (generation == 0U || generation != monitor->generation)
+        result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_GENERATION;
+    else if (source_ipv4 != monitor->station_ipv4)
+        result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_SOURCE_IPV4;
+    else if (monitor->state != DF_GVS_MONITOR_AWAITING_VIDEO &&
+             monitor->state != DF_GVS_MONITOR_PUBLISHING &&
+             monitor->state != DF_GVS_MONITOR_VIEWING)
+        result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_STATE;
+    else if (memcmp(source, monitor->station, sizeof(monitor->station)) != 0)
+        result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_SOURCE;
+    else if (memcmp(destination, monitor->local, sizeof(monitor->local)) != 0)
+        result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_DESTINATION;
+    if (result->admit_reject != DF_GVS_MONITOR_ADMIT_REJECT_NONE)
+        return DF_ERR_INVALID;
     monitor->last_now_ms = now_ms;
     if (!monitor->media_ready) {
         monitor->media_ready = true;

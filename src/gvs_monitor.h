@@ -31,6 +31,16 @@ enum df_gvs_monitor_failure {
     DF_GVS_MONITOR_STOP_TIMEOUT,
 };
 
+enum df_gvs_monitor_admit_reject {
+    DF_GVS_MONITOR_ADMIT_REJECT_NONE = 0,
+    DF_GVS_MONITOR_ADMIT_REJECT_CLOCK,
+    DF_GVS_MONITOR_ADMIT_REJECT_GENERATION,
+    DF_GVS_MONITOR_ADMIT_REJECT_SOURCE_IPV4,
+    DF_GVS_MONITOR_ADMIT_REJECT_STATE,
+    DF_GVS_MONITOR_ADMIT_REJECT_SOURCE,
+    DF_GVS_MONITOR_ADMIT_REJECT_DESTINATION,
+};
+
 struct df_gvs_monitor_action {
     bool send;
     uint8_t destination[6];
@@ -48,6 +58,7 @@ struct df_gvs_monitor_result {
     bool media_ready;
     bool stopped;
     bool failed;
+    enum df_gvs_monitor_admit_reject admit_reject;
 };
 
 struct df_gvs_monitor {

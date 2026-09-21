@@ -41,6 +41,59 @@ static void df_media_video_reject_log(const char *reason,
     diagnostic_logs++;
 }
 
+static const char *df_media_monitor_reject_name(
+    enum df_gvs_monitor_admit_reject reason) {
+    switch (reason) {
+    case DF_GVS_MONITOR_ADMIT_REJECT_CLOCK: return "clock";
+    case DF_GVS_MONITOR_ADMIT_REJECT_GENERATION: return "generation";
+    case DF_GVS_MONITOR_ADMIT_REJECT_SOURCE_IPV4: return "source_ipv4";
+    case DF_GVS_MONITOR_ADMIT_REJECT_STATE: return "state";
+    case DF_GVS_MONITOR_ADMIT_REJECT_SOURCE: return "source";
+    case DF_GVS_MONITOR_ADMIT_REJECT_DESTINATION: return "destination";
+    case DF_GVS_MONITOR_ADMIT_REJECT_NONE: break;
+    }
+    return "unknown";
+}
+
+static void df_media_monitor_reject_log(
+    const struct df_media_session *session,
+    const uint8_t source[6], const uint8_t destination[6],
+    uint32_t source_ipv4, uint64_t timestamp_ms,
+    const struct df_gvs_monitor_result *result) {
+    static unsigned diagnostic_logs;
+
+    if (diagnostic_logs >= 64U || session == NULL || result == NULL) return;
+    (void)fprintf(stderr,
+        "doorfast: event=media_monitor_rejected station_id=%s "
+        "reason=%s generation=%llu monitor_generation=%llu state=%d "
+        "timestamp_ms=%llu last_now_ms=%llu source_ipv4=%u "
+        "source=%02x:%02x:%02x:%02x:%02x:%02x "
+        "expected_source=%02x:%02x:%02x:%02x:%02x:%02x "
+        "destination=%02x:%02x:%02x:%02x:%02x:%02x "
+        "expected_destination=%02x:%02x:%02x:%02x:%02x:%02x\n",
+        session->station_id, df_media_monitor_reject_name(result->admit_reject),
+        (unsigned long long)session->generation,
+        (unsigned long long)session->monitor.generation,
+        (int)session->monitor.state, (unsigned long long)timestamp_ms,
+        (unsigned long long)session->monitor.last_now_ms,
+        (unsigned)source_ipv4,
+        source == NULL ? 0U : source[0], source == NULL ? 0U : source[1],
+        source == NULL ? 0U : source[2], source == NULL ? 0U : source[3],
+        source == NULL ? 0U : source[4], source == NULL ? 0U : source[5],
+        session->station[0], session->station[1], session->station[2],
+        session->station[3], session->station[4], session->station[5],
+        destination == NULL ? 0U : destination[0],
+        destination == NULL ? 0U : destination[1],
+        destination == NULL ? 0U : destination[2],
+        destination == NULL ? 0U : destination[3],
+        destination == NULL ? 0U : destination[4],
+        destination == NULL ? 0U : destination[5],
+        session->monitor.local[0], session->monitor.local[1],
+        session->monitor.local[2], session->monitor.local[3],
+        session->monitor.local[4], session->monitor.local[5]);
+    diagnostic_logs++;
+}
+
 static void df_media_session_manager_advance_revisions(
     struct df_media_session_manager *manager,
     struct df_media_session *session) {
@@ -768,6 +821,8 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
                 df_gvs_monitor_admit_jpeg(&session->monitor, source,
                     destination, source_ipv4, session->generation,
                     timestamp_ms, &monitor_result) != DF_OK) {
+                df_media_monitor_reject_log(session, source, destination,
+                    source_ipv4, timestamp_ms, &monitor_result);
                 df_media_video_reject_log(
                     df_media_video_reject_reason_name(
                         DF_MEDIA_VIDEO_REJECT_MONITOR), NULL, source_ipv4);

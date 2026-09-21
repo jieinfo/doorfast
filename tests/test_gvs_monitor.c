@@ -182,6 +182,8 @@ void test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout(
         confirmation, sizeof(confirmation), 0x01020304U, 101U, &result));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
         station, local, 0x01020304U, monitor.generation + 1U, 102U, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_ADMIT_REJECT_GENERATION,
+        result.admit_reject);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
         local, 0x01020304U, monitor.generation, 102U, &result));
     TEST_ASSERT_INT_EQ(1, result.media_ready ? 1 : 0);
