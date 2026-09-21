@@ -789,6 +789,7 @@ void test_media_session_manager_correlates_stop_ack_and_releases_timeouts(void) 
     struct df_media_session_key key;
     struct df_gvs_frame frame = {0};
     uint64_t generation = 0U;
+    unsigned attempt;
 
     manager_fixture(&config, &callbacks, &trace);
     config.stations = stations;
@@ -828,10 +829,16 @@ void test_media_session_manager_correlates_stop_ack_and_releases_timeouts(void) 
         df_media_session_manager_init(&manager, &config, &callbacks));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
         "gate_main", DF_MEDIA_SESSION_PREVIEW, 200U, &generation));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 200U));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 1200U));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 2200U));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 3200U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_tick(&manager, 200U));
+    for (attempt = 1U; attempt < DF_GVS_MONITOR_MAX_REQUESTS; attempt++) {
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager,
+            200U + (uint64_t)attempt *
+            DF_GVS_MONITOR_REQUEST_INTERVAL_MS));
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager,
+        200U + (uint64_t)DF_GVS_MONITOR_MAX_REQUESTS *
+        DF_GVS_MONITOR_REQUEST_INTERVAL_MS));
     TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
     df_media_session_manager_destroy(&manager);
 }

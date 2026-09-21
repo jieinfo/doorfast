@@ -230,6 +230,7 @@ void test_gvs_station_discovery_evicts_least_recently_seen_candidate(void);
 void test_gvs_monitor_retries_captured_request_and_accepts_confirmation(void);
 void test_gvs_monitor_retries_after_unconfirmed_response(void);
 void test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit(void);
+void test_gvs_monitor_busy_response_retries_beyond_three_requests(void);
 void test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout(void);
 void test_gvs_monitor_instances_reject_cross_station_and_stale_operations(void);
 void test_gvs_monitor_call_binding_enforces_first_frame_timeout(void);
@@ -612,6 +613,7 @@ int main(int argc, char **argv) {
     test_gvs_monitor_retries_captured_request_and_accepts_confirmation();
     test_gvs_monitor_retries_after_unconfirmed_response();
     test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit();
+    test_gvs_monitor_busy_response_retries_beyond_three_requests();
     test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout();
     test_gvs_monitor_instances_reject_cross_station_and_stale_operations();
     test_gvs_monitor_call_binding_enforces_first_frame_timeout();
