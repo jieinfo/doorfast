@@ -159,6 +159,8 @@ void test_media_module_stop_cleanup_failure_is_not_reported_as_stopped(void);
 void test_media_module_status_revision_tracks_public_snapshot_changes(void);
 void test_media_module_validates_v3_contract(void);
 void test_media_session_binds_commands_to_station_and_generation(void);
+void test_media_session_viewer_release_preserves_publishing_state(void);
+void test_media_session_viewer_release_preserves_pre_media_state(void);
 void test_media_session_manager_admits_dynamic_station_pool(void);
 void test_media_session_manager_rejects_admission_without_mutating_sessions(void);
 void test_media_session_manager_commands_require_exact_key(void);
@@ -384,6 +386,8 @@ int main(int argc, char **argv) {
     test_media_module_status_revision_tracks_public_snapshot_changes();
     test_media_module_validates_v3_contract();
     test_media_session_binds_commands_to_station_and_generation();
+    test_media_session_viewer_release_preserves_publishing_state();
+    test_media_session_viewer_release_preserves_pre_media_state();
     test_media_session_manager_admits_dynamic_station_pool();
     test_media_session_manager_rejects_admission_without_mutating_sessions();
     test_media_session_manager_commands_require_exact_key();
