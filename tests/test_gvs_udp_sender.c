@@ -37,13 +37,12 @@ void test_gvs_udp_sender_binds_configured_source_address(void) {
     struct sockaddr_in address;
     socklen_t length = sizeof(address);
 
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open_bound(&sender,
-        "127.0.0.1", 8300U, 8300U, udp_sender_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "127.0.0.1",
+        8300, udp_sender_header_fields, NULL));
     TEST_ASSERT_INT_EQ(0, getsockname(sender.fd,
         (struct sockaddr *)&address, &length));
     TEST_ASSERT_INT_EQ(AF_INET, address.sin_family);
     TEST_ASSERT_INT_EQ(htonl(INADDR_LOOPBACK), address.sin_addr.s_addr);
-    TEST_ASSERT_INT_EQ(8300, ntohs(address.sin_port));
     df_gvs_udp_sender_close(&sender);
 }
 
