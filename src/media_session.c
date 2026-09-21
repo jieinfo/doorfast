@@ -185,6 +185,8 @@ int df_media_session_upgrade_to_call(struct df_media_session *session,
     session->generation = generation;
     session->call_generation = call_generation;
     session->started_ms = now_ms;
+    session->frames_received = 0U;
+    session->last_frame_ms = 0U;
     session->state = DF_MEDIA_SESSION_REQUESTING;
     session->last_error = DF_MEDIA_ERROR_NONE;
     session->viewer_active = false;
@@ -239,6 +241,7 @@ int df_media_session_push_jpeg(struct df_media_session *session,
     if (df_media_frame_queue_push(&session->queue, jpeg, length,
             session->generation, timestamp_ms) != DF_OK) return DF_ERR_IO;
     session->frames_received++;
+    session->last_frame_ms = timestamp_ms;
     if (!df_media_encoder_is_running(&session->encoder) &&
         df_media_session_start_encoder(session, module_config, credentials,
             width, height) != DF_OK) {

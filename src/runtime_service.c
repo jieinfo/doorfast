@@ -135,6 +135,7 @@ static const char *df_runtime_media_error_code(int result) {
     case DF_MEDIA_ERROR_STATION_DISABLED: return "station_disabled";
     case DF_MEDIA_ERROR_GENERATION_MISMATCH: return "generation_mismatch";
     case DF_MEDIA_ERROR_ENCODER_FAILED: return "encoder_failed";
+    case DF_MEDIA_ERROR_VIDEO_STALLED: return "video_stalled";
     default: return "service_unavailable";
     }
 }

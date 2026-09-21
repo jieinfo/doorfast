@@ -172,6 +172,7 @@ void test_media_session_manager_upgrades_preview_for_incoming_call(void);
 void test_media_session_manager_preempts_oldest_preview_for_call(void);
 void test_media_session_manager_preserves_previews_when_policy_requests_it(void);
 void test_media_session_manager_correlates_stop_ack_and_releases_timeouts(void);
+void test_media_session_manager_releases_stalled_video_session(void);
 void test_media_session_manager_snapshots_cleanup_per_session(void);
 void test_media_session_manager_rejects_reinit_without_losing_owner_state(void);
 void test_media_session_manager_generation_limit_is_failure_atomic(void);
@@ -395,6 +396,7 @@ int main(int argc, char **argv) {
     test_media_session_manager_preempts_oldest_preview_for_call();
     test_media_session_manager_preserves_previews_when_policy_requests_it();
     test_media_session_manager_correlates_stop_ack_and_releases_timeouts();
+    test_media_session_manager_releases_stalled_video_session();
     test_media_session_manager_snapshots_cleanup_per_session();
     test_media_session_manager_rejects_reinit_without_losing_owner_state();
     test_media_session_manager_generation_limit_is_failure_atomic();

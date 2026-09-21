@@ -58,6 +58,7 @@ enum df_media_error_v3 {
     DF_MEDIA_ERROR_ENCODER_FAILED,
     DF_MEDIA_ERROR_GENERATION_MISMATCH,
     DF_MEDIA_ERROR_SESSION_PREEMPTED,
+    DF_MEDIA_ERROR_VIDEO_STALLED,
 };
 
 struct df_media_station_config_v3 {

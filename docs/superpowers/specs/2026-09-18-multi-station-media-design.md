@@ -464,6 +464,8 @@ Relevant codes are:
 - `capacity_busy`;
 - `resource_exhausted`;
 - `encoder_failed`;
+- `video_stalled` when a publishing or viewed source stops producing complete
+  JPEG frames for five seconds;
 - `generation_mismatch`;
 - `runtime_mismatch`;
 - `session_preempted`.

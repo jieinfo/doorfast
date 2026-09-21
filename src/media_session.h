@@ -23,6 +23,7 @@ struct df_media_session {
     bool queue_initialized;
     uint64_t started_ms;
     uint64_t frames_received;
+    uint64_t last_frame_ms;
     uint64_t status_fingerprint;
     uint64_t status_revision;
     bool status_initialized;
