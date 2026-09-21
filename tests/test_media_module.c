@@ -631,19 +631,26 @@ void test_media_module_restarts_after_failure_with_new_generation(void) {
         .credentials_path = "/tmp/doorfast-media-module-missing",
     };
     const struct df_media_module_callbacks_v2 callbacks = {
-        .emit_control = module_emit_control,
+        .emit_control = module_noop_control,
         .context = &trace,
     };
+    unsigned attempt;
 
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_init(&module, &config,
         &callbacks, 0));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(&module, 0));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 1000));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 2000));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module, 3000));
+    for (attempt = 1U; attempt < DF_GVS_MONITOR_MAX_REQUESTS; attempt++) {
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module,
+            (uint64_t)attempt * DF_GVS_MONITOR_REQUEST_INTERVAL_MS));
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_tick(&module,
+        (uint64_t)DF_GVS_MONITOR_MAX_REQUESTS *
+        DF_GVS_MONITOR_REQUEST_INTERVAL_MS));
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_FAILED, module.monitor.state);
     TEST_ASSERT_INT_EQ(1, module.failure[0] != '\0');
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(&module, 4000));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_start(&module,
+        ((uint64_t)DF_GVS_MONITOR_MAX_REQUESTS + 1U) *
+        DF_GVS_MONITOR_REQUEST_INTERVAL_MS));
     TEST_ASSERT_INT_EQ(2, (int)module.monitor.generation);
     TEST_ASSERT_INT_EQ(0, module.failure[0] != '\0');
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_destroy(&module));
