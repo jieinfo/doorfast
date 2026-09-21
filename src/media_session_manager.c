@@ -516,6 +516,9 @@ int df_media_session_manager_receive_control(
         if (frame->family == 0x03U && frame->opcode == 0x51U &&
             session->purpose != DF_MEDIA_SESSION_PREVIEW)
             return DF_ERR_INVALID;
+        if (frame->family == 0x03U && frame->opcode == 0x02U &&
+            session->purpose != DF_MEDIA_SESSION_PREVIEW)
+            return DF_ERR_INVALID;
         previous_monitor = session->monitor;
         if (df_gvs_monitor_receive(&session->monitor, frame, source_ipv4,
                 now_ms, &result) != DF_OK)
@@ -527,7 +530,20 @@ int df_media_session_manager_receive_control(
             session->monitor = previous_monitor;
             return DF_ERR_IO;
         }
+        if (result.retrying && manager->callbacks.emit_control(
+                session->station, session->station_ipv4,
+                manager->config.local, 0x03U, 0x82U, NULL, 0U,
+                manager->callbacks.context) != DF_OK) {
+            session->monitor = previous_monitor;
+            return DF_ERR_IO;
+        }
         if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
+        if (result.retrying) {
+            df_gvs_video_reassembly_reset(&session->video);
+            df_gvs_video_reassembly_init(&session->video);
+            session->state = DF_MEDIA_SESSION_REQUESTING;
+            session->last_error = DF_MEDIA_ERROR_NONE;
+        }
         if (result.failed) {
             session->state = DF_MEDIA_SESSION_FAILED;
             if (df_media_session_manager_release_failed(manager, session) != DF_OK)
@@ -880,6 +896,9 @@ int df_media_session_manager_push_video(
                 source_ipv4);
             return DF_ERR_INVALID;
         }
+        if (session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
+            session->monitor.retry_waiting)
+            return DF_OK;
         result = df_gvs_video_reassembly_push(
             &session->video, packet, &jpeg, &length);
         if (result == DF_GVS_VIDEO_REASSEMBLY_INCOMPLETE ||
@@ -915,6 +934,7 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
     if (manager == NULL || !manager->initialized) return DF_ERR_INVALID;
     for (index = 0U; index < manager->capacity; index++) {
         struct df_media_session *session = &manager->sessions[index];
+        struct df_gvs_monitor previous_monitor;
 
         if (!session->active)
             continue;
@@ -925,13 +945,16 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
         }
         {
             struct df_gvs_monitor_action action;
+            previous_monitor = session->monitor;
             if (df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
                 overall = DF_ERR_IO;
             else if (action.send && manager->callbacks.emit_control(
                     action.destination, session->station_ipv4, action.source,
                     action.family, action.opcode, action.payload,
-                    action.payload_length, manager->callbacks.context) != DF_OK)
+                    action.payload_length, manager->callbacks.context) != DF_OK) {
+                session->monitor = previous_monitor;
                 overall = DF_ERR_IO;
+            }
         }
         if (session->monitor.state == DF_GVS_MONITOR_FAILED) {
             session->state = DF_MEDIA_SESSION_FAILED;
