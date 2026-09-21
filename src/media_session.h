@@ -54,6 +54,7 @@ int df_media_session_push_jpeg(struct df_media_session *,
     const struct df_media_module_config_v3 *,
     const struct df_media_credentials *, const uint8_t *, size_t,
     uint16_t width, uint16_t height, uint64_t timestamp_ms);
+int df_media_session_reset_pipeline(struct df_media_session *);
 int df_media_session_tick_pipeline(struct df_media_session *, uint64_t now_ms);
 int df_media_session_stop_pipeline(struct df_media_session *);
 int df_media_session_upgrade_to_call(struct df_media_session *,

@@ -220,6 +220,61 @@ void test_gvs_monitor_admits_video_before_confirmation(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, monitor.state);
 }
 
+void test_gvs_monitor_retries_after_station_ends_short_preview(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
+    const uint8_t preview_end[] = {0x01U};
+    struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_result result = {0};
+    struct df_gvs_monitor_action action = {0};
+    uint64_t generation;
+    uint64_t retry_deadline;
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start_with_generation(
+        &monitor, local, station, 0x01020304U, 7U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 100U, &action));
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
+        confirmation, sizeof(confirmation), 0x01020304U, 101U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
+        local, 0x01020304U, 7U, 102U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_mark_publishing(&monitor, 7U,
+        103U));
+    generation = monitor.generation;
+
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
+        preview_end, sizeof(preview_end), 0x01020304U, 200U, &result));
+    TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ((int)generation, (int)monitor.generation);
+    TEST_ASSERT_INT_EQ(1, (int)monitor.request_attempts);
+    TEST_ASSERT_INT_EQ(0, monitor.media_ready ? 1 : 0);
+    retry_deadline = monitor.next_action_ms;
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
+        preview_end, sizeof(preview_end), 0x01020304U, 300U, &result));
+    TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
+    TEST_ASSERT_INT_EQ((int)retry_deadline, (int)monitor.next_action_ms);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, 7U, 301U, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_ADMIT_REJECT_STATE,
+        result.admit_reject);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ((int)retry_deadline, (int)monitor.next_action_ms);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 1199U, &action));
+    TEST_ASSERT_INT_EQ(0, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 1200U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x04, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
+        preview_end, sizeof(preview_end), 0x01020304U, 1201U, &result));
+    TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(1, monitor.retry_waiting ? 1 : 0);
+    TEST_ASSERT_INT_EQ(2, (int)monitor.request_attempts);
+    TEST_ASSERT_INT_EQ(2201, (int)monitor.next_action_ms);
+}
+
 void test_gvs_monitor_instances_reject_cross_station_and_stale_operations(void) {
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
     const uint8_t main_station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};

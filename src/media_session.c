@@ -182,6 +182,20 @@ int df_media_session_stop_pipeline(struct df_media_session *session) {
     return result;
 }
 
+int df_media_session_reset_pipeline(struct df_media_session *session) {
+    int result;
+
+    if (session == NULL) return DF_ERR_INVALID;
+    result = df_media_session_stop_pipeline(session);
+    df_gvs_video_reassembly_reset(&session->video);
+    df_gvs_video_reassembly_init(&session->video);
+    session->frames_received = 0U;
+    session->last_frame_ms = 0U;
+    session->viewer_active = false;
+    session->last_error = DF_MEDIA_ERROR_NONE;
+    return result;
+}
+
 int df_media_session_upgrade_to_call(struct df_media_session *session,
     uint64_t generation, uint64_t call_generation, uint64_t now_ms) {
     if (session == NULL || !session->active || generation == 0U ||

@@ -39,6 +39,7 @@ static void df_gvs_monitor_fail(struct df_gvs_monitor *monitor,
     monitor->next_action_ms = 0U;
     monitor->first_frame_deadline_ms = 0U;
     monitor->media_ready = false;
+    monitor->retry_waiting = false;
 }
 
 void df_gvs_monitor_init(struct df_gvs_monitor *monitor) {
@@ -106,6 +107,7 @@ int df_gvs_monitor_cancel(struct df_gvs_monitor *monitor, uint64_t now_ms) {
     monitor->first_frame_deadline_ms = 0U;
     monitor->request_attempts = 0U;
     monitor->media_ready = false;
+    monitor->retry_waiting = false;
     monitor->stop_sent = false;
     return DF_OK;
 }
@@ -163,6 +165,7 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
                sizeof(df_gvs_monitor_request));
         action->generation = monitor->generation;
         monitor->request_attempts++;
+        monitor->retry_waiting = false;
         if (now_ms > UINT64_MAX - DF_GVS_MONITOR_REQUEST_INTERVAL_MS) {
             df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_TIMEOUT);
         } else {
@@ -224,7 +227,8 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         return DF_ERR_INVALID;
     }
     memset(result, 0, sizeof(*result));
-    if (monitor->state == DF_GVS_MONITOR_REQUESTING && frame->opcode == 0x84U) {
+    if (monitor->state == DF_GVS_MONITOR_REQUESTING &&
+        !monitor->retry_waiting && frame->opcode == 0x84U) {
         if (frame->payload_length != sizeof(df_gvs_monitor_confirmation) ||
             frame->payload == NULL || memcmp(frame->payload,
                 df_gvs_monitor_confirmation, sizeof(df_gvs_monitor_confirmation)) != 0 ||
@@ -239,7 +243,8 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         result->confirmed = true;
         return DF_OK;
     }
-    if (monitor->state == DF_GVS_MONITOR_REQUESTING && frame->opcode == 0x50U) {
+    if (monitor->state == DF_GVS_MONITOR_REQUESTING &&
+        !monitor->retry_waiting && frame->opcode == 0x50U) {
         if (frame->payload_length != 0U) return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
         return DF_OK;
@@ -251,6 +256,29 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         if (frame->payload_length != 0U) return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
         result->keepalive_reply = true;
+        return DF_OK;
+    }
+    if ((monitor->state == DF_GVS_MONITOR_REQUESTING ||
+         monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO ||
+         monitor->state == DF_GVS_MONITOR_PUBLISHING ||
+         monitor->state == DF_GVS_MONITOR_VIEWING) &&
+        frame->opcode == 0x02U) {
+        if (frame->payload_length != 1U || frame->payload == NULL ||
+            frame->payload[0] > 1U ||
+            now_ms > UINT64_MAX - DF_GVS_MONITOR_REQUEST_INTERVAL_MS)
+            return DF_ERR_INVALID;
+        monitor->last_now_ms = now_ms;
+        if (!monitor->retry_waiting) {
+            monitor->state = DF_GVS_MONITOR_REQUESTING;
+            monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+            monitor->next_action_ms =
+                now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+            monitor->first_frame_deadline_ms = 0U;
+            monitor->media_ready = false;
+            monitor->retry_waiting = true;
+            monitor->stop_sent = false;
+        }
+        result->retrying = true;
         return DF_OK;
     }
     if (monitor->state == DF_GVS_MONITOR_STOPPING && frame->opcode == 0x82U &&
@@ -280,10 +308,12 @@ int df_gvs_monitor_admit_jpeg(struct df_gvs_monitor *monitor,
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_GENERATION;
     else if (source_ipv4 != monitor->station_ipv4)
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_SOURCE_IPV4;
-    else if (monitor->state != DF_GVS_MONITOR_REQUESTING &&
+    else if ((monitor->state == DF_GVS_MONITOR_REQUESTING &&
+              monitor->retry_waiting) ||
+             (monitor->state != DF_GVS_MONITOR_REQUESTING &&
              monitor->state != DF_GVS_MONITOR_AWAITING_VIDEO &&
              monitor->state != DF_GVS_MONITOR_PUBLISHING &&
-             monitor->state != DF_GVS_MONITOR_VIEWING)
+             monitor->state != DF_GVS_MONITOR_VIEWING))
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_STATE;
     else if (memcmp(source, monitor->station, sizeof(monitor->station)) != 0)
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_SOURCE;
@@ -337,6 +367,7 @@ int df_gvs_monitor_stop(struct df_gvs_monitor *monitor, uint64_t generation,
     monitor->last_now_ms = now_ms;
     monitor->state = DF_GVS_MONITOR_STOPPING;
     monitor->next_action_ms = now_ms;
+    monitor->retry_waiting = false;
     monitor->stop_sent = false;
     return DF_OK;
 }

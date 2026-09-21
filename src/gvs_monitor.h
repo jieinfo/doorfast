@@ -56,6 +56,7 @@ struct df_gvs_monitor_result {
     bool confirmed;
     bool keepalive_reply;
     bool media_ready;
+    bool retrying;
     bool stopped;
     bool failed;
     enum df_gvs_monitor_admit_reject admit_reject;
@@ -74,6 +75,7 @@ struct df_gvs_monitor {
     uint64_t first_frame_timeout_ms;
     unsigned request_attempts;
     bool media_ready;
+    bool retry_waiting;
     bool stop_sent;
 };
 

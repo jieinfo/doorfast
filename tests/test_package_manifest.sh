@@ -166,8 +166,8 @@ grep -F "option version '0'" package/doorfast/files/doorfast-sync.config
 grep -q 'doorfast-sync.config.*doorfast-sync' package/doorfast/Makefile
 grep -q 'doorfast-deployment.config.*doorfast-deployment' package/doorfast/Makefile
 grep -q 'doorfast-group.*etc/uci-defaults/doorfast-group' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=56' package/doorfast/Makefile
-grep -q 'PKG_RELEASE:=56' package/doorfast-media/Makefile
+grep -q 'PKG_RELEASE:=57' package/doorfast/Makefile
+grep -q 'PKG_RELEASE:=57' package/doorfast-media/Makefile
 doorfast_release=$(sed -n 's/^PKG_RELEASE:=//p' package/doorfast/Makefile)
 doorfast_media_release=$(sed -n 's/^PKG_RELEASE:=//p' package/doorfast-media/Makefile)
 test "$doorfast_release" = "$doorfast_media_release"
