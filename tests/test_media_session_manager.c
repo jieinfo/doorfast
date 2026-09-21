@@ -11,6 +11,19 @@
 #include "media_session_manager.h"
 #include "test.h"
 
+void test_media_video_reject_reason_names(void) {
+    TEST_ASSERT_INT_EQ(0, strcmp("destination_mismatch",
+        df_media_video_reject_reason_name(DF_MEDIA_VIDEO_REJECT_DESTINATION)));
+    TEST_ASSERT_INT_EQ(0, strcmp("source_ipv4_mismatch",
+        df_media_video_reject_reason_name(DF_MEDIA_VIDEO_REJECT_SOURCE_IPV4)));
+    TEST_ASSERT_INT_EQ(0, strcmp("monitor_mismatch",
+        df_media_video_reject_reason_name(DF_MEDIA_VIDEO_REJECT_MONITOR)));
+    TEST_ASSERT_INT_EQ(0, strcmp("jpeg_invalid",
+        df_media_video_reject_reason_name(DF_MEDIA_VIDEO_REJECT_JPEG)));
+    TEST_ASSERT_INT_EQ(0, strcmp("encoder_failed",
+        df_media_video_reject_reason_name(DF_MEDIA_VIDEO_REJECT_ENCODER)));
+}
+
 struct manager_trace {
     uint64_t available_kib;
     const char *unroutable_station;
