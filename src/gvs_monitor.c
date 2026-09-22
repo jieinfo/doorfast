@@ -268,6 +268,9 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             now_ms > UINT64_MAX - DF_GVS_MONITOR_REQUEST_INTERVAL_MS)
             return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
+        /* Captured sessions use 03/02=01 as a non-terminal status update. */
+        if (frame->payload[0] == 1U)
+            return DF_OK;
         if (!monitor->retry_waiting) {
             monitor->state = DF_GVS_MONITOR_REQUESTING;
             monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;

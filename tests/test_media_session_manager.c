@@ -600,7 +600,7 @@ void test_media_session_manager_acknowledges_short_preview_and_retries(void) {
          .ipv4 = 0x01020304U},
     };
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
-    const uint8_t preview_end[] = {0x01U};
+    const uint8_t preview_end[] = {0x00U};
     const uint8_t late_fragment[] = {0xffU, 0xd8U};
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
