@@ -58,6 +58,25 @@ int df_gvs_parse_video(const uint8_t *p, size_t n,
     o->payload = p + DF_GVS_VIDEO_HEADER_LEN;
     return 0;
 }
+
+int df_gvs_parse_video_datagram(const uint8_t *p, size_t n,
+                                struct df_gvs_video_packet *o,
+                                size_t *consumed)
+{
+    size_t length;
+
+    if (consumed != NULL) *consumed = 0U;
+    if (p == NULL || o == NULL || consumed == NULL ||
+        n < DF_GVS_VIDEO_HEADER_LEN || !common(p, n)) return -1;
+    length = (size_t)le16(p + 0x22);
+    if (length == 0U || length > 1200U ||
+        length > SIZE_MAX - DF_GVS_VIDEO_HEADER_LEN ||
+        DF_GVS_VIDEO_HEADER_LEN + length > n) return -1;
+    if (df_gvs_parse_video(p, DF_GVS_VIDEO_HEADER_LEN + length, o) != 0)
+        return -1;
+    *consumed = DF_GVS_VIDEO_HEADER_LEN + length;
+    return 0;
+}
 int df_gvs_serialize_audio(const uint8_t destination[6],
                            const uint8_t source[6], uint16_t sequence,
                            const uint8_t *payload, size_t payload_length,

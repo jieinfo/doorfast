@@ -9,6 +9,7 @@ void test_gvs_call_runtime_tick_is_atomic(void);
 void test_gvs_call_control_answer_reaches_confirmation(void);
 void test_gvs_call_control_tracks_answer_sent_by_external_transport(void);
 void test_gvs_media(void);
+void test_gvs_media_splits_coalesced_video_datagrams(void);
 void test_gvs_media_admission_requires_current_exact_endpoints(void);
 void test_gvs_media_lifecycle_isolates_generations_and_endings(void);
 void test_gvs_video_reassembly(void);
@@ -449,6 +450,7 @@ int main(int argc, char **argv) {
     test_runtime_ubus_audio_status_tracks_buffer();
     test_runtime_ubus_keeps_bounded_redacted_event_log();
     test_gvs_media();
+    test_gvs_media_splits_coalesced_video_datagrams();
     test_gvs_jpeg_extracts_dimensions_from_sof();
     test_gvs_media_admission_requires_current_exact_endpoints();
     test_gvs_media_lifecycle_isolates_generations_and_endings();
