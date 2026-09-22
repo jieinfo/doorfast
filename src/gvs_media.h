@@ -10,6 +10,8 @@ struct df_gvs_audio_packet { uint8_t destination[6], source[6]; uint16_t sequenc
 struct df_gvs_video_packet { uint8_t destination[6], source[6]; uint16_t frame_no, chunk_count, chunk_index, chunk_length, capacity; uint32_t full_length; const uint8_t *payload; };
 int df_gvs_parse_audio(const uint8_t *, size_t, struct df_gvs_audio_packet *);
 int df_gvs_parse_video(const uint8_t *, size_t, struct df_gvs_video_packet *);
+int df_gvs_parse_video_datagram(const uint8_t *, size_t,
+    struct df_gvs_video_packet *, size_t *consumed);
 int df_gvs_serialize_audio(const uint8_t [6], const uint8_t [6], uint16_t,
     const uint8_t *, size_t, uint8_t *, size_t, size_t *);
 #endif

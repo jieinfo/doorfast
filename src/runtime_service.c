@@ -736,7 +736,7 @@ static void df_runtime_receive_audio_payload(
     }
 }
 
-static void df_runtime_receive_video_payload(
+static void df_runtime_receive_video_datagram(
     const uint8_t *payload, size_t payload_length, uint32_t source_ipv4,
     struct df_runtime_media_module *media_module, struct df_runtime_ubus *ubus,
     const struct df_station_registry *stations,
@@ -744,11 +744,13 @@ static void df_runtime_receive_video_payload(
     struct df_gvs_video_reassembly *video,
     struct df_gvs_video_frame_cache *video_cache, uint64_t now_ms) {
     struct df_gvs_video_packet video_packet;
+    size_t consumed = 0U;
     static unsigned diagnostic_logs;
 
     if (payload == NULL || media_module == NULL || session == NULL ||
         identity == NULL || video == NULL || video_cache == NULL ||
-        df_gvs_parse_video(payload, payload_length, &video_packet) != 0) {
+        df_gvs_parse_video_datagram(payload, payload_length, &video_packet,
+            &consumed) != 0) {
         if (diagnostic_logs < 16U) {
             (void)fprintf(stderr,
                 "doorfast: event=video_datagram_rejected reason=parse "
@@ -803,6 +805,34 @@ static void df_runtime_receive_video_payload(
                 (void)remove(DF_RUNTIME_VIDEO_SNAPSHOT);
             }
         }
+    }
+}
+
+static void df_runtime_receive_video_payload(
+    const uint8_t *payload, size_t payload_length, uint32_t source_ipv4,
+    struct df_runtime_media_module *media_module, struct df_runtime_ubus *ubus,
+    const struct df_station_registry *stations,
+    struct df_gvs_session *session, const uint8_t identity[6],
+    struct df_gvs_video_reassembly *video,
+    struct df_gvs_video_frame_cache *video_cache, uint64_t now_ms) {
+    size_t offset = 0U;
+
+    while (offset < payload_length) {
+        struct df_gvs_video_packet packet;
+        size_t consumed = 0U;
+
+        if (df_gvs_parse_video_datagram(payload + offset,
+                payload_length - offset, &packet, &consumed) != 0 ||
+            consumed == 0U) {
+            df_runtime_receive_video_datagram(payload + offset,
+                payload_length - offset, source_ipv4, media_module, ubus,
+                stations, session, identity, video, video_cache, now_ms);
+            return;
+        }
+        df_runtime_receive_video_datagram(payload + offset, consumed,
+            source_ipv4, media_module, ubus, stations, session, identity,
+            video, video_cache, now_ms);
+        offset += consumed;
     }
 }
 

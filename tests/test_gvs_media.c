@@ -83,3 +83,36 @@ void test_gvs_media(void)
         destination, source, 0x1234, payload, sizeof(payload),
         serialized, sizeof(serialized) - 1, &serialized_length));
 }
+
+void test_gvs_media_splits_coalesced_video_datagrams(void)
+{
+    uint8_t coalesced[(DF_GVS_VIDEO_HEADER_LEN + 3U) * 2U] = {0};
+    struct df_gvs_video_packet first = {0};
+    struct df_gvs_video_packet second = {0};
+    size_t consumed = 0U;
+
+    header(coalesced);
+    coalesced[0x18] = 1U;
+    coalesced[0x1a] = 6U;
+    coalesced[0x1e] = 2U;
+    coalesced[0x20] = 1U;
+    coalesced[0x22] = 3U;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 0U] = 0xffU;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 1U] = 0xd8U;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 2U] = 1U;
+    header(coalesced + DF_GVS_VIDEO_HEADER_LEN + 3U);
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 3U + 0x18] = 1U;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 3U + 0x1a] = 6U;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 3U + 0x1e] = 2U;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 3U + 0x20] = 2U;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 3U + 0x22] = 3U;
+    coalesced[DF_GVS_VIDEO_HEADER_LEN + 3U + DF_GVS_VIDEO_HEADER_LEN] = 2U;
+
+    TEST_ASSERT_INT_EQ(0, df_gvs_parse_video_datagram(coalesced,
+        sizeof(coalesced), &first, &consumed));
+    TEST_ASSERT_INT_EQ(DF_GVS_VIDEO_HEADER_LEN + 3U, (int)consumed);
+    TEST_ASSERT_INT_EQ(1, (int)first.chunk_index);
+    TEST_ASSERT_INT_EQ(0, df_gvs_parse_video_datagram(coalesced + consumed,
+        sizeof(coalesced) - consumed, &second, &consumed));
+    TEST_ASSERT_INT_EQ(2, (int)second.chunk_index);
+}
