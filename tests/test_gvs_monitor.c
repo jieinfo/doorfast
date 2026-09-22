@@ -224,7 +224,7 @@ void test_gvs_monitor_retries_after_station_ends_short_preview(void) {
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
     const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
     const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
-    const uint8_t preview_end[] = {0x01U};
+    const uint8_t preview_end[] = {0x00U};
     struct df_gvs_monitor monitor = {0};
     struct df_gvs_monitor_result result = {0};
     struct df_gvs_monitor_action action = {0};
@@ -273,6 +273,32 @@ void test_gvs_monitor_retries_after_station_ends_short_preview(void) {
     TEST_ASSERT_INT_EQ(1, monitor.retry_waiting ? 1 : 0);
     TEST_ASSERT_INT_EQ(2, (int)monitor.request_attempts);
     TEST_ASSERT_INT_EQ(2201, (int)monitor.next_action_ms);
+}
+
+void test_gvs_monitor_ignores_nonterminal_preview_status(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
+    const uint8_t preview_status[] = {0x01U};
+    struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_result result = {0};
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start_with_generation(
+        &monitor, local, station, 0x01020304U, 7U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
+        confirmation, sizeof(confirmation), 0x01020304U, 101U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
+        local, 0x01020304U, 7U, 102U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_mark_publishing(&monitor, 7U,
+        103U));
+
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
+        preview_status, sizeof(preview_status), 0x01020304U, 200U, &result));
+    TEST_ASSERT_INT_EQ(0, result.retrying ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, monitor.state);
+    TEST_ASSERT_INT_EQ(1, monitor.media_ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, monitor.retry_waiting ? 1 : 0);
 }
 
 void test_gvs_monitor_instances_reject_cross_station_and_stale_operations(void) {
