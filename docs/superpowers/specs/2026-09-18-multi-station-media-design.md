@@ -465,7 +465,9 @@ Relevant codes are:
 - `resource_exhausted`;
 - `encoder_failed`;
 - `video_stalled` when a publishing or viewed source stops producing complete
-  JPEG frames for five seconds;
+  JPEG frames for thirty seconds. The longer window is required because the
+  door stations publish JPEG frames in bursts with observed gaps above twenty
+  seconds;
 - `generation_mismatch`;
 - `runtime_mismatch`;
 - `session_preempted`.
