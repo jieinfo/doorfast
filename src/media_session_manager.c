@@ -7,7 +7,8 @@
 
 #include "doorfast.h"
 
-#define DF_MEDIA_SESSION_FRAME_STALL_TIMEOUT_MS 5000U
+/* Door stations publish JPEG frames in bursts with gaps up to about 21 s. */
+#define DF_MEDIA_SESSION_FRAME_STALL_TIMEOUT_MS 30000U
 
 const char *df_media_video_reject_reason_name(
     enum df_media_video_reject_reason reason) {

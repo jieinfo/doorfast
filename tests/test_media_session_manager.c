@@ -1024,11 +1024,15 @@ void test_media_session_manager_releases_stalled_video_session(void) {
         session->station, config.local, session->station_ipv4, jpeg,
         sizeof(jpeg), 640U, 480U, 5199U));
     controls_before_stall = trace.control_count;
+    /* Captured stations may leave a burst gap of more than twenty seconds. */
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 10198U));
+        df_media_session_manager_tick(&manager, 27198U));
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 10199U));
+        df_media_session_manager_tick(&manager, 35198U));
+    TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_tick(&manager, 35199U));
     TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(0,
         df_media_encoder_is_running(&session->encoder) ? 1 : 0);
@@ -1047,13 +1051,13 @@ void test_media_session_manager_releases_stalled_video_session(void) {
         memcmp(trace.last_control_source, config.local,
             sizeof(trace.last_control_source)));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
-        "gate_main", DF_MEDIA_SESSION_PREVIEW, 10200U, &second_generation));
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 35200U, &second_generation));
     TEST_ASSERT_INT_EQ(1, second_generation > first_generation);
     session = &manager.sessions[0];
     memcpy(frame.source, session->station, sizeof(frame.source));
     TEST_ASSERT_INT_EQ(DF_OK,
         df_media_session_manager_receive_control(&manager, &frame,
-            session->station_ipv4, 10201U));
+            session->station_ipv4, 35201U));
     session->encoder.input_fd = open("/dev/null", O_WRONLY);
     TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
     session->encoder.input_owned = true;
@@ -1061,10 +1065,10 @@ void test_media_session_manager_releases_stalled_video_session(void) {
     session->encoder.generation = second_generation;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
         session->station, config.local, session->station_ipv4, jpeg,
-        sizeof(jpeg), 640U, 480U, 10300U));
+        sizeof(jpeg), 640U, 480U, 35300U));
     trace.fail_control = true;
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_media_session_manager_tick(&manager, 15300U));
+        df_media_session_manager_tick(&manager, 65300U));
     TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(0,
         df_media_encoder_is_running(&session->encoder) ? 1 : 0);
@@ -1074,7 +1078,7 @@ void test_media_session_manager_releases_stalled_video_session(void) {
         manager.failed_generation == second_generation);
     trace.fail_control = false;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
-        "gate_main", DF_MEDIA_SESSION_PREVIEW, 15301U, &third_generation));
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 65301U, &third_generation));
     TEST_ASSERT_INT_EQ(1, third_generation > second_generation);
 
     df_media_session_manager_destroy(&manager);
