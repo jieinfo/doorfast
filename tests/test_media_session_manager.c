@@ -959,51 +959,6 @@ void test_media_session_manager_correlates_stop_ack_and_releases_timeouts(void) 
     df_media_session_manager_destroy(&manager);
 }
 
-void test_media_session_manager_honors_preview_timeout(void) {
-    static const struct df_media_station_config_v3 stations[] = {
-        {.id = "gate_main", .stream_name = "doorfast_gate_main",
-         .enabled = true,
-         .logical_address = {0x32U, 2U, 1U, 0U, 2U, 0U},
-         .ipv4 = 0x01020304U},
-    };
-    struct df_media_module_config_v3 config;
-    struct df_media_module_callbacks_v3 callbacks;
-    struct manager_trace trace = {.available_kib = 4096U};
-    struct df_media_session_manager manager = {0};
-    struct df_media_session *session;
-    uint64_t generation = 0U;
-
-    manager_fixture(&config, &callbacks, &trace);
-    config.stations = stations;
-    config.station_count = sizeof(stations) / sizeof(stations[0]);
-    config.max_encoders = 1U;
-    config.preview_timeout_s = 15U;
-    config.local[0] = 0x61U;
-    config.local[1] = 2U;
-    config.local[2] = 1U;
-    config.local[3] = 1U;
-    config.local[4] = 1U;
-    config.local[5] = 1U;
-    TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_init(&manager, &config, &callbacks));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
-        "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &generation));
-    session = &manager.sessions[0];
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, session->monitor.state);
-    TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 15100U));
-    TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
-    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_STOPPING, session->state);
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, session->monitor.state);
-    TEST_ASSERT_INT_EQ(1, (int)trace.control_count);
-    TEST_ASSERT_INT_EQ(0x02, trace.last_control_opcode);
-    TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 16100U));
-    TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
-    TEST_ASSERT_INT_EQ(1, (int)trace.control_count);
-    df_media_session_manager_destroy(&manager);
-}
-
 void test_media_session_manager_releases_stalled_video_session(void) {
     static const uint8_t jpeg[] = {0xffU, 0xd8U, 0x41U, 0xffU, 0xd9U};
     static const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};

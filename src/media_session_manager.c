@@ -135,57 +135,6 @@ static int df_media_session_manager_stop_resources(
     return result;
 }
 
-static bool df_media_session_manager_preview_expired(
-    const struct df_media_session_manager *manager,
-    const struct df_media_session *session, uint64_t now_ms) {
-    uint64_t timeout_ms;
-
-    if (manager == NULL || session == NULL || !session->active ||
-        session->state == DF_MEDIA_SESSION_STOPPING ||
-        session->purpose != DF_MEDIA_SESSION_PREVIEW ||
-        manager->config.preview_timeout_s == 0U ||
-        now_ms < session->started_ms) return false;
-    timeout_ms = (uint64_t)manager->config.preview_timeout_s * 1000U;
-    return now_ms - session->started_ms >= timeout_ms;
-}
-
-static int df_media_session_manager_stop_preview(
-    struct df_media_session_manager *manager,
-    struct df_media_session *session, uint64_t now_ms) {
-    struct df_gvs_monitor previous_monitor;
-    struct df_gvs_monitor_action action;
-
-    if (manager == NULL || session == NULL || !session->active ||
-        session->purpose != DF_MEDIA_SESSION_PREVIEW) return DF_ERR_INVALID;
-    if (session->monitor.state == DF_GVS_MONITOR_IDLE) {
-        if (df_media_session_manager_stop_resources(session) != DF_OK)
-            return DF_MEDIA_ERROR_ENCODER_FAILED;
-        df_media_session_reset(session);
-        if (manager->active_count > 0U) manager->active_count--;
-        df_media_session_manager_advance_revisions(manager, session);
-        return DF_OK;
-    }
-    previous_monitor = session->monitor;
-    if (df_gvs_monitor_stop(&session->monitor, session->generation, now_ms) != DF_OK ||
-        df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK) {
-        session->monitor = previous_monitor;
-        return DF_ERR_INVALID;
-    }
-    if (action.send && manager->callbacks.emit_control(
-            action.destination, session->station_ipv4, action.source,
-            action.family, action.opcode, action.payload,
-            action.payload_length, manager->callbacks.context) != DF_OK) {
-        session->monitor = previous_monitor;
-        return DF_ERR_IO;
-    }
-    session->state = DF_MEDIA_SESSION_STOPPING;
-    session->viewer_active = false;
-    if (df_media_session_stop_pipeline(session) != DF_OK)
-        return DF_MEDIA_ERROR_ENCODER_FAILED;
-    df_media_session_manager_advance_revisions(manager, session);
-    return DF_OK;
-}
-
 static int df_media_session_manager_emit_stop_best_effort(
     struct df_media_session_manager *manager,
     struct df_media_session *session, uint64_t now_ms) {
@@ -995,15 +944,6 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
             if (df_media_session_manager_release_failed(manager, session) != DF_OK)
                 overall = DF_ERR_IO;
             continue;
-        }
-        if (df_media_session_manager_preview_expired(manager, session, now_ms)) {
-            int stop_result = df_media_session_manager_stop_preview(
-                manager, session, now_ms);
-
-            if (stop_result != DF_OK) {
-                overall = DF_ERR_IO;
-                continue;
-            }
         }
         {
             struct df_gvs_monitor_action action;
