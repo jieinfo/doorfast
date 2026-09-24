@@ -214,14 +214,6 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
     memset(action, 0, sizeof(*action));
     monitor->last_now_ms = now_ms;
 
-    if (monitor->status_retry_pending &&
-        monitor->status_retry_deadline_ms != 0U &&
-        now_ms >= monitor->status_retry_deadline_ms) {
-        if (df_gvs_monitor_request_retry(monitor, now_ms) != DF_OK)
-            return DF_ERR_INVALID;
-        return DF_OK;
-    }
-
     if (monitor->state == DF_GVS_MONITOR_REQUESTING) {
         if (now_ms < monitor->next_action_ms) {
             return DF_OK;
@@ -372,18 +364,8 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
         if (frame->payload[0] == 1U) {
-            if (monitor->persistent &&
-                (monitor->state == DF_GVS_MONITOR_PUBLISHING ||
-                 monitor->state == DF_GVS_MONITOR_VIEWING)) {
-                if (now_ms > UINT64_MAX -
-                    DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS)
-                    return DF_ERR_INVALID;
-                if (!monitor->status_retry_pending) {
-                    monitor->status_retry_pending = true;
-                    monitor->status_retry_deadline_ms = now_ms +
-                        DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS;
-                }
-            }
+            /* 03/02=01 is a station status poll. Do not tear down a preview
+             * while the station is between its periodic video bursts. */
             return DF_OK;
         }
         if (!monitor->retry_waiting) {
@@ -400,11 +382,16 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
                 monitor->stop_sent = false;
             } else if (monitor->peer_stop_seen) {
                 /* Duplicate peer hangup while the replacement request is in flight. */
-            } else if (df_gvs_monitor_restart_after_peer_stop(monitor,
-                    now_ms) != DF_OK) {
-                return DF_ERR_INVALID;
             } else {
-                peer_retry_ready = true;
+                monitor->state = DF_GVS_MONITOR_REQUESTING;
+                monitor->next_action_ms = now_ms;
+                monitor->first_frame_deadline_ms = 0U;
+                monitor->status_retry_deadline_ms = 0U;
+                monitor->request_attempts = 0U;
+                monitor->media_ready = false;
+                monitor->status_retry_pending = false;
+                monitor->retry_waiting = false;
+                monitor->peer_stop_seen = false;
             }
         }
         result->hangup_reply = true;

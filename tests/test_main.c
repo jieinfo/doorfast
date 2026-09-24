@@ -241,7 +241,8 @@ void test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout(
 void test_gvs_monitor_admits_video_before_confirmation(void);
 void test_gvs_monitor_retries_after_station_ends_short_preview(void);
 void test_gvs_monitor_ignores_nonterminal_preview_status(void);
-void test_gvs_monitor_persistent_preview_retries_after_status(void);
+void test_gvs_monitor_persistent_preview_keeps_media_after_status(void);
+void test_gvs_monitor_persistent_preview_resumes_after_peer_end(void);
 void test_gvs_monitor_preview_retry_waits_for_stop_ack(void);
 void test_gvs_monitor_accepts_peer_hangup_while_retry_stopping(void);
 void test_gvs_monitor_preview_retry_falls_back_after_stop_timeout(void);
@@ -637,7 +638,8 @@ int main(int argc, char **argv) {
     test_gvs_monitor_admits_video_before_confirmation();
     test_gvs_monitor_retries_after_station_ends_short_preview();
     test_gvs_monitor_ignores_nonterminal_preview_status();
-    test_gvs_monitor_persistent_preview_retries_after_status();
+    test_gvs_monitor_persistent_preview_keeps_media_after_status();
+    test_gvs_monitor_persistent_preview_resumes_after_peer_end();
     test_gvs_monitor_preview_retry_waits_for_stop_ack();
     test_gvs_monitor_accepts_peer_hangup_while_retry_stopping();
     test_gvs_monitor_preview_retry_falls_back_after_stop_timeout();

@@ -582,7 +582,17 @@ int df_media_session_manager_receive_control(
         }
         if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
         if (result.retrying) {
-            session->state = DF_MEDIA_SESSION_STOPPING;
+            if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+                session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
+                session->frames_received != 0U &&
+                df_media_encoder_is_running(&session->encoder)) {
+                session->state = session->viewer_active ?
+                    DF_MEDIA_SESSION_VIEWING : DF_MEDIA_SESSION_PUBLISHING;
+            } else {
+                session->state = session->monitor.state ==
+                    DF_GVS_MONITOR_REQUESTING ?
+                    DF_MEDIA_SESSION_REQUESTING : DF_MEDIA_SESSION_STOPPING;
+            }
         }
         if (result.retry_ready) {
             if (df_media_session_manager_finish_preview_retry(session) !=
