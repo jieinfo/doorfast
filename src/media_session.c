@@ -40,7 +40,7 @@ static int df_media_session_start_encoder(struct df_media_session *session,
     };
 
     return df_media_encoder_start(&session->encoder, &config, credentials,
-        session->generation);
+        session->media_generation);
 }
 
 static int df_media_session_flush_pending(struct df_media_session *session) {
@@ -115,6 +115,7 @@ int df_media_session_activate(struct df_media_session *session,
     if (session == NULL || !session->reserved || session->active ||
         generation == 0U) return DF_ERR_INVALID;
     session->generation = generation;
+    session->media_generation = generation;
     session->state = DF_MEDIA_SESSION_REQUESTING;
     session->reserved = false;
     session->active = true;
@@ -211,6 +212,7 @@ int df_media_session_upgrade_to_call(struct df_media_session *session,
     df_gvs_video_reassembly_init(&session->video);
     session->purpose = DF_MEDIA_SESSION_CALL;
     session->generation = generation;
+    session->media_generation = generation;
     session->call_generation = call_generation;
     session->started_ms = now_ms;
     session->frames_received = 0U;
@@ -256,18 +258,19 @@ int df_media_session_push_jpeg(struct df_media_session *session,
         }
         if (session->queue_initialized &&
             df_media_frame_queue_reset(&session->queue,
-                session->generation) != DF_OK) {
+                session->media_generation) != DF_OK) {
             df_media_session_fail_encoder(session);
             return DF_ERR_IO;
         }
     }
     if (!session->queue_initialized) {
-        if (df_media_frame_queue_init(&session->queue, session->generation,
+        if (df_media_frame_queue_init(&session->queue,
+                session->media_generation,
                 DF_GVS_VIDEO_MAX_FRAME) != DF_OK) return DF_ERR_IO;
         session->queue_initialized = true;
     }
     if (df_media_frame_queue_push(&session->queue, jpeg, length,
-            session->generation, timestamp_ms) != DF_OK) return DF_ERR_IO;
+            session->media_generation, timestamp_ms) != DF_OK) return DF_ERR_IO;
     session->frames_received++;
     session->last_frame_ms = timestamp_ms;
     if (!df_media_encoder_is_running(&session->encoder) &&
