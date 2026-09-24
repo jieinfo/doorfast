@@ -228,7 +228,8 @@ static int df_media_encoder_command_build(
         APPEND("-vaapi_device"); APPEND("/dev/dri/renderD128");
     }
     APPEND("-f"); APPEND("image2pipe"); APPEND("-vcodec"); APPEND("mjpeg");
-    APPEND("-framerate"); APPEND(command->fps); APPEND("-i"); APPEND("pipe:0");
+    APPEND("-framerate"); APPEND(command->fps); APPEND("-probesize");
+    APPEND("32"); APPEND("-i"); APPEND("pipe:0");
     APPEND("-an");
     if (command->filter[0] != '\0') {
         APPEND("-vf"); APPEND(command->filter);

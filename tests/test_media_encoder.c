@@ -239,6 +239,7 @@ void test_media_encoder_exec_uses_complete_rtsp_arguments(void)
     TEST_ASSERT_INT_EQ(1, strstr(contents, "-bufsize\n2400k\n") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, strstr(contents,
         "-x264-params\nrepeat-headers=1:scenecut=0\n") != NULL ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, strstr(contents, "-probesize\n32\n") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, strstr(contents, "-rtsp_transport\ntcp\n") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, strstr(contents, "-rtsp_flags\n") != NULL ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, strstr(contents,
