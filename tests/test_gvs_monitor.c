@@ -491,6 +491,11 @@ void test_gvs_monitor_accepts_peer_hangup_while_retry_stopping(void) {
     TEST_ASSERT_INT_EQ(1, result.retry_ready ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, result.retrying ? 1 : 0);
     TEST_ASSERT_INT_EQ((int)(generation + 1U), (int)monitor.generation);
+
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, monitor.generation, 204U, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_ADMIT_REJECT_STATE,
+        result.admit_reject);
 }
 
 void test_gvs_monitor_preview_retry_falls_back_after_stop_timeout(void) {

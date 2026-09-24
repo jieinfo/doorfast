@@ -476,6 +476,8 @@ int df_gvs_monitor_admit_jpeg(struct df_gvs_monitor *monitor,
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_GENERATION;
     else if (source_ipv4 != monitor->station_ipv4)
         result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_SOURCE_IPV4;
+    else if (monitor->peer_stop_seen)
+        result->admit_reject = DF_GVS_MONITOR_ADMIT_REJECT_STATE;
     else if ((monitor->state == DF_GVS_MONITOR_REQUESTING &&
               monitor->retry_waiting) ||
              (monitor->state != DF_GVS_MONITOR_REQUESTING &&
