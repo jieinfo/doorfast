@@ -572,7 +572,8 @@ int df_media_session_manager_receive_control(
             session->monitor = previous_monitor;
             return DF_ERR_IO;
         }
-        if (result.retrying && manager->callbacks.emit_control(
+        if ((result.retrying || result.hangup_reply) &&
+            manager->callbacks.emit_control(
                 session->station, session->station_ipv4,
                 manager->config.local, 0x03U, 0x82U, NULL, 0U,
                 manager->callbacks.context) != DF_OK) {
