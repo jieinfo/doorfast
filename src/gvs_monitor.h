@@ -9,6 +9,7 @@
 #include "gvs_frame.h"
 
 #define DF_GVS_MONITOR_REQUEST_INTERVAL_MS 1000U
+#define DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS 1000U
 #define DF_GVS_MONITOR_MAX_REQUESTS 20U
 #define DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS 8000U
 #define DF_GVS_MONITOR_STOP_TIMEOUT_MS 1000U
@@ -72,9 +73,12 @@ struct df_gvs_monitor {
     uint64_t last_now_ms;
     uint64_t next_action_ms;
     uint64_t first_frame_deadline_ms;
+    uint64_t status_retry_deadline_ms;
     uint64_t first_frame_timeout_ms;
     unsigned request_attempts;
     bool media_ready;
+    bool persistent;
+    bool status_retry_pending;
     bool retry_waiting;
     bool stop_sent;
 };
@@ -82,6 +86,7 @@ struct df_gvs_monitor {
 void df_gvs_monitor_init(struct df_gvs_monitor *);
 int df_gvs_monitor_set_first_frame_timeout(struct df_gvs_monitor *,
     uint64_t timeout_ms);
+int df_gvs_monitor_set_persistent(struct df_gvs_monitor *, bool persistent);
 int df_gvs_monitor_start(struct df_gvs_monitor *, const uint8_t local[6],
     const uint8_t station[6], uint32_t station_ipv4, uint64_t now_ms);
 int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *,
