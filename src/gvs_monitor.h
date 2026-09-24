@@ -56,6 +56,7 @@ struct df_gvs_monitor_action {
 struct df_gvs_monitor_result {
     bool confirmed;
     bool keepalive_reply;
+    bool hangup_reply;
     bool media_ready;
     bool retrying;
     bool retry_ready;
@@ -83,6 +84,7 @@ struct df_gvs_monitor {
     bool retry_after_stop;
     bool retry_ready;
     bool retry_waiting;
+    bool peer_stop_seen;
     bool stop_sent;
 };
 

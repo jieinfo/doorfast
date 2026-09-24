@@ -663,14 +663,15 @@ void test_media_session_manager_acknowledges_short_preview_and_retries(void) {
         (int)trace.control_count);
     TEST_ASSERT_INT_EQ(0x82, trace.last_control_opcode);
     TEST_ASSERT_INT_EQ(0, (int)trace.last_control_payload_length);
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, session->monitor.state);
-    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_STOPPING, session->state);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, session->monitor.state);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_REQUESTING, session->state);
     TEST_ASSERT_INT_EQ((int)generation, (int)session->generation);
-    TEST_ASSERT_INT_EQ(1, (int)session->frames_received);
-    TEST_ASSERT_INT_EQ(1, session->viewer_active ? 1 : 0);
+    TEST_ASSERT_INT_EQ((int)(generation + 1U), (int)session->media_generation);
+    TEST_ASSERT_INT_EQ(0, (int)session->frames_received);
+    TEST_ASSERT_INT_EQ(0, session->viewer_active ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, df_media_encoder_is_running(&session->encoder) ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
-    TEST_ASSERT_INT_EQ(DF_OK,
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_media_session_manager_push_video(&manager, &packet,
             stations[0].ipv4, 301U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 2U),
@@ -679,26 +680,60 @@ void test_media_session_manager_acknowledges_short_preview_and_retries(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 1200U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 3U),
         (int)trace.control_count);
-    TEST_ASSERT_INT_EQ(0x02, trace.last_control_opcode);
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, session->monitor.state);
-    frame.opcode = 0x82U;
-    frame.payload = NULL;
-    frame.payload_length = 0U;
-    TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_receive_control(&manager, &frame,
-            stations[0].ipv4, 1201U));
+    TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, session->monitor.state);
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_REQUESTING, session->state);
-    TEST_ASSERT_INT_EQ((int)(generation + 1U),
-        (int)session->media_generation);
-    TEST_ASSERT_INT_EQ(0, (int)session->frames_received);
-    TEST_ASSERT_INT_EQ(0, session->viewer_active ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, session->queue_initialized ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, df_media_encoder_is_running(&session->encoder) ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 1201U));
-    TEST_ASSERT_INT_EQ((int)(controls_before_end + 4U),
-        (int)trace.control_count);
     TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
+    df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_acknowledges_peer_hangup_during_stop(void) {
+    static const struct df_media_station_config_v3 stations[] = {
+        {.id = "gate_main", .stream_name = "doorfast_gate_main",
+         .enabled = true,
+         .logical_address = {0x32U, 2U, 1U, 0U, 2U, 0U},
+         .ipv4 = 0x01020304U},
+    };
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t hangup[] = {0x00U};
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    struct df_media_session_key key;
+    struct df_gvs_frame frame = {0};
+    uint64_t generation = 0U;
+
+    manager_fixture(&config, &callbacks, &trace);
+    config.stations = stations;
+    config.station_count = sizeof(stations) / sizeof(stations[0]);
+    config.max_encoders = 1U;
+    memcpy(config.local, local, sizeof(config.local));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 100U));
+    key.station_id = "gate_main";
+    key.generation = generation;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 101U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, manager.sessions[0].monitor.state);
+
+    memcpy(frame.source, stations[0].logical_address, sizeof(frame.source));
+    memcpy(frame.destination, local, sizeof(frame.destination));
+    frame.family = 0x03U;
+    frame.opcode = 0x02U;
+    frame.payload = hangup;
+    frame.payload_length = sizeof(hangup);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            stations[0].ipv4, 102U));
+    TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
+    TEST_ASSERT_INT_EQ(0x82, trace.last_control_opcode);
+    TEST_ASSERT_INT_EQ(0, (int)trace.last_control_payload_length);
     df_media_session_manager_destroy(&manager);
 }
 
