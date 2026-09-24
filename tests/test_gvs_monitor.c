@@ -176,10 +176,18 @@ void test_gvs_monitor_persistent_preview_retries_after_first_frame_timeout(void)
         confirmation, sizeof(confirmation), 0x01020304U, 101U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
         101U + DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS, &action));
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, monitor.state);
     TEST_ASSERT_INT_EQ(0, monitor.failure);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
         101U + DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x02, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x82,
+        NULL, 0U, 0x01020304U,
+        101U + DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS + 1U, &result));
+    TEST_ASSERT_INT_EQ(1, result.retry_ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
+        101U + DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS + 1U, &action));
     TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(0x04, action.opcode);
 }
@@ -379,9 +387,83 @@ void test_gvs_monitor_persistent_preview_retries_after_status(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, monitor.state);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
         200U + DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS, &action));
-    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, monitor.state);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
         200U + DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x02, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x82U,
+        NULL, 0U, 0x01020304U,
+        200U + DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS + 1U, &result));
+    TEST_ASSERT_INT_EQ(1, result.retry_ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(8, (int)monitor.generation);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
+        200U + DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS + 1U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x04, action.opcode);
+}
+
+void test_gvs_monitor_preview_retry_waits_for_stop_ack(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
+    struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_action action = {0};
+    struct df_gvs_monitor_result result = {0};
+    uint64_t first_generation;
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_set_persistent(&monitor, true));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start_with_generation(
+        &monitor, local, station, 0x01020304U, 7U, 100U));
+    first_generation = monitor.generation;
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
+        confirmation, sizeof(confirmation), 0x01020304U, 101U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
+        local, 0x01020304U, first_generation, 102U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_mark_publishing(&monitor,
+        first_generation, 103U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_request_retry(&monitor, 200U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 200U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x02, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, first_generation, 201U, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_ADMIT_REJECT_STATE,
+        result.admit_reject);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x82U,
+        NULL, 0U, 0x01020304U, 300U, &result));
+    TEST_ASSERT_INT_EQ(1, result.retry_ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(1, monitor.generation > first_generation ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 300U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x04, action.opcode);
+}
+
+void test_gvs_monitor_preview_retry_falls_back_after_stop_timeout(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_action action = {0};
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_set_persistent(&monitor, true));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start_with_generation(
+        &monitor, local, station, 0x01020304U, 7U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_request_retry(&monitor, 200U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 200U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
+        200U + DF_GVS_MONITOR_STOP_TIMEOUT_MS, &action));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(1, monitor.retry_ready ? 1 : 0);
+    TEST_ASSERT_INT_EQ(8, (int)monitor.generation);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor,
+        200U + DF_GVS_MONITOR_STOP_TIMEOUT_MS, &action));
     TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(0x04, action.opcode);
 }

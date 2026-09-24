@@ -142,7 +142,7 @@ static int df_media_session_manager_emit_stop_best_effort(
 
     if (manager == NULL || session == NULL) return DF_ERR_INVALID;
     if (session->monitor.state == DF_GVS_MONITOR_IDLE) return DF_OK;
-    if (df_gvs_monitor_stop(&session->monitor, session->generation,
+    if (df_gvs_monitor_stop(&session->monitor, session->media_generation,
             now_ms) != DF_OK ||
         df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
         return DF_ERR_IO;
@@ -312,44 +312,44 @@ static int df_media_session_manager_start_monitor(
         return DF_ERR_INVALID;
     return df_gvs_monitor_start_with_generation(&session->monitor,
         manager->config.local, session->station, session->station_ipv4,
-        session->generation, now_ms);
+        session->media_generation, now_ms);
 }
 
-static int df_media_session_manager_restart_preview(
+static int df_media_session_manager_schedule_preview_retry(
     struct df_media_session_manager *manager,
     struct df_media_session *session, uint64_t now_ms) {
-    struct df_gvs_monitor previous_monitor;
-    int result = DF_OK;
-
     if (manager == NULL || session == NULL || !session->active ||
         session->purpose != DF_MEDIA_SESSION_PREVIEW)
         return DF_ERR_INVALID;
-    previous_monitor = session->monitor;
-    if (session->monitor.state != DF_GVS_MONITOR_IDLE) {
-        if (df_media_session_manager_emit_stop_best_effort(manager, session,
-                now_ms) != DF_OK) {
-            session->monitor = previous_monitor;
-            session->state = DF_MEDIA_SESSION_FAILED;
-            session->last_error = DF_MEDIA_ERROR_VIDEO_STALLED;
-            return DF_ERR_IO;
-        }
+    if (df_gvs_monitor_request_retry(&session->monitor, now_ms) != DF_OK) {
+        session->state = DF_MEDIA_SESSION_FAILED;
+        session->last_error = DF_MEDIA_ERROR_VIDEO_STALLED;
+        return DF_ERR_IO;
     }
+    session->state = DF_MEDIA_SESSION_STOPPING;
+    return DF_OK;
+}
+
+static int df_media_session_manager_finish_preview_retry(
+    struct df_media_session *session) {
+    uint64_t media_generation;
+
+    if (session == NULL || !session->active ||
+        session->purpose != DF_MEDIA_SESSION_PREVIEW ||
+        !session->monitor.retry_ready)
+        return DF_ERR_INVALID;
+    media_generation = session->monitor.generation;
+    if (media_generation == 0U) return DF_ERR_INVALID;
     if (df_media_session_reset_pipeline(session) != DF_OK) {
         session->state = DF_MEDIA_SESSION_FAILED;
         session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
         return DF_ERR_IO;
     }
-    if (df_gvs_monitor_cancel(&session->monitor, now_ms) != DF_OK ||
-        df_gvs_monitor_start_with_generation(&session->monitor,
-            manager->config.local, session->station, session->station_ipv4,
-            session->generation, now_ms) != DF_OK) {
-        session->state = DF_MEDIA_SESSION_FAILED;
-        session->last_error = DF_MEDIA_ERROR_VIDEO_STALLED;
-        return DF_ERR_IO;
-    }
+    session->media_generation = media_generation;
+    session->monitor.retry_ready = false;
     session->state = DF_MEDIA_SESSION_REQUESTING;
     session->last_error = DF_MEDIA_ERROR_NONE;
-    return result;
+    return DF_OK;
 }
 
 static int df_media_session_manager_bind_call_monitor(
@@ -360,7 +360,8 @@ static int df_media_session_manager_bind_call_monitor(
         session->monitor.first_frame_timeout_ms =
             (uint64_t)manager->config.first_frame_timeout_s * 1000U;
     return df_gvs_monitor_bind_call(&session->monitor, manager->config.local,
-        session->station, session->station_ipv4, session->generation, now_ms);
+        session->station, session->station_ipv4, session->media_generation,
+        now_ms);
 }
 
 static int df_media_session_manager_call_monitor_preflight(
@@ -580,11 +581,14 @@ int df_media_session_manager_receive_control(
         }
         if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
         if (result.retrying) {
-            if (df_media_session_reset_pipeline(session) != DF_OK) {
+            session->state = DF_MEDIA_SESSION_STOPPING;
+        }
+        if (result.retry_ready) {
+            if (df_media_session_manager_finish_preview_retry(session) !=
+                    DF_OK) {
                 session->monitor = previous_monitor;
                 return DF_ERR_IO;
             }
-            session->state = DF_MEDIA_SESSION_REQUESTING;
         }
         if (result.failed) {
             session->state = DF_MEDIA_SESSION_FAILED;
@@ -628,7 +632,7 @@ static int df_media_session_manager_preempt_preview(
         return DF_ERR_INVALID;
     previous_monitor = session->monitor;
     if (session->monitor.state != DF_GVS_MONITOR_IDLE) {
-        if (df_gvs_monitor_stop(&session->monitor, session->generation,
+        if (df_gvs_monitor_stop(&session->monitor, session->media_generation,
                 now_ms) != DF_OK ||
             df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK) {
             session->monitor = previous_monitor;
@@ -786,7 +790,7 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
             struct df_gvs_monitor_action action;
             struct df_gvs_monitor previous_monitor = session->monitor;
 
-            if (df_gvs_monitor_stop(&session->monitor, key->generation,
+            if (df_gvs_monitor_stop(&session->monitor, session->media_generation,
                     now_ms) != DF_OK ||
                 df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
                 return DF_ERR_INVALID;
@@ -877,7 +881,7 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
 
             if (session->monitor.state != DF_GVS_MONITOR_IDLE &&
                 df_gvs_monitor_admit_jpeg(&session->monitor, source,
-                    destination, source_ipv4, session->generation,
+                    destination, source_ipv4, session->media_generation,
                     timestamp_ms, &monitor_result) != DF_OK) {
                 df_media_monitor_reject_log(session, source, destination,
                     source_ipv4, timestamp_ms, &monitor_result);
@@ -895,7 +899,7 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
             else if (result == DF_OK &&
                 session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO &&
                 df_gvs_monitor_mark_publishing(&session->monitor,
-                    session->generation, timestamp_ms) != DF_OK)
+                    session->media_generation, timestamp_ms) != DF_OK)
                 return DF_ERR_IO;
             if (result != DF_OK) {
                 df_media_video_reject_log(
@@ -938,8 +942,9 @@ int df_media_session_manager_push_video(
                 source_ipv4);
             return DF_ERR_INVALID;
         }
-        if (session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
-            session->monitor.retry_waiting)
+        if (session->monitor.state == DF_GVS_MONITOR_STOPPING ||
+            (session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
+             session->monitor.retry_waiting))
             return DF_OK;
         result = df_gvs_video_reassembly_push(
             &session->video, packet, &jpeg, &length);
@@ -994,17 +999,27 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
                     action.destination, session->station_ipv4, action.source,
                     action.family, action.opcode, action.payload,
                     action.payload_length, manager->callbacks.context) != DF_OK) {
+                bool retry_stop = previous_monitor.retry_after_stop;
+
                 session->monitor = previous_monitor;
                 overall = DF_ERR_IO;
+                if (retry_stop) {
+                    session->state = DF_MEDIA_SESSION_FAILED;
+                    session->last_error = DF_MEDIA_ERROR_VIDEO_STALLED;
+                    if (df_media_session_manager_release_failed(manager,
+                            session) != DF_OK)
+                        overall = DF_ERR_IO;
+                }
             }
         }
-        if ((previous_monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO ||
-             previous_monitor.state == DF_GVS_MONITOR_PUBLISHING ||
-             previous_monitor.state == DF_GVS_MONITOR_VIEWING) &&
-            session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
-            session->purpose == DF_MEDIA_SESSION_PREVIEW) {
-            if (df_media_session_manager_restart_preview(manager, session,
-                    now_ms) != DF_OK)
+        if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+            session->monitor.state == DF_GVS_MONITOR_STOPPING &&
+            session->state != DF_MEDIA_SESSION_STOPPING) {
+            session->state = DF_MEDIA_SESSION_STOPPING;
+        }
+        if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+            session->monitor.retry_ready) {
+            if (df_media_session_manager_finish_preview_retry(session) != DF_OK)
                 overall = DF_ERR_IO;
         }
         if (session->monitor.state == DF_GVS_MONITOR_FAILED) {
@@ -1029,8 +1044,8 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
             now_ms - session->last_frame_ms >=
                 DF_MEDIA_SESSION_FRAME_STALL_TIMEOUT_MS) {
             if (session->purpose == DF_MEDIA_SESSION_PREVIEW) {
-                if (df_media_session_manager_restart_preview(manager, session,
-                        now_ms) != DF_OK) {
+                if (df_media_session_manager_schedule_preview_retry(manager,
+                        session, now_ms) != DF_OK) {
                     overall = DF_ERR_IO;
                     if (session->state == DF_MEDIA_SESSION_FAILED &&
                         df_media_session_manager_release_failed(manager,

@@ -13,6 +13,7 @@ struct df_media_session {
     uint8_t station[6];
     uint32_t station_ipv4;
     uint64_t generation;
+    uint64_t media_generation;
     uint64_t call_generation;
     enum df_media_session_purpose purpose;
     enum df_media_session_state_v3 state;

@@ -41,6 +41,8 @@ static void df_gvs_monitor_fail(struct df_gvs_monitor *monitor,
     monitor->status_retry_deadline_ms = 0U;
     monitor->media_ready = false;
     monitor->status_retry_pending = false;
+    monitor->retry_after_stop = false;
+    monitor->retry_ready = false;
     monitor->retry_waiting = false;
 }
 
@@ -67,6 +69,26 @@ int df_gvs_monitor_set_persistent(struct df_gvs_monitor *monitor,
          monitor->state != DF_GVS_MONITOR_FAILED))
         return DF_ERR_INVALID;
     monitor->persistent = persistent;
+    return DF_OK;
+}
+
+int df_gvs_monitor_request_retry(struct df_gvs_monitor *monitor,
+    uint64_t now_ms) {
+    if (monitor == NULL || !monitor->persistent ||
+        now_ms < monitor->last_now_ms || !df_gvs_monitor_active(monitor->state))
+        return DF_ERR_INVALID;
+    monitor->last_now_ms = now_ms;
+    monitor->state = DF_GVS_MONITOR_STOPPING;
+    monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+    monitor->next_action_ms = now_ms;
+    monitor->first_frame_deadline_ms = 0U;
+    monitor->status_retry_deadline_ms = 0U;
+    monitor->media_ready = false;
+    monitor->status_retry_pending = false;
+    monitor->retry_after_stop = true;
+    monitor->retry_ready = false;
+    monitor->retry_waiting = false;
+    monitor->stop_sent = false;
     return DF_OK;
 }
 
@@ -125,6 +147,8 @@ int df_gvs_monitor_cancel(struct df_gvs_monitor *monitor, uint64_t now_ms) {
     monitor->request_attempts = 0U;
     monitor->media_ready = false;
     monitor->status_retry_pending = false;
+    monitor->retry_after_stop = false;
+    monitor->retry_ready = false;
     monitor->retry_waiting = false;
     monitor->stop_sent = false;
     return DF_OK;
@@ -167,15 +191,8 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
     if (monitor->status_retry_pending &&
         monitor->status_retry_deadline_ms != 0U &&
         now_ms >= monitor->status_retry_deadline_ms) {
-        monitor->state = DF_GVS_MONITOR_REQUESTING;
-        monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
-        monitor->next_action_ms = now_ms;
-        monitor->first_frame_deadline_ms = 0U;
-        monitor->status_retry_deadline_ms = 0U;
-        monitor->media_ready = false;
-        monitor->status_retry_pending = false;
-        monitor->retry_waiting = false;
-        monitor->stop_sent = false;
+        if (df_gvs_monitor_request_retry(monitor, now_ms) != DF_OK)
+            return DF_ERR_INVALID;
         return DF_OK;
     }
 
@@ -214,13 +231,8 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
         if (!monitor->persistent) {
             df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT);
         } else {
-            monitor->state = DF_GVS_MONITOR_REQUESTING;
-            monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
-            monitor->next_action_ms = now_ms;
-            monitor->first_frame_deadline_ms = 0U;
-            monitor->media_ready = false;
-            monitor->retry_waiting = false;
-            monitor->stop_sent = false;
+            if (df_gvs_monitor_request_retry(monitor, now_ms) != DF_OK)
+                return DF_ERR_INVALID;
         }
         return DF_OK;
     }
@@ -244,9 +256,24 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
             return DF_OK;
         }
         if (now_ms >= monitor->next_action_ms) {
-            monitor->state = DF_GVS_MONITOR_IDLE;
-            monitor->failure = DF_GVS_MONITOR_STOP_TIMEOUT;
-            monitor->media_ready = false;
+            if (monitor->retry_after_stop) {
+                if (monitor->generation == UINT64_MAX) {
+                    df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_STOP_TIMEOUT);
+                } else {
+                    monitor->generation++;
+                    monitor->state = DF_GVS_MONITOR_REQUESTING;
+                    monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+                    monitor->next_action_ms = now_ms;
+                    monitor->media_ready = false;
+                    monitor->retry_after_stop = false;
+                    monitor->retry_ready = true;
+                    monitor->stop_sent = false;
+                }
+            } else {
+                monitor->state = DF_GVS_MONITOR_IDLE;
+                monitor->failure = DF_GVS_MONITOR_STOP_TIMEOUT;
+                monitor->media_ready = false;
+            }
         }
     }
     return DF_OK;
@@ -329,16 +356,20 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             return DF_OK;
         }
         if (!monitor->retry_waiting) {
-            monitor->state = DF_GVS_MONITOR_REQUESTING;
-            monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
-            monitor->next_action_ms =
-                now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
-            monitor->first_frame_deadline_ms = 0U;
-            monitor->status_retry_deadline_ms = 0U;
-            monitor->media_ready = false;
-            monitor->status_retry_pending = false;
-            monitor->retry_waiting = true;
-            monitor->stop_sent = false;
+            if (!monitor->persistent) {
+                monitor->state = DF_GVS_MONITOR_REQUESTING;
+                monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+                monitor->next_action_ms =
+                    now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+                monitor->first_frame_deadline_ms = 0U;
+                monitor->status_retry_deadline_ms = 0U;
+                monitor->media_ready = false;
+                monitor->status_retry_pending = false;
+                monitor->retry_waiting = true;
+                monitor->stop_sent = false;
+            } else if (df_gvs_monitor_request_retry(monitor, now_ms) != DF_OK) {
+                return DF_ERR_INVALID;
+            }
         }
         result->retrying = true;
         return DF_OK;
@@ -346,10 +377,27 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
     if (monitor->state == DF_GVS_MONITOR_STOPPING && frame->opcode == 0x82U &&
         frame->payload_length == 0U) {
         monitor->last_now_ms = now_ms;
-        monitor->state = DF_GVS_MONITOR_IDLE;
-        monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
-        monitor->media_ready = false;
-        result->stopped = true;
+        if (monitor->retry_after_stop) {
+            if (monitor->generation == UINT64_MAX) {
+                df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_STOP_TIMEOUT);
+                result->failed = true;
+            } else {
+                monitor->generation++;
+                monitor->state = DF_GVS_MONITOR_REQUESTING;
+                monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+                monitor->next_action_ms = now_ms;
+                monitor->media_ready = false;
+                monitor->retry_after_stop = false;
+                monitor->retry_ready = true;
+                monitor->stop_sent = false;
+                result->retry_ready = true;
+            }
+        } else {
+            monitor->state = DF_GVS_MONITOR_IDLE;
+            monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+            monitor->media_ready = false;
+            result->stopped = true;
+        }
         return DF_OK;
     }
     return DF_ERR_INVALID;
@@ -386,6 +434,7 @@ int df_gvs_monitor_admit_jpeg(struct df_gvs_monitor *monitor,
     monitor->last_now_ms = now_ms;
     monitor->status_retry_pending = false;
     monitor->status_retry_deadline_ms = 0U;
+    monitor->retry_ready = false;
     if (monitor->state == DF_GVS_MONITOR_REQUESTING) {
         monitor->state = DF_GVS_MONITOR_AWAITING_VIDEO;
         monitor->next_action_ms = 0U;
@@ -433,6 +482,8 @@ int df_gvs_monitor_stop(struct df_gvs_monitor *monitor, uint64_t generation,
     monitor->next_action_ms = now_ms;
     monitor->status_retry_deadline_ms = 0U;
     monitor->status_retry_pending = false;
+    monitor->retry_after_stop = false;
+    monitor->retry_ready = false;
     monitor->retry_waiting = false;
     monitor->stop_sent = false;
     return DF_OK;
