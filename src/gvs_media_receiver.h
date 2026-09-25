@@ -9,6 +9,7 @@
 #define DF_GVS_AUDIO_PORT 8302U
 #define DF_GVS_VIDEO_PORT 8303U
 #define DF_GVS_MEDIA_DATAGRAM_CAPACITY 2048U
+#define DF_GVS_MEDIA_RECEIVE_BUFFER_BYTES (4U * 1024U * 1024U)
 
 enum df_gvs_media_channel {
     DF_GVS_MEDIA_AUDIO = 1,
@@ -33,6 +34,7 @@ struct df_gvs_media_receiver {
     int video_fd;
     uint16_t audio_port;
     uint16_t video_port;
+    unsigned receive_buffer_bytes;
     unsigned next_channel;
     uint64_t audio_received;
     uint64_t video_received;

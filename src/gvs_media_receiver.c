@@ -7,22 +7,31 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define DF_GVS_MEDIA_RECEIVE_BUFFER (1024 * 1024)
-
 static int df_gvs_media_receiver_open_socket(const char *host, uint16_t port,
     int *fd, uint16_t *bound_port) {
     struct sockaddr_in local = {0};
     struct in_addr requested_address;
     socklen_t local_length = sizeof(local);
-    int receive_buffer = DF_GVS_MEDIA_RECEIVE_BUFFER;
+    int receive_buffer = (int)DF_GVS_MEDIA_RECEIVE_BUFFER_BYTES;
     int flags;
 
     *fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (*fd < 0) return DF_ERR_IO;
     flags = fcntl(*fd, F_GETFL, 0);
-    if (flags < 0 || fcntl(*fd, F_SETFL, flags | O_NONBLOCK) != 0 ||
+    if (flags < 0 || fcntl(*fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        (void)close(*fd);
+        *fd = -1;
+        return DF_ERR_IO;
+    }
+#ifdef SO_RCVBUFFORCE
+    if (setsockopt(*fd, SOL_SOCKET, SO_RCVBUFFORCE, &receive_buffer,
+        sizeof(receive_buffer)) != 0 &&
         setsockopt(*fd, SOL_SOCKET, SO_RCVBUF, &receive_buffer,
             sizeof(receive_buffer)) != 0) {
+#else
+    if (setsockopt(*fd, SOL_SOCKET, SO_RCVBUF, &receive_buffer,
+        sizeof(receive_buffer)) != 0) {
+#endif
         (void)close(*fd);
         *fd = -1;
         return DF_ERR_IO;
@@ -65,6 +74,7 @@ int df_gvs_media_receiver_open(struct df_gvs_media_receiver *receiver,
     memset(receiver, 0, sizeof(*receiver));
     receiver->audio_fd = -1;
     receiver->video_fd = -1;
+    receiver->receive_buffer_bytes = DF_GVS_MEDIA_RECEIVE_BUFFER_BYTES;
     if (df_gvs_media_receiver_open_socket(host, audio_port,
             &receiver->audio_fd, &receiver->audio_port) != DF_OK ||
         df_gvs_media_receiver_open_socket(host, video_port,

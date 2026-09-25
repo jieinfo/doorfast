@@ -126,3 +126,21 @@ void test_gvs_media_receiver_rejects_truncation_and_duplicate_ownership(void) {
         "127.0.0.1", receiver.audio_port, receiver.video_port));
     df_gvs_media_receiver_close(&duplicate);
 }
+
+void test_gvs_media_receiver_reserves_burst_safe_receive_buffer(void) {
+    struct df_gvs_media_receiver receiver = {
+        .audio_fd = -1,
+        .video_fd = -1,
+    };
+    int receive_buffer = 0;
+    socklen_t receive_buffer_length = sizeof(receive_buffer);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_media_receiver_open(
+        &receiver, "127.0.0.1", 0U, 0U));
+    TEST_ASSERT_INT_EQ((int)DF_GVS_MEDIA_RECEIVE_BUFFER_BYTES,
+        (int)receiver.receive_buffer_bytes);
+    TEST_ASSERT_INT_EQ(0, getsockopt(receiver.video_fd, SOL_SOCKET, SO_RCVBUF,
+        &receive_buffer, &receive_buffer_length));
+    TEST_ASSERT_INT_EQ(1, receive_buffer > 0);
+    df_gvs_media_receiver_close(&receiver);
+}

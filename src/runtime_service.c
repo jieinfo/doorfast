@@ -44,7 +44,7 @@
 #include "runtime_ubus.h"
 
 #define DF_RUNTIME_IDLE_POLL_MS 10U
-#define DF_RUNTIME_MEDIA_DRAIN_MAX 64U
+#define DF_RUNTIME_MEDIA_DRAIN_MAX 512U
 #define DF_RUNTIME_AUDIO_SNAPSHOT "/tmp/doorfast-latest.wav"
 #define DF_RUNTIME_AUDIO_CHUNKS "/tmp/doorfast-audio-chunks"
 #define DF_RUNTIME_VIDEO_SNAPSHOT "/tmp/doorfast-latest.jpg"
