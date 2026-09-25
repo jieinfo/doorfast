@@ -1937,6 +1937,8 @@ void test_media_session_manager_isolates_encoder_exit(void) {
         capture_directory, 1));
     TEST_ASSERT_INT_EQ(DF_OK, manager_start_pipeline_pair(&manager, &config,
         &callbacks, &trace, &main_generation, &side_generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_incoming_call(
+        &manager, "gate_main", 10U, 150U));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(
         &manager, main_station, local, 0x01020304U, first, sizeof(first),
         480U, 640U, 200U));
@@ -1990,4 +1992,102 @@ void test_media_session_manager_isolates_encoder_exit(void) {
     }
     TEST_ASSERT_INT_EQ(0, unlink(ffmpeg_program));
     TEST_ASSERT_INT_EQ(0, rmdir(capture_directory));
+}
+
+void test_media_session_manager_recovers_preview_encoder_exit(void) {
+    static const uint8_t first[] = {0xffU, 0xd8U, 0x41U, 0xffU, 0xd9U};
+    static const uint8_t second[] = {0xffU, 0xd8U, 0x42U, 0xffU, 0xd9U};
+    const uint8_t main_station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    char capture_directory[] = "/tmp/doorfast-media-preview-recovery-XXXXXX";
+    char ffmpeg_program[256];
+    char saved_path[4096];
+    const char *path = getenv("PATH");
+    uint64_t main_generation = 0U;
+    struct df_media_session_key main_key;
+    uint64_t media_generation;
+    pid_t first_pid;
+    unsigned attempt;
+
+    TEST_ASSERT_INT_EQ(1, path != NULL && strlen(path) < sizeof(saved_path));
+    if (path == NULL || strlen(path) >= sizeof(saved_path)) return;
+    memcpy(saved_path, path, strlen(path) + 1U);
+    TEST_ASSERT_INT_EQ(DF_OK, manager_write_ffmpeg_capture(capture_directory,
+        ffmpeg_program, sizeof(ffmpeg_program)));
+    TEST_ASSERT_INT_EQ(0, setenv("PATH", capture_directory, 1));
+    TEST_ASSERT_INT_EQ(0, setenv("DF_TEST_MEDIA_CAPTURE_DIR",
+        capture_directory, 1));
+    manager_pipeline_fixture(&config, &callbacks, &trace);
+    config.station_count = 1U;
+    config.max_encoders = 1U;
+    if (df_media_session_manager_init(&manager, &config, &callbacks) != DF_OK)
+        goto cleanup;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &main_generation));
+    main_key.station_id = "gate_main";
+    main_key.generation = main_generation;
+    {
+        static const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
+        struct df_gvs_frame frame = {
+            .family = 0x03U,
+            .opcode = 0x84U,
+            .payload = confirmation,
+            .payload_length = sizeof(confirmation),
+        };
+        memcpy(frame.destination, local, sizeof(frame.destination));
+        memcpy(frame.source, main_station, sizeof(frame.source));
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(
+            &manager, &frame, 0x01020304U, 101U));
+    }
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_VIEWER, &main_key, true, 102U));
+    media_generation = manager.sessions[0].media_generation;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
+        main_station, local, 0x01020304U, first, sizeof(first), 480U, 640U,
+        200U));
+    first_pid = manager.sessions[0].encoder.pid;
+    TEST_ASSERT_INT_EQ(1, first_pid > 0);
+    TEST_ASSERT_INT_EQ(0, kill(first_pid, SIGKILL));
+    for (attempt = 0U; attempt < 100U &&
+            df_media_encoder_is_running(&manager.sessions[0].encoder); attempt++) {
+        struct timespec delay = {0, 1000000L};
+        (void)nanosleep(&delay, NULL);
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager,
+            201U + attempt));
+    }
+    TEST_ASSERT_INT_EQ(1, (int)df_media_session_manager_active(&manager));
+    TEST_ASSERT_INT_EQ(1, manager.sessions[0].active ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_VIEWING, manager.sessions[0].state);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_NONE, manager.sessions[0].last_error);
+    TEST_ASSERT_INT_EQ((int)main_generation,
+        (int)manager.sessions[0].generation);
+    TEST_ASSERT_INT_EQ((int)media_generation,
+        (int)manager.sessions[0].media_generation);
+    TEST_ASSERT_INT_EQ(1, manager.sessions[0].viewer_active ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, manager.sessions[0].queue_initialized ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0,
+        df_media_encoder_is_running(&manager.sessions[0].encoder) ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
+        main_station, local, 0x01020304U, second, sizeof(second), 480U, 640U,
+        300U));
+    TEST_ASSERT_INT_EQ(1, manager.sessions[0].encoder.pid > 0);
+    TEST_ASSERT_INT_EQ(1, manager.sessions[0].encoder.pid != first_pid);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_VIEWING, manager.sessions[0].state);
+
+    df_media_session_manager_destroy(&manager);
+cleanup:
+    TEST_ASSERT_INT_EQ(0, setenv("PATH", saved_path, 1));
+    (void)unsetenv("DF_TEST_MEDIA_CAPTURE_DIR");
+    {
+        char capture[256];
+        (void)snprintf(capture, sizeof(capture), "%s/%s", capture_directory,
+            "doorfast_gate_main");
+        (void)unlink(capture);
+    }
+    (void)unlink(ffmpeg_program);
+    (void)rmdir(capture_directory);
 }
