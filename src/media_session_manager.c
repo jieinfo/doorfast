@@ -586,19 +586,19 @@ int df_media_session_manager_receive_control(
         if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
         if (result.retrying) {
             if (session->monitor.peer_stop_seen) {
-                /* Keep the RTSP encoder and viewing intent, but discard
-                 * frames from the protocol attempt the station ended. */
-                if (session->queue_initialized &&
-                    df_media_frame_queue_reset(&session->queue,
-                        session->media_generation) != DF_OK) {
+                bool viewer_active = session->viewer_active;
+
+                /* The station ended the protocol attempt. Stop the old
+                 * publisher before requesting a replacement, otherwise its
+                 * RTSP pipe can survive without frames and poison the next
+                 * preview attempt. Keep the session and viewing intent. */
+                if (df_media_session_reset_pipeline(session) != DF_OK) {
                     session->state = DF_MEDIA_SESSION_FAILED;
                     session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
                     (void)df_media_session_manager_release_failed(manager, session);
                     return DF_ERR_IO;
                 }
-                df_gvs_video_reassembly_reset(&session->video);
-                session->frames_received = 0U;
-                session->last_frame_ms = 0U;
+                session->viewer_active = viewer_active;
                 session->state = DF_MEDIA_SESSION_REQUESTING;
             } else if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
                 session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
