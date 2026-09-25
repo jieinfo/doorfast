@@ -465,9 +465,12 @@ Relevant codes are:
 - `resource_exhausted`;
 - `encoder_failed`;
 - `video_stalled` when a publishing or viewed source stops producing complete
-  JPEG frames for thirty seconds. The longer window is required because the
-  door stations publish JPEG frames in bursts with observed gaps above twenty
-  seconds;
+  JPEG frames for thirty seconds without an explicit peer-end notification.
+  This is a fallback for silent loss, not a delay applied to `03/02=01`:
+  that notification ends the current protocol attempt without requesting an
+  ACK. Preview retries start after one second and retain the viewing intent
+  and running encoder. Old queued frames and partial JPEGs are discarded,
+  and replacement video requires a new `03/84` before readiness returns;
 - `generation_mismatch`;
 - `runtime_mismatch`;
 - `session_preempted`.

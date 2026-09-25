@@ -333,6 +333,7 @@ static int df_media_session_manager_schedule_preview_retry(
 static int df_media_session_manager_finish_preview_retry(
     struct df_media_session *session) {
     uint64_t media_generation;
+    bool viewer_active;
 
     if (session == NULL || !session->active ||
         session->purpose != DF_MEDIA_SESSION_PREVIEW ||
@@ -340,11 +341,13 @@ static int df_media_session_manager_finish_preview_retry(
         return DF_ERR_INVALID;
     media_generation = session->monitor.generation;
     if (media_generation == 0U) return DF_ERR_INVALID;
+    viewer_active = session->viewer_active;
     if (df_media_session_reset_pipeline(session) != DF_OK) {
         session->state = DF_MEDIA_SESSION_FAILED;
         session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
         return DF_ERR_IO;
     }
+    session->viewer_active = viewer_active;
     session->media_generation = media_generation;
     session->monitor.retry_ready = false;
     session->state = DF_MEDIA_SESSION_REQUESTING;
@@ -572,7 +575,7 @@ int df_media_session_manager_receive_control(
             session->monitor = previous_monitor;
             return DF_ERR_IO;
         }
-        if ((result.retrying || result.hangup_reply) &&
+        if (result.hangup_reply &&
             manager->callbacks.emit_control(
                 session->station, session->station_ipv4,
                 manager->config.local, 0x03U, 0x82U, NULL, 0U,
@@ -582,7 +585,22 @@ int df_media_session_manager_receive_control(
         }
         if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
         if (result.retrying) {
-            if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+            if (session->monitor.peer_stop_seen) {
+                bool viewer_active = session->viewer_active;
+
+                /* The station ended the protocol attempt. Stop the old
+                 * publisher before requesting a replacement, otherwise its
+                 * RTSP pipe can survive without frames and poison the next
+                 * preview attempt. Keep the session and viewing intent. */
+                if (df_media_session_reset_pipeline(session) != DF_OK) {
+                    session->state = DF_MEDIA_SESSION_FAILED;
+                    session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
+                    (void)df_media_session_manager_release_failed(manager, session);
+                    return DF_ERR_IO;
+                }
+                session->viewer_active = viewer_active;
+                session->state = DF_MEDIA_SESSION_REQUESTING;
+            } else if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
                 session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
                 session->frames_received != 0U &&
                 df_media_encoder_is_running(&session->encoder)) {
@@ -953,7 +971,8 @@ int df_media_session_manager_push_video(
                 source_ipv4);
             return DF_ERR_INVALID;
         }
-        if (session->monitor.state == DF_GVS_MONITOR_STOPPING ||
+        if (session->monitor.peer_stop_seen ||
+            session->monitor.state == DF_GVS_MONITOR_STOPPING ||
             (session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
              session->monitor.retry_waiting))
             return DF_OK;
@@ -1011,8 +1030,14 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
                     action.family, action.opcode, action.payload,
                     action.payload_length, manager->callbacks.context) != DF_OK) {
                 bool retry_stop = previous_monitor.retry_after_stop;
+                uint64_t next_action_ms = session->monitor.next_action_ms;
 
                 session->monitor = previous_monitor;
+                /* A failed replacement send must keep the confirmation
+                 * gate closed without retrying on every runtime tick. */
+                if (action.opcode == 0x04U && previous_monitor.peer_stop_seen &&
+                    now_ms <= UINT64_MAX - DF_GVS_MONITOR_REQUEST_INTERVAL_MS)
+                    session->monitor.next_action_ms = next_action_ms;
                 overall = DF_ERR_IO;
                 if (retry_stop) {
                     session->state = DF_MEDIA_SESSION_FAILED;

@@ -320,7 +320,7 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
     }
     memset(result, 0, sizeof(*result));
     if (monitor->state == DF_GVS_MONITOR_REQUESTING &&
-        (!monitor->retry_waiting || monitor->peer_stop_seen) &&
+        !monitor->retry_waiting &&
         frame->opcode == 0x84U) {
         if (frame->payload_length != sizeof(df_gvs_monitor_confirmation) ||
             frame->payload == NULL || memcmp(frame->payload,
@@ -364,8 +364,21 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
         if (frame->payload[0] == 1U) {
-            /* 03/02=01 is a station status poll. Do not tear down a preview
-             * while the station is between its periodic video bursts. */
+            /* The vendor ends the session for both reasons, but only 00
+             * requests an ACK. Keep duplicates from postponing recovery. */
+            if (monitor->peer_stop_seen) return DF_OK;
+            monitor->state = DF_GVS_MONITOR_REQUESTING;
+            monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
+            monitor->next_action_ms = now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+            monitor->first_frame_deadline_ms = 0U;
+            monitor->status_retry_deadline_ms = 0U;
+            monitor->media_ready = false;
+            monitor->status_retry_pending = false;
+            monitor->retry_waiting = true;
+            monitor->peer_stop_seen = true;
+            monitor->stop_sent = false;
+            if (monitor->persistent) monitor->request_attempts = 0U;
+            result->retrying = true;
             return DF_OK;
         }
         if (!monitor->retry_waiting) {
@@ -404,7 +417,7 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             frame->payload[0] > 1U)
             return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
-        result->hangup_reply = true;
+        result->hangup_reply = frame->payload[0] == 0U;
         if (monitor->retry_after_stop) {
             if (df_gvs_monitor_restart_after_peer_stop(monitor, now_ms) !=
                     DF_OK)
