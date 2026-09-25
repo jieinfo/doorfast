@@ -534,33 +534,55 @@ void test_media_session_manager_replies_to_preview_keepalive(void) {
         "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &generation));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 100U));
 
+    /* A station may send its keepalive before the preview confirmation has
+     * arrived.  Every keepalive belongs to the same preview generation and
+     * must be acknowledged without advancing or tearing down the monitor. */
     memcpy(frame.source, stations[0].logical_address, sizeof(frame.source));
     memcpy(frame.destination, local, sizeof(frame.destination));
     frame.family = 0x03U;
+    frame.opcode = 0x51U;
+    frame.payload = NULL;
+    frame.payload_length = 0U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            0x01020300U, 100U + 1U));
+    TEST_ASSERT_INT_EQ(2, (int)trace.control_count);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+        manager.sessions[0].monitor.state);
+    TEST_ASSERT_INT_EQ((int)generation,
+        (int)manager.sessions[0].monitor.generation);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            0x01020300U, 100U + 2U));
+    TEST_ASSERT_INT_EQ(3, (int)trace.control_count);
+    TEST_ASSERT_INT_EQ(0x52, trace.last_control_opcode);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+        manager.sessions[0].monitor.state);
+
     frame.opcode = 0x84U;
     frame.payload = confirmation;
     frame.payload_length = sizeof(confirmation);
     TEST_ASSERT_INT_EQ(DF_OK,
         df_media_session_manager_receive_control(&manager, &frame,
-            0x01020300U, 101U));
+            0x01020300U, 103U));
 
     frame.opcode = 0x51U;
     frame.payload = NULL;
     frame.payload_length = 0U;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_media_session_manager_receive_control(&manager, &frame,
-            0x01020301U, 102U));
-    TEST_ASSERT_INT_EQ(1, (int)trace.control_count);
+            0x01020301U, 104U));
+    TEST_ASSERT_INT_EQ(3, (int)trace.control_count);
     frame.destination[5] ^= 1U;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_media_session_manager_receive_control(&manager, &frame,
-            0x01020300U, 102U));
-    TEST_ASSERT_INT_EQ(1, (int)trace.control_count);
+            0x01020300U, 104U));
+    TEST_ASSERT_INT_EQ(3, (int)trace.control_count);
     frame.destination[5] ^= 1U;
     TEST_ASSERT_INT_EQ(DF_OK,
         df_media_session_manager_receive_control(&manager, &frame,
-            0x01020300U, 102U));
-    TEST_ASSERT_INT_EQ(2, (int)trace.control_count);
+            0x01020300U, 105U));
+    TEST_ASSERT_INT_EQ(4, (int)trace.control_count);
     TEST_ASSERT_INT_EQ(0x03, trace.last_control_family);
     TEST_ASSERT_INT_EQ(0x52, trace.last_control_opcode);
     TEST_ASSERT_INT_EQ(0, (int)trace.last_control_payload_length);
@@ -574,8 +596,8 @@ void test_media_session_manager_replies_to_preview_keepalive(void) {
     frame.payload_length = sizeof(confirmation);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_media_session_manager_receive_control(&manager, &frame,
-            0x01020300U, 103U));
-    TEST_ASSERT_INT_EQ(2, (int)trace.control_count);
+            0x01020300U, 106U));
+    TEST_ASSERT_INT_EQ(4, (int)trace.control_count);
 
     frame.payload = NULL;
     frame.payload_length = 0U;
@@ -585,10 +607,77 @@ void test_media_session_manager_replies_to_preview_keepalive(void) {
 
         TEST_ASSERT_INT_EQ(DF_ERR_IO,
             df_media_session_manager_receive_control(&manager, &frame,
-                0x01020300U, 104U));
+                0x01020300U, 107U));
         TEST_ASSERT_INT_EQ(0, memcmp(&before, &manager.sessions[0].monitor,
             sizeof(before)));
     }
+    df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_cleans_busy_preview_after_three_rejections(void) {
+    static const struct df_media_station_config_v3 stations[] = {
+        {.id = "gate_main", .stream_name = "doorfast_gate_main",
+         .enabled = true, .logical_address = {0x32U, 2U, 1U, 0U, 2U, 0U},
+         .ipv4 = 0x01020304U},
+    };
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    struct df_gvs_frame frame = {0};
+    const struct df_media_session *session;
+    uint64_t generation = 0U;
+    uint64_t now_ms = 100U;
+    unsigned attempt;
+
+    manager_fixture(&config, &callbacks, &trace);
+    config.stations = stations;
+    config.station_count = sizeof(stations) / sizeof(stations[0]);
+    config.max_encoders = 1U;
+    memcpy(config.local, local, sizeof(config.local));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, now_ms, &generation));
+
+    memcpy(frame.source, stations[0].logical_address, sizeof(frame.source));
+    memcpy(frame.destination, local, sizeof(frame.destination));
+    frame.family = 0x03U;
+    frame.opcode = 0x50U;
+    frame.payload = NULL;
+    frame.payload_length = 0U;
+    for (attempt = 0U; attempt < DF_GVS_MONITOR_BUSY_RETRY_LIMIT; attempt++) {
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_tick(&manager, now_ms));
+        TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_receive_control(&manager, &frame,
+                stations[0].ipv4, now_ms + 1U));
+        now_ms += DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+    }
+
+    session = df_media_session_manager_find(&manager, "gate_main");
+    TEST_ASSERT_INT_EQ(1, session != NULL);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_STOPPING,
+        session == NULL ? -1 : (int)session->state);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_tick(&manager, now_ms));
+    TEST_ASSERT_INT_EQ(0x02, trace.last_control_opcode);
+    TEST_ASSERT_INT_EQ(1, (int)trace.last_control_payload_length);
+
+    frame.opcode = 0x82U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            stations[0].ipv4, now_ms + 1U));
+    session = df_media_session_manager_find(&manager, "gate_main");
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_REQUESTING,
+        session == NULL ? -1 : (int)session->state);
+    TEST_ASSERT_INT_EQ(1, session != NULL &&
+        session->media_generation != generation);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_tick(&manager, now_ms + 1U));
+    TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
     df_media_session_manager_destroy(&manager);
 }
 

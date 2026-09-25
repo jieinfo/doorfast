@@ -107,6 +107,7 @@ static int df_gvs_monitor_restart_after_peer_stop(
     monitor->first_frame_deadline_ms = 0U;
     monitor->status_retry_deadline_ms = 0U;
     monitor->request_attempts = 0U;
+    monitor->busy_rejections = 0U;
     monitor->media_ready = false;
     monitor->status_retry_pending = false;
     monitor->retry_after_stop = false;
@@ -170,6 +171,7 @@ int df_gvs_monitor_cancel(struct df_gvs_monitor *monitor, uint64_t now_ms) {
     monitor->first_frame_deadline_ms = 0U;
     monitor->status_retry_deadline_ms = 0U;
     monitor->request_attempts = 0U;
+    monitor->busy_rejections = 0U;
     monitor->media_ready = false;
     monitor->status_retry_pending = false;
     monitor->retry_after_stop = false;
@@ -286,6 +288,8 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
                     monitor->retry_after_stop = false;
                     monitor->retry_ready = true;
                     monitor->stop_sent = false;
+                    monitor->request_attempts = 0U;
+                    monitor->busy_rejections = 0U;
                 }
             } else {
                 monitor->state = DF_GVS_MONITOR_IDLE;
@@ -330,6 +334,7 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         }
         monitor->last_now_ms = now_ms;
         monitor->state = DF_GVS_MONITOR_AWAITING_VIDEO;
+        monitor->busy_rejections = 0U;
         monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
         monitor->peer_stop_seen = false;
         monitor->retry_waiting = false;
@@ -342,9 +347,29 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         !monitor->retry_waiting && frame->opcode == 0x50U) {
         if (frame->payload_length != 0U) return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
+        if (monitor->persistent && monitor->busy_rejections < UINT_MAX)
+            monitor->busy_rejections++;
+        if (monitor->persistent &&
+            monitor->busy_rejections >= DF_GVS_MONITOR_BUSY_RETRY_LIMIT) {
+            /* A busy response is not a successful retry.  Tear down the
+             * rejected attempt before asking the station again. */
+            monitor->state = DF_GVS_MONITOR_STOPPING;
+            monitor->next_action_ms = now_ms;
+            monitor->first_frame_deadline_ms = 0U;
+            monitor->status_retry_deadline_ms = 0U;
+            monitor->media_ready = false;
+            monitor->status_retry_pending = false;
+            monitor->retry_after_stop = true;
+            monitor->retry_ready = false;
+            monitor->retry_waiting = false;
+            monitor->peer_stop_seen = false;
+            monitor->stop_sent = false;
+            result->retrying = true;
+        }
         return DF_OK;
     }
-    if ((monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO ||
+    if ((monitor->state == DF_GVS_MONITOR_REQUESTING ||
+         monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO ||
          monitor->state == DF_GVS_MONITOR_PUBLISHING ||
          monitor->state == DF_GVS_MONITOR_VIEWING) &&
         frame->opcode == 0x51U) {
@@ -378,6 +403,7 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             monitor->peer_stop_seen = true;
             monitor->stop_sent = false;
             if (monitor->persistent) monitor->request_attempts = 0U;
+            monitor->busy_rejections = 0U;
             result->retrying = true;
             return DF_OK;
         }
@@ -401,6 +427,7 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
                 monitor->first_frame_deadline_ms = 0U;
                 monitor->status_retry_deadline_ms = 0U;
                 monitor->request_attempts = 0U;
+                monitor->busy_rejections = 0U;
                 monitor->media_ready = false;
                 monitor->status_retry_pending = false;
                 monitor->retry_waiting = false;
@@ -448,6 +475,8 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
                 monitor->retry_ready = true;
                 monitor->peer_stop_seen = false;
                 monitor->stop_sent = false;
+                monitor->request_attempts = 0U;
+                monitor->busy_rejections = 0U;
                 result->retry_ready = true;
             }
         } else {
