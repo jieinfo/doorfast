@@ -186,6 +186,7 @@ void test_media_session_manager_rejects_reinit_without_losing_owner_state(void);
 void test_media_session_manager_generation_limit_is_failure_atomic(void);
 void test_media_session_manager_routes_independent_encoder_pipelines(void);
 void test_media_session_manager_isolates_encoder_exit(void);
+void test_media_session_manager_recovers_preview_encoder_exit(void);
 void test_media_video_reject_reason_names(void);
 void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void);
 void test_runtime_module_rejects_commands_when_unavailable(void);
@@ -329,7 +330,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 173;
+    return 174;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -430,6 +431,7 @@ int main(int argc, char **argv) {
     test_media_session_manager_generation_limit_is_failure_atomic();
     test_media_session_manager_routes_independent_encoder_pipelines();
     test_media_session_manager_isolates_encoder_exit();
+    test_media_session_manager_recovers_preview_encoder_exit();
     test_media_video_reject_reason_names();
     test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing();
     test_runtime_module_rejects_commands_when_unavailable();
@@ -451,7 +453,7 @@ int main(int argc, char **argv) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(173, test_suite_count());
+    TEST_ASSERT_INT_EQ(174, test_suite_count());
     test_runtime_id_encodes_random_bytes_and_validates_exact_lowercase_hex();
     test_runtime_id_clears_output_when_random_fill_fails_or_is_short();
     test_event_stream_serializes_exact_json();

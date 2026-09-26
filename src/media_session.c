@@ -20,6 +20,31 @@ static void df_media_session_fail_encoder(struct df_media_session *session) {
     session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
 }
 
+static int df_media_session_recover_preview_encoder(
+    struct df_media_session *session) {
+    bool viewer_active;
+    int result;
+
+    if (session == NULL || session->purpose != DF_MEDIA_SESSION_PREVIEW)
+        return DF_ERR_INVALID;
+    viewer_active = session->viewer_active;
+    result = df_media_session_reset_pipeline(session);
+    if (result != DF_OK) return result;
+    session->viewer_active = viewer_active;
+    if (viewer_active || session->monitor.state == DF_GVS_MONITOR_VIEWING)
+        session->state = DF_MEDIA_SESSION_VIEWING;
+    else if (session->monitor.state == DF_GVS_MONITOR_REQUESTING)
+        session->state = DF_MEDIA_SESSION_REQUESTING;
+    else if (session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO)
+        session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
+    else if (session->monitor.state == DF_GVS_MONITOR_STOPPING)
+        session->state = DF_MEDIA_SESSION_STOPPING;
+    else
+        session->state = DF_MEDIA_SESSION_PUBLISHING;
+    session->last_error = DF_MEDIA_ERROR_NONE;
+    return DF_OK;
+}
+
 static int df_media_session_start_encoder(struct df_media_session *session,
     const struct df_media_module_config_v3 *module_config,
     const struct df_media_credentials *credentials, uint16_t width,
@@ -231,6 +256,10 @@ int df_media_session_tick_pipeline(struct df_media_session *session,
     if (session->state == DF_MEDIA_SESSION_FAILED) return DF_OK;
     result = df_media_encoder_tick(&session->encoder, now_ms);
     if (result != DF_OK || session->encoder.encoder_exited) {
+        if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+            session->encoder.encoder_exited &&
+            df_media_session_recover_preview_encoder(session) == DF_OK)
+            return DF_OK;
         df_media_session_fail_encoder(session);
         return result == DF_OK ? DF_OK : DF_ERR_IO;
     }
@@ -281,8 +310,12 @@ int df_media_session_push_jpeg(struct df_media_session *session,
     }
     result = df_media_session_flush_pending(session);
     if (result != DF_OK && result != DF_MEDIA_ENCODER_RETRY) {
-        if (session->encoder.encoder_exited)
+        if (session->encoder.encoder_exited) {
+            if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+                df_media_session_recover_preview_encoder(session) == DF_OK)
+                return DF_OK;
             df_media_session_fail_encoder(session);
+        }
         return DF_ERR_IO;
     }
     if (result == DF_MEDIA_ENCODER_RETRY) {
@@ -296,16 +329,24 @@ int df_media_session_push_jpeg(struct df_media_session *session,
             (void)df_media_frame_queue_push(&session->queue, frame.data,
                 frame.length, frame.generation, frame.timestamp_ms);
         } else if (result != DF_OK) {
-            if (session->encoder.encoder_exited)
+            if (session->encoder.encoder_exited) {
+                if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+                    df_media_session_recover_preview_encoder(session) == DF_OK)
+                    return DF_OK;
                 df_media_session_fail_encoder(session);
+            }
             return result;
         }
     }
     if (session->encoder.encoder_exited) {
+        if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+            df_media_session_recover_preview_encoder(session) == DF_OK)
+            return DF_OK;
         df_media_session_fail_encoder(session);
         return DF_ERR_IO;
     }
-    session->state = DF_MEDIA_SESSION_PUBLISHING;
+    session->state = session->viewer_active ? DF_MEDIA_SESSION_VIEWING :
+        DF_MEDIA_SESSION_PUBLISHING;
     session->last_error = DF_MEDIA_ERROR_NONE;
     return DF_OK;
 }
