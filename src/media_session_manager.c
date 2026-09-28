@@ -315,6 +315,29 @@ static int df_media_session_manager_start_monitor(
         session->media_generation, now_ms);
 }
 
+static void df_media_source_transition_log(const struct df_media_session *session,
+    enum df_media_source_state previous, uint64_t now_ms) {
+    if (session->source_state == previous ||
+        session->source_state == DF_MEDIA_SOURCE_WAITING) return;
+    (void)fprintf(stderr,
+        "doorfast: event=media_source_state station_id=%s source=%s "
+        "generation=%llu media_generation=%llu real_frame_age_ms=%llu\n",
+        session->station_id,
+        session->source_state == DF_MEDIA_SOURCE_LIVE ? "source_live" : "reconnecting",
+        (unsigned long long)session->generation,
+        (unsigned long long)session->media_generation,
+        (unsigned long long)(now_ms >= session->last_frame_ms ?
+            now_ms - session->last_frame_ms : 0U));
+}
+
+static void df_media_session_manager_source_lost(struct df_media_session *session,
+    uint64_t now_ms) {
+    enum df_media_source_state previous = session->source_state;
+
+    df_media_session_mark_source_lost(session, now_ms);
+    df_media_source_transition_log(session, previous, now_ms);
+}
+
 static int df_media_session_manager_schedule_preview_retry(
     struct df_media_session_manager *manager,
     struct df_media_session *session, uint64_t now_ms) {
@@ -326,7 +349,16 @@ static int df_media_session_manager_schedule_preview_retry(
         session->last_error = DF_MEDIA_ERROR_VIDEO_STALLED;
         return DF_ERR_IO;
     }
-    session->state = DF_MEDIA_SESSION_STOPPING;
+    df_media_session_manager_source_lost(session, now_ms);
+    if (session->publication_generation != 0U) {
+        if (df_media_session_reset_attempt(session,
+                session->monitor.generation) != DF_OK)
+            return DF_ERR_IO;
+        session->state = session->viewer_active ?
+            DF_MEDIA_SESSION_VIEWING : DF_MEDIA_SESSION_PUBLISHING;
+    } else {
+        session->state = DF_MEDIA_SESSION_STOPPING;
+    }
     return DF_OK;
 }
 
@@ -342,7 +374,9 @@ static int df_media_session_manager_finish_preview_retry(
     media_generation = session->monitor.generation;
     if (media_generation == 0U) return DF_ERR_INVALID;
     viewer_active = session->viewer_active;
-    if (df_media_session_reset_pipeline(session) != DF_OK) {
+    if ((session->publication_generation != 0U ?
+            df_media_session_reset_attempt(session, media_generation) :
+            df_media_session_reset_pipeline(session)) != DF_OK) {
         session->state = DF_MEDIA_SESSION_FAILED;
         session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
         return DF_ERR_IO;
@@ -350,7 +384,9 @@ static int df_media_session_manager_finish_preview_retry(
     session->viewer_active = viewer_active;
     session->media_generation = media_generation;
     session->monitor.retry_ready = false;
-    session->state = DF_MEDIA_SESSION_REQUESTING;
+    session->state = session->publication_generation != 0U ?
+        (viewer_active ? DF_MEDIA_SESSION_VIEWING : DF_MEDIA_SESSION_PUBLISHING) :
+        DF_MEDIA_SESSION_REQUESTING;
     session->last_error = DF_MEDIA_ERROR_NONE;
     return DF_OK;
 }
@@ -583,27 +619,35 @@ int df_media_session_manager_receive_control(
             session->monitor = previous_monitor;
             return DF_ERR_IO;
         }
-        if (result.confirmed) session->state = DF_MEDIA_SESSION_AWAITING_VIDEO;
+        if (result.confirmed) {
+            if (df_media_session_reset_attempt(session,
+                    session->monitor.generation) != DF_OK)
+                return DF_ERR_IO;
+            session->state = session->publication_generation != 0U ?
+                (session->viewer_active ? DF_MEDIA_SESSION_VIEWING :
+                    DF_MEDIA_SESSION_PUBLISHING) : DF_MEDIA_SESSION_AWAITING_VIDEO;
+        }
         if (result.retrying) {
             if (session->monitor.peer_stop_seen) {
                 bool viewer_active = session->viewer_active;
 
-                /* The station ended the protocol attempt. Stop the old
-                 * publisher before requesting a replacement, otherwise its
-                 * RTSP pipe can survive without frames and poison the next
-                 * preview attempt. Keep the session and viewing intent. */
-                if (df_media_session_reset_pipeline(session) != DF_OK) {
+                df_media_session_manager_source_lost(session, now_ms);
+                if ((session->publication_generation != 0U ?
+                        df_media_session_reset_attempt(session,
+                            session->monitor.generation) :
+                        df_media_session_reset_pipeline(session)) != DF_OK) {
                     session->state = DF_MEDIA_SESSION_FAILED;
                     session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
                     (void)df_media_session_manager_release_failed(manager, session);
                     return DF_ERR_IO;
                 }
                 session->viewer_active = viewer_active;
-                session->state = DF_MEDIA_SESSION_REQUESTING;
+                session->media_generation = session->monitor.generation;
+                session->state = session->publication_generation != 0U ?
+                    (viewer_active ? DF_MEDIA_SESSION_VIEWING :
+                        DF_MEDIA_SESSION_PUBLISHING) : DF_MEDIA_SESSION_REQUESTING;
             } else if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
-                session->monitor.state == DF_GVS_MONITOR_REQUESTING &&
-                session->frames_received != 0U &&
-                df_media_encoder_is_running(&session->encoder)) {
+                session->publication_generation != 0U) {
                 session->state = session->viewer_active ?
                     DF_MEDIA_SESSION_VIEWING : DF_MEDIA_SESSION_PUBLISHING;
             } else {
@@ -848,8 +892,12 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
         return DF_OK;
     }
     result = df_media_session_command(session, command, key, active, now_ms);
-    if (result == DF_OK)
+    if (result == DF_OK) {
+        if (session->publication_generation != 0U)
+            session->state = session->viewer_active ?
+                DF_MEDIA_SESSION_VIEWING : DF_MEDIA_SESSION_PUBLISHING;
         df_media_session_manager_advance_revisions(manager, session);
+    }
     return result;
 }
 
@@ -906,6 +954,7 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
         }
         {
             struct df_gvs_monitor_result monitor_result;
+            enum df_media_source_state previous_source = session->source_state;
             int result;
 
             if (session->monitor.state != DF_GVS_MONITOR_IDLE &&
@@ -922,6 +971,7 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
             result = df_media_session_push_jpeg(session, &manager->config,
                 &manager->credentials, jpeg, length, width, height,
                 timestamp_ms);
+            df_media_source_transition_log(session, previous_source, timestamp_ms);
 
             if (session->state == DF_MEDIA_SESSION_FAILED)
                 (void)df_media_session_manager_release_failed(manager, session);
@@ -1050,6 +1100,7 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
         }
         if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
             session->monitor.state == DF_GVS_MONITOR_STOPPING &&
+            session->publication_generation == 0U &&
             session->state != DF_MEDIA_SESSION_STOPPING) {
             session->state = DF_MEDIA_SESSION_STOPPING;
         }
@@ -1076,6 +1127,7 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
         }
         if ((session->state == DF_MEDIA_SESSION_PUBLISHING ||
              session->state == DF_MEDIA_SESSION_VIEWING) &&
+            session->source_state != DF_MEDIA_SOURCE_RECONNECTING &&
             session->frames_received != 0U && now_ms >= session->last_frame_ms &&
             now_ms - session->last_frame_ms >=
                 DF_MEDIA_SESSION_FRAME_STALL_TIMEOUT_MS) {
@@ -1098,13 +1150,23 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
                         DF_OK)
                     overall = DF_ERR_IO;
             }
-            continue;
+            if (!session->active) continue;
         }
         if (df_media_encoder_is_running(&session->encoder) &&
             df_media_session_tick_pipeline(session, now_ms) != DF_OK)
             overall = DF_ERR_IO;
         if (session->state == DF_MEDIA_SESSION_FAILED)
             (void)df_media_session_manager_release_failed(manager, session);
+        if (session->active && session->publication_generation != 0U &&
+            df_media_session_tick_reconnect(session, manager->config.fps,
+                now_ms) != DF_OK) {
+            if (session->state != DF_MEDIA_SESSION_FAILED) {
+                session->state = DF_MEDIA_SESSION_FAILED;
+                session->last_error = DF_MEDIA_ERROR_RECONNECT_FRAME;
+            }
+            (void)df_media_session_manager_release_failed(manager, session);
+            overall = DF_ERR_IO;
+        }
     }
     return overall;
 }
@@ -1180,8 +1242,10 @@ static int df_media_module_api_tick_v3(void *instance, uint64_t now_ms) {
 static bool df_media_session_status_ready(
     const struct df_media_session *session) {
     return session != NULL &&
-        (session->state == DF_MEDIA_SESSION_PUBLISHING ||
-         session->state == DF_MEDIA_SESSION_VIEWING) &&
+        session->active && session->state != DF_MEDIA_SESSION_IDLE &&
+        session->state != DF_MEDIA_SESSION_STOPPING &&
+        session->state != DF_MEDIA_SESSION_FAILED &&
+        session->state != DF_MEDIA_SESSION_PREEMPTED &&
         session->frames_received != 0U &&
         df_media_encoder_is_running(&session->encoder);
 }
@@ -1216,6 +1280,7 @@ static uint64_t df_media_session_status_fingerprint(
     fingerprint = df_media_status_mix(fingerprint, session->generation);
     fingerprint = df_media_status_mix(fingerprint, (uint64_t)session->purpose);
     fingerprint = df_media_status_mix(fingerprint, (uint64_t)session->state);
+    fingerprint = df_media_status_mix(fingerprint, (uint64_t)session->source_state);
     fingerprint = df_media_status_mix(fingerprint,
         (uint64_t)session->last_error);
     fingerprint = df_media_status_mix(fingerprint, session->active ? 1U : 0U);

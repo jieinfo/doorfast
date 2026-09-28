@@ -138,7 +138,7 @@ void test_media_session_reconnect_rejects_dimension_change(void) {
         &config, NULL, preview_jpeg, sizeof(preview_jpeg), 800U, 600U,
         301U));
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_FAILED, session.state);
-    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED, session.last_error);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_RECONNECT_FRAME, session.last_error);
     TEST_ASSERT_INT_EQ(0, session.reconnect_frame.data != NULL);
     TEST_ASSERT_INT_EQ(0, session.publication_generation);
     TEST_ASSERT_INT_EQ(0, df_media_encoder_is_running(&session.encoder));

@@ -559,4 +559,13 @@ void test_runtime_media_async_failure_is_logged_once_with_station_identity(void)
     TEST_ASSERT_INT_EQ(0, strcmp(
         "event=media_pipeline_failed station_id=gate_side generation=13 "
         "error=video_stalled", log_entry.message));
+
+    trace.failed_generation = 14U;
+    trace.failed_error = DF_MEDIA_ERROR_RECONNECT_FRAME;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_media_tick_with_event(&media, &ubus, NULL, 903U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_log_get(&ubus, 2U, &log_entry));
+    TEST_ASSERT_INT_EQ(0, strcmp(
+        "event=media_pipeline_failed station_id=gate_side generation=14 "
+        "error=reconnect_frame_failed", log_entry.message));
 }

@@ -392,6 +392,14 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             /* The vendor ends the session for both reasons, but only 00
              * requests an ACK. Keep duplicates from postponing recovery. */
             if (monitor->peer_stop_seen) return DF_OK;
+            if (monitor->persistent) {
+                if (monitor->generation == UINT64_MAX) {
+                    df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_STOP_TIMEOUT);
+                    result->failed = true;
+                    return DF_OK;
+                }
+                monitor->generation++;
+            }
             monitor->state = DF_GVS_MONITOR_REQUESTING;
             monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
             monitor->next_action_ms = now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;

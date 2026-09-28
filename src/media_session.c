@@ -352,6 +352,7 @@ int df_media_session_push_jpeg(struct df_media_session *session,
          session->reconnect_frame.height != height) &&
         session->source_state == DF_MEDIA_SOURCE_RECONNECTING) {
         df_media_session_fail_encoder(session);
+        session->last_error = DF_MEDIA_ERROR_RECONNECT_FRAME;
         return DF_ERR_IO;
     }
     if (session->publication_generation == 0U) {
@@ -361,6 +362,7 @@ int df_media_session_push_jpeg(struct df_media_session *session,
             if (df_media_reconnect_frame_create(width, height,
                     &session->reconnect_frame) != DF_OK) {
                 df_media_session_fail_encoder(session);
+                session->last_error = DF_MEDIA_ERROR_RECONNECT_FRAME;
                 return DF_ERR_IO;
             }
         }
@@ -381,6 +383,7 @@ int df_media_session_push_jpeg(struct df_media_session *session,
             if (df_media_reconnect_frame_create(width, height,
                     &session->reconnect_frame) != DF_OK) {
                 df_media_session_fail_encoder(session);
+                session->last_error = DF_MEDIA_ERROR_RECONNECT_FRAME;
                 return DF_ERR_IO;
             }
         }
