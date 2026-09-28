@@ -266,6 +266,9 @@ int df_media_session_tick_reconnect(struct df_media_session *session,
     result = df_media_session_flush_pending(session);
     if (result == DF_MEDIA_ENCODER_RETRY) return DF_OK;
     if (result != DF_OK) {
+        if (session->encoder.encoder_exited &&
+            df_media_session_recover_preview_encoder(session) == DF_OK)
+            return DF_OK;
         df_media_session_fail_encoder(session);
         return DF_ERR_IO;
     }
@@ -280,6 +283,9 @@ int df_media_session_tick_reconnect(struct df_media_session *session,
     frame.timestamp_ms = now_ms;
     result = df_media_encoder_write_frame(&session->encoder, &frame);
     if (result != DF_OK && result != DF_MEDIA_ENCODER_RETRY) {
+        if (session->encoder.encoder_exited &&
+            df_media_session_recover_preview_encoder(session) == DF_OK)
+            return DF_OK;
         df_media_session_fail_encoder(session);
         return DF_ERR_IO;
     }
