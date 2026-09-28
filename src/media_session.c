@@ -12,10 +12,18 @@ static void df_media_session_queue_destroy(struct df_media_session *session) {
     }
 }
 
+static void df_media_session_clear_publication(struct df_media_session *session) {
+    df_media_reconnect_frame_destroy(&session->reconnect_frame);
+    session->publication_generation = 0U;
+    session->next_reconnect_frame_ms = 0U;
+    session->source_state = DF_MEDIA_SOURCE_WAITING;
+}
+
 static void df_media_session_fail_encoder(struct df_media_session *session) {
     if (session == NULL) return;
     (void)df_media_encoder_stop(&session->encoder, 100U);
     df_media_session_queue_destroy(session);
+    df_media_session_clear_publication(session);
     session->state = DF_MEDIA_SESSION_FAILED;
     session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
 }
@@ -65,7 +73,7 @@ static int df_media_session_start_encoder(struct df_media_session *session,
     };
 
     return df_media_encoder_start(&session->encoder, &config, credentials,
-        session->media_generation);
+        session->publication_generation);
 }
 
 static int df_media_session_flush_pending(struct df_media_session *session) {
@@ -101,6 +109,7 @@ void df_media_session_reset(struct df_media_session *session) {
         bool status_initialized = session->status_initialized;
 
         df_gvs_video_reassembly_reset(&session->video);
+        df_media_reconnect_frame_destroy(&session->reconnect_frame);
         memset(session, 0, sizeof(*session));
         session->status_fingerprint = status_fingerprint;
         session->status_revision = status_revision;
@@ -205,6 +214,7 @@ int df_media_session_stop_pipeline(struct df_media_session *session) {
     if (session == NULL) return DF_ERR_INVALID;
     result = df_media_encoder_stop(&session->encoder, 100U);
     df_media_session_queue_destroy(session);
+    df_media_session_clear_publication(session);
     return result;
 }
 
@@ -222,6 +232,61 @@ int df_media_session_reset_pipeline(struct df_media_session *session) {
     return result;
 }
 
+int df_media_session_reset_attempt(struct df_media_session *session,
+    uint64_t media_generation) {
+    if (session == NULL || !session->active || media_generation == 0U)
+        return DF_ERR_INVALID;
+    df_gvs_video_reassembly_reset(&session->video);
+    df_gvs_video_reassembly_init(&session->video);
+    session->monitor.media_ready = false;
+    session->media_generation = media_generation;
+    return DF_OK;
+}
+
+void df_media_session_mark_source_lost(struct df_media_session *session,
+    uint64_t now_ms) {
+    if (session == NULL || !session->active ||
+        session->purpose != DF_MEDIA_SESSION_PREVIEW ||
+        session->publication_generation == 0U ||
+        session->source_state == DF_MEDIA_SOURCE_RECONNECTING) return;
+    session->source_state = DF_MEDIA_SOURCE_RECONNECTING;
+    session->next_reconnect_frame_ms = now_ms;
+}
+
+int df_media_session_tick_reconnect(struct df_media_session *session,
+    uint8_t fps, uint64_t now_ms) {
+    struct df_media_frame frame;
+    uint64_t interval_ms;
+    int result;
+
+    if (session == NULL || fps == 0U) return DF_ERR_INVALID;
+    if (session->purpose != DF_MEDIA_SESSION_PREVIEW ||
+        session->publication_generation == 0U ||
+        !df_media_encoder_is_running(&session->encoder)) return DF_OK;
+    result = df_media_session_flush_pending(session);
+    if (result == DF_MEDIA_ENCODER_RETRY) return DF_OK;
+    if (result != DF_OK) {
+        df_media_session_fail_encoder(session);
+        return DF_ERR_IO;
+    }
+    if (session->source_state != DF_MEDIA_SOURCE_RECONNECTING ||
+        now_ms < session->next_reconnect_frame_ms) return DF_OK;
+    interval_ms = 1000U / fps;
+    if (now_ms > UINT64_MAX - interval_ms ||
+        session->reconnect_frame.data == NULL) return DF_ERR_INVALID;
+    frame.data = session->reconnect_frame.data;
+    frame.length = session->reconnect_frame.length;
+    frame.generation = session->publication_generation;
+    frame.timestamp_ms = now_ms;
+    result = df_media_encoder_write_frame(&session->encoder, &frame);
+    if (result != DF_OK && result != DF_MEDIA_ENCODER_RETRY) {
+        df_media_session_fail_encoder(session);
+        return DF_ERR_IO;
+    }
+    session->next_reconnect_frame_ms = now_ms + interval_ms;
+    return DF_OK;
+}
+
 int df_media_session_upgrade_to_call(struct df_media_session *session,
     uint64_t generation, uint64_t call_generation, uint64_t now_ms) {
     if (session == NULL || !session->active || generation == 0U ||
@@ -233,6 +298,7 @@ int df_media_session_upgrade_to_call(struct df_media_session *session,
     if (session->queue_initialized &&
         df_media_frame_queue_reset(&session->queue, generation) != DF_OK)
         return DF_ERR_IO;
+    df_media_session_clear_publication(session);
     df_gvs_video_reassembly_reset(&session->video);
     df_gvs_video_reassembly_init(&session->video);
     session->purpose = DF_MEDIA_SESSION_CALL;
@@ -280,6 +346,25 @@ int df_media_session_push_jpeg(struct df_media_session *session,
     result = df_media_session_tick_pipeline(session, timestamp_ms);
     if (result != DF_OK || session->state == DF_MEDIA_SESSION_FAILED)
         return DF_ERR_IO;
+    if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
+        session->publication_generation != 0U &&
+        (session->reconnect_frame.width != width ||
+         session->reconnect_frame.height != height) &&
+        session->source_state == DF_MEDIA_SOURCE_RECONNECTING) {
+        df_media_session_fail_encoder(session);
+        return DF_ERR_IO;
+    }
+    if (session->publication_generation == 0U) {
+        session->publication_generation = session->generation;
+        if (session->purpose == DF_MEDIA_SESSION_PREVIEW) {
+            df_media_reconnect_frame_destroy(&session->reconnect_frame);
+            if (df_media_reconnect_frame_create(width, height,
+                    &session->reconnect_frame) != DF_OK) {
+                df_media_session_fail_encoder(session);
+                return DF_ERR_IO;
+            }
+        }
+    }
     if (df_media_encoder_requires_restart(&session->encoder, width, height)) {
         if (df_media_encoder_stop(&session->encoder, 100U) != DF_OK) {
             df_media_session_fail_encoder(session);
@@ -287,21 +372,31 @@ int df_media_session_push_jpeg(struct df_media_session *session,
         }
         if (session->queue_initialized &&
             df_media_frame_queue_reset(&session->queue,
-                session->media_generation) != DF_OK) {
+                session->publication_generation) != DF_OK) {
             df_media_session_fail_encoder(session);
             return DF_ERR_IO;
+        }
+        if (session->purpose == DF_MEDIA_SESSION_PREVIEW) {
+            df_media_reconnect_frame_destroy(&session->reconnect_frame);
+            if (df_media_reconnect_frame_create(width, height,
+                    &session->reconnect_frame) != DF_OK) {
+                df_media_session_fail_encoder(session);
+                return DF_ERR_IO;
+            }
         }
     }
     if (!session->queue_initialized) {
         if (df_media_frame_queue_init(&session->queue,
-                session->media_generation,
+                session->publication_generation,
                 DF_GVS_VIDEO_MAX_FRAME) != DF_OK) return DF_ERR_IO;
         session->queue_initialized = true;
     }
     if (df_media_frame_queue_push(&session->queue, jpeg, length,
-            session->media_generation, timestamp_ms) != DF_OK) return DF_ERR_IO;
+            session->publication_generation, timestamp_ms) != DF_OK) return DF_ERR_IO;
     session->frames_received++;
     session->last_frame_ms = timestamp_ms;
+    session->source_state = DF_MEDIA_SOURCE_LIVE;
+    session->next_reconnect_frame_ms = 0U;
     if (!df_media_encoder_is_running(&session->encoder) &&
         df_media_session_start_encoder(session, module_config, credentials,
             width, height) != DF_OK) {
