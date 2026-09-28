@@ -71,7 +71,7 @@ jobs:
           (
             cd "$sdk_dir"
             ./scripts/feeds update -a
-            ./scripts/feeds install libpcap libuci libjson-c libopenssl libcurl luci-base ffmpeg libffmpeg-full libx264
+            ./scripts/feeds install libpcap libuci libjson-c libopenssl libcurl luci-base ffmpeg libffmpeg-full libx264 libjpeg-turbo
           )
           ./scripts/prepare-sdk-package.sh "$sdk_dir"
           (

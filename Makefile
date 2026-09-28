@@ -6,8 +6,13 @@ PCAP_CONFIG ?= pcap-config
 endif
 PCAP_CFLAGS ?= $(shell $(PCAP_CONFIG) --cflags 2>/dev/null)
 PCAP_LIBS ?= $(shell $(PCAP_CONFIG) --libs 2>/dev/null)
+ifneq ($(wildcard /opt/homebrew/include/jpeglib.h),)
+JPEG_CFLAGS := -I/opt/homebrew/include
+JPEG_LIBS := -L/opt/homebrew/lib
+endif
+JPEG_LIBS += -ljpeg
 CPPFLAGS := -D_DEFAULT_SOURCE -DDF_ALLOW_TEST_ROOT
-CFLAGS := -std=c17 -Wall -Wextra -Werror -pedantic -Isrc -Itests -Itests/support $(PCAP_CFLAGS)
+CFLAGS := -std=c17 -Wall -Wextra -Werror -pedantic -Isrc -Itests -Itests/support $(PCAP_CFLAGS) $(JPEG_CFLAGS)
 TEST_SOURCES := tests/test_main.c tests/test_event_relay.c src/event_relay.c tests/test_config.c tests/test_runtime_config.c tests/test_station_registry.c tests/test_media_credentials.c tests/test_sip.c tests/test_gvs_deadline.c tests/test_gvs_frame.c tests/test_gvs_identity.c tests/test_gvs_presence.c tests/test_gvs_reply_queue.c tests/test_gvs_send_transaction.c tests/test_gvs_memory_sender.c tests/test_gvs_call_command.c tests/test_gvs_serialize.c tests/test_gvs_sync.c tests/test_gvs_sync_state.c tests/test_gvs_sync_adapters.c tests/test_gvs_runtime_sync.c tests/test_runtime_ubus.c tests/test_runtime_service.c tests/test_event_stream.c tests/test_gvs_observer.c tests/test_gvs_receive.c tests/test_gvs_replay.c tests/test_gvs_session.c tests/test_policy.c tests/test_capture.c tests/test_capture_retry.c tests/test_audit.c tests/test_discovery.c tests/test_diagnostics.c src/config.c src/runtime_config.c src/media_credentials.c src/runtime_service.c src/event_stream.c src/event.c src/sip.c src/gvs_deadline.c src/gvs_frame.c src/gvs_identity.c src/gvs_presence.c src/gvs_reply_queue.c src/gvs_send_transaction.c src/gvs_memory_sender.c src/gvs_call_command.c src/gvs_serialize.c src/gvs_sync.c src/gvs_sync_state.c src/gvs_sync_adapters.c src/gvs_runtime_sync.c src/runtime_ubus.c src/gvs_observer.c src/gvs_packet.c src/gvs_receive.c src/gvs_replay.c src/gvs_session.c src/session.c src/policy.c src/capture.c src/capture_retry.c src/audit.c src/discovery.c src/diagnostics.c
 DAEMON_SOURCES := src/main.c src/config.c src/runtime_config.c src/runtime_service.c src/event_stream.c src/event.c src/sip.c src/gvs_deadline.c src/gvs_frame.c src/gvs_identity.c src/gvs_presence.c src/gvs_reply_queue.c src/gvs_send_transaction.c src/gvs_memory_sender.c src/gvs_call_command.c src/gvs_serialize.c src/gvs_sync.c src/gvs_sync_state.c src/gvs_sync_adapters.c src/gvs_runtime_sync.c src/runtime_ubus.c src/gvs_observer.c src/gvs_packet.c src/gvs_receive.c src/gvs_replay.c src/gvs_session.c src/session.c src/policy.c src/capture.c src/capture_retry.c src/audit.c src/discovery.c src/diagnostics.c
 SIM_SOURCES := tools/gvs-peer-sim.c tests/support/gvs_peer_sim.c \
@@ -52,6 +57,7 @@ TEST_SOURCES += tests/test_gvs_media_admission.c src/gvs_media_admission.c
 TEST_SOURCES += tests/test_gvs_media_lifecycle.c src/gvs_media_lifecycle.c
 TEST_SOURCES += tests/test_gvs_video_reassembly.c src/gvs_video_reassembly.c
 TEST_SOURCES += tests/test_gvs_jpeg.c
+TEST_SOURCES += tests/test_media_reconnect_frame.c src/media_reconnect_frame.c
 TEST_SOURCES += tests/test_gvs_video_frame_cache.c src/gvs_video_frame_cache.c
 TEST_SOURCES += tests/test_gvs_video_snapshot.c src/gvs_video_snapshot.c
 TEST_SOURCES += tests/test_gvs_audio_buffer.c src/gvs_audio_buffer.c
@@ -153,7 +159,7 @@ build:
 	@mkdir -p build
 
 build/doorfast-tests: | build
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(TEST_SOURCES) -o $@ $(PCAP_LIBS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(TEST_SOURCES) -o $@ $(PCAP_LIBS) $(JPEG_LIBS)
 	$@
 
 build/doorfast: $(DAEMON_SOURCES) src/gvs_send_transaction.h src/gvs_memory_sender.h src/gvs_call_command.h | build

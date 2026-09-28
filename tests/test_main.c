@@ -14,6 +14,7 @@ void test_gvs_media_admission_requires_current_exact_endpoints(void);
 void test_gvs_media_lifecycle_isolates_generations_and_endings(void);
 void test_gvs_video_reassembly(void);
 void test_gvs_jpeg(void);
+void test_media_reconnect_frame_dimensions_and_bounds(void);
 void test_gvs_jpeg_extracts_dimensions_from_sof(void);
 void test_gvs_video_frame_cache(void);
 void test_gvs_video_snapshot(void);
@@ -473,6 +474,7 @@ int main(int argc, char **argv) {
     test_gvs_media_lifecycle_isolates_generations_and_endings();
     test_gvs_video_reassembly();
     test_gvs_jpeg();
+    test_media_reconnect_frame_dimensions_and_bounds();
     test_gvs_video_frame_cache();
     test_gvs_video_snapshot();
     test_gvs_audio_buffer();
