@@ -1,0 +1,9 @@
+# Doorfast preview continuity: local verification
+
+Date: 2026-09-28. This report records local test evidence only. Browser and physical-device acceptance is pending.
+
+The manager now resets failed session slots after stopping the media pipeline and resource hook. Reconnect JPEG, publication generation, session generation, and attempt generation are cleared, while the manager's public failure summary remains available. A lifecycle test checks that clearing Doorfast's single shared viewer flag retains the published session, then an explicit stop and timeout release the session, encoder, and reconnect frame. Other local coverage includes three stations, capacity limits, call preemption, short-stream retry, FFmpeg exit, and dimension error handling.
+
+TDD RED: `make test` exited 2 with six assertions: three media-error scenarios each retained `generation=1` and `media_generation=1` where zero was required. After the fix and updating a pre-existing test to use the public failure summary, `make test` and `./build/doorfast-tests` both exited 0. There are 345 registered C test calls. `git diff --check` exited 0. Build: C17 with `-Wall -Wextra -Werror -pedantic`, linked with libpcap and libjpeg by `make test`.
+
+The VM media fixture has no short-stream simulation, so it was not extended for this task. The local tests do not prove physical ICE negotiation, decoder output, or go2rtc behavior on devices 1, 2, and B2. Release still requires passing PR Actions and reversible real-browser acceptance using that PR artifact: ten rounds per device, at least nine real-frame successes within 60 seconds per device, at least 90% same-session recovery after device end, and evidence that stopping leaves no session or encoder. Prompt frames must be counted separately from real frames. No such acceptance was performed here.

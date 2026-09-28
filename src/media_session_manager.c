@@ -167,8 +167,7 @@ static int df_media_session_manager_release_failed(
     }
     if (df_media_session_manager_stop_resources(session) != DF_OK)
         return DF_ERR_IO;
-    session->active = false;
-    session->reserved = false;
+    df_media_session_reset(session);
     if (manager->active_count > 0U) manager->active_count--;
     return DF_OK;
 }

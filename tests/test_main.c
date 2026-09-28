@@ -187,6 +187,7 @@ void test_media_session_manager_correlates_stop_ack_and_keeps_preview_retrying(v
 void test_media_session_manager_retries_stalled_video_session(void);
 void test_media_session_manager_keeps_producer_across_busy_retry(void);
 void test_media_session_manager_reports_reconnect_frame_failure(void);
+void test_media_session_manager_shared_viewer_stops_after_timeout(void);
 void test_media_session_manager_reconnect_backpressure_is_bounded(void);
 void test_media_session_manager_recovers_live_child_epipe(void);
 void test_media_session_manager_keeps_producer_after_acknowledged_peer_end(void);
@@ -442,6 +443,7 @@ int main(int argc, char **argv) {
     test_media_session_manager_retries_stalled_video_session();
     test_media_session_manager_keeps_producer_across_busy_retry();
     test_media_session_manager_reports_reconnect_frame_failure();
+    test_media_session_manager_shared_viewer_stops_after_timeout();
     test_media_session_manager_reconnect_backpressure_is_bounded();
     test_media_session_manager_recovers_live_child_epipe();
     test_media_session_manager_keeps_producer_after_acknowledged_peer_end();
