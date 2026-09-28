@@ -860,7 +860,7 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
             session->monitor.state == DF_GVS_MONITOR_PUBLISHING ||
             session->monitor.state == DF_GVS_MONITOR_VIEWING) {
             struct df_gvs_monitor_action action;
-            struct df_gvs_monitor previous_monitor = session->monitor;
+            int send_result = DF_OK;
 
             if (df_gvs_monitor_stop(&session->monitor, session->media_generation,
                     now_ms) != DF_OK ||
@@ -869,16 +869,14 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
             if (action.send && manager->callbacks.emit_control(
                     action.destination, session->station_ipv4, action.source,
                     action.family, action.opcode, action.payload,
-                    action.payload_length, manager->callbacks.context) != DF_OK) {
-                session->monitor = previous_monitor;
-                return DF_ERR_IO;
-            }
+                    action.payload_length, manager->callbacks.context) != DF_OK)
+                send_result = DF_ERR_IO;
             session->state = DF_MEDIA_SESSION_STOPPING;
             session->viewer_active = false;
             if (df_media_session_stop_pipeline(session) != DF_OK)
                 return DF_MEDIA_ERROR_ENCODER_FAILED;
             df_media_session_manager_advance_revisions(manager, session);
-            return DF_OK;
+            return send_result;
         }
         if (df_media_session_manager_stop_resources(session) != DF_OK)
             return DF_MEDIA_ERROR_ENCODER_FAILED;

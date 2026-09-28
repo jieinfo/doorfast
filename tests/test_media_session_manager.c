@@ -2021,6 +2021,8 @@ void test_media_session_manager_keeps_three_reconnecting_stations_isolated(void)
     TEST_ASSERT_INT_EQ(0, entries[0].ready);
     TEST_ASSERT_INT_EQ(0, entries[0].encoder_running);
     TEST_ASSERT_INT_EQ(1, manager.sessions[0].reconnect_frame.data == NULL);
+    TEST_ASSERT_INT_EQ(0, (int)manager.sessions[0].publication_generation);
+    TEST_ASSERT_INT_EQ(1, entries[0].generation != generations[0]);
     TEST_ASSERT_INT_EQ(2, (int)status.active_encoders);
     for (index = 1U; index < 3U; index++) {
         struct df_media_session_key key = {
@@ -2034,6 +2036,14 @@ void test_media_session_manager_keeps_three_reconnecting_stations_isolated(void)
         TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
             DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 401U));
         TEST_ASSERT_INT_EQ(1, manager.sessions[index].reconnect_frame.data == NULL);
+        TEST_ASSERT_INT_EQ(0, (int)manager.sessions[index].publication_generation);
+        TEST_ASSERT_INT_EQ(0, (int)manager.sessions[index].generation);
+        status.session_count = 3U;
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
+        TEST_ASSERT_INT_EQ((int)(3U - index), (int)status.required_session_count);
+        TEST_ASSERT_INT_EQ((int)(2U - index), (int)status.active_encoders);
+        TEST_ASSERT_INT_EQ(1,
+            df_media_session_manager_lookup(&manager, &key) == NULL);
     }
     df_media_session_manager_destroy(&manager);
 }
@@ -2162,7 +2172,7 @@ void test_media_session_manager_reports_reconnect_frame_failure(void) {
     }
 }
 
-void test_media_session_manager_shared_viewer_stops_after_timeout(void) {
+static void manager_shared_viewer_stops_after_timeout(bool fail_control) {
     static const uint8_t jpeg[] = {0xffU, 0xd8U, 0x11U, 0xffU, 0xd9U};
     static const uint8_t confirmation[] = {0x1eU, 0U, 1U};
     struct df_media_module_config_v3 config;
@@ -2213,10 +2223,15 @@ void test_media_session_manager_shared_viewer_stops_after_timeout(void) {
     TEST_ASSERT_INT_EQ((int)key.generation,
         (int)session->publication_generation);
     TEST_ASSERT_INT_EQ(1, session->reconnect_frame.data != NULL);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
-        DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 200U));
+    trace.fail_control = fail_control;
+    TEST_ASSERT_INT_EQ(fail_control ? DF_ERR_IO : DF_OK,
+        df_media_session_manager_command(&manager,
+            DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 200U));
     TEST_ASSERT_INT_EQ(0, (int)session->publication_generation);
     TEST_ASSERT_INT_EQ(1, session->reconnect_frame.data == NULL);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
+    TEST_ASSERT_INT_EQ(0, entry.ready);
+    TEST_ASSERT_INT_EQ(0, (int)status.active_encoders);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager,
         200U + DF_GVS_MONITOR_STOP_TIMEOUT_MS));
     TEST_ASSERT_INT_EQ(0, (int)df_media_session_manager_active(&manager));
@@ -2224,7 +2239,16 @@ void test_media_session_manager_shared_viewer_stops_after_timeout(void) {
     TEST_ASSERT_INT_EQ(1, (int)trace.resource_stops);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
     TEST_ASSERT_INT_EQ(0, (int)status.active_encoders);
+    TEST_ASSERT_INT_EQ(0, (int)status.required_session_count);
+    TEST_ASSERT_INT_EQ(0, (int)status.session_count);
+    TEST_ASSERT_INT_EQ(1,
+        df_media_session_manager_lookup(&manager, &key) == NULL);
     df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_shared_viewer_stops_after_timeout(void) {
+    manager_shared_viewer_stops_after_timeout(false);
+    manager_shared_viewer_stops_after_timeout(true);
 }
 
 static int manager_start_pipeline_pair(struct df_media_session_manager *manager,
