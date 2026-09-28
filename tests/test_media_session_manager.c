@@ -2048,6 +2048,102 @@ void test_media_session_manager_keeps_three_reconnecting_stations_isolated(void)
     df_media_session_manager_destroy(&manager);
 }
 
+/* A completed old frame must never follow the reconnect image. The encoder's
+ * pending copy still belongs to its original timestamp and must finish first. */
+static void manager_backpressure_attempt_boundary(void) {
+    static const uint8_t a[] = {0xffU, 0xd8U, 0x11U, 0xffU, 0xd9U};
+    static const uint8_t b[] = {0xffU, 0xd8U, 0x22U, 0xffU, 0xd9U};
+    static const uint8_t confirmation[] = {0x1eU, 0U, 1U};
+    static const uint8_t ended[] = {0U};
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    struct df_gvs_frame control = {.family = 3U, .opcode = 0x84U,
+        .payload = confirmation, .payload_length = sizeof(confirmation)};
+    struct df_media_session *session;
+    uint64_t generation;
+    int descriptors[2];
+    uint8_t filler[4096] = {0};
+    uint8_t *captured, *pending;
+    size_t length, used = 0U;
+    unsigned tick;
+    ssize_t count;
+
+    manager_pipeline_fixture(&config, &callbacks, &trace);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &generation));
+    session = &manager.sessions[0];
+    memcpy(control.source, session->station, 6U);
+    memcpy(control.destination, config.local, 6U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
+        &control, session->station_ipv4, 101U));
+    TEST_ASSERT_INT_EQ(0, pipe(descriptors));
+    TEST_ASSERT_INT_EQ(0, fcntl(descriptors[0], F_SETFL, O_NONBLOCK));
+    TEST_ASSERT_INT_EQ(0, fcntl(descriptors[1], F_SETFL, O_NONBLOCK));
+    session->encoder.input_fd = descriptors[1];
+    session->encoder.input_owned = true;
+    session->encoder.running = true;
+    session->encoder.generation = generation;
+    while (write(descriptors[1], filler, sizeof(filler)) > 0) {}
+    TEST_ASSERT_INT_EQ(1, errno == EAGAIN || errno == EWOULDBLOCK);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
+        session->station, config.local, session->station_ipv4,
+        a, sizeof(a), 640U, 480U, 200U));
+    pending = session->encoder.pending_frame;
+    TEST_ASSERT_INT_EQ(1, pending != NULL);
+    control.opcode = 2U;
+    control.payload = ended;
+    control.payload_length = sizeof(ended);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
+        &control, session->station_ipv4, 300U));
+    TEST_ASSERT_INT_EQ(0, (int)session->queue.count);
+    TEST_ASSERT_INT_EQ(1, pending == session->encoder.pending_frame);
+    TEST_ASSERT_INT_EQ(200, (int)session->encoder.pending_timestamp_ms);
+    TEST_ASSERT_INT_EQ((int)generation, (int)session->encoder.pending_generation);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 300U));
+    TEST_ASSERT_INT_EQ(200, (int)session->encoder.pending_timestamp_ms);
+    while (read(descriptors[0], filler, sizeof(filler)) > 0) {}
+    length = sizeof(a) + session->reconnect_frame.length + sizeof(b);
+    captured = malloc(length);
+    TEST_ASSERT_INT_EQ(1, captured != NULL);
+    if (captured == NULL) {
+        df_media_session_manager_destroy(&manager);
+        (void)close(descriptors[0]);
+        return;
+    }
+    /* Fixed time prevents a second prompt while a large JPEG drains. */
+    for (tick = 0U; tick < 100U && used < length - sizeof(b); tick++) {
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 301U));
+        while ((count = read(descriptors[0], captured + used, length - used)) > 0)
+            used += (size_t)count;
+    }
+    TEST_ASSERT_INT_EQ((int)(length - sizeof(b)), (int)used);
+    control.opcode = 0x84U;
+    control.payload = confirmation;
+    control.payload_length = sizeof(confirmation);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
+        &control, session->station_ipv4, 302U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
+        session->station, config.local, session->station_ipv4,
+        b, sizeof(b), 640U, 480U, 303U));
+    while ((count = read(descriptors[0], captured + used, length - used)) > 0)
+        used += (size_t)count;
+    TEST_ASSERT_INT_EQ((int)length, (int)used);
+    if (used == length) {
+        TEST_ASSERT_INT_EQ(0, memcmp(a, captured, sizeof(a)));
+        TEST_ASSERT_INT_EQ(0, memcmp(session->reconnect_frame.data,
+            captured + sizeof(a), session->reconnect_frame.length));
+        TEST_ASSERT_INT_EQ(0, memcmp(b, captured + length - sizeof(b), sizeof(b)));
+    }
+    TEST_ASSERT_INT_EQ(0, (int)session->queue.count);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SOURCE_LIVE, session->source_state);
+    free(captured);
+    df_media_session_manager_destroy(&manager);
+    TEST_ASSERT_INT_EQ(0, close(descriptors[0]));
+}
+
 /* A full encoder pipe is a recoverable RETRY, not a lost producer. */
 void test_media_session_manager_reconnect_backpressure_is_bounded(void) {
     static const uint8_t jpeg[] = {0xffU, 0xd8U, 0x11U, 0xffU, 0xd9U};
@@ -2065,6 +2161,8 @@ void test_media_session_manager_reconnect_backpressure_is_bounded(void) {
     uint8_t bytes[4096] = {0};
     uint8_t *pending;
     size_t pending_length;
+
+    manager_backpressure_attempt_boundary();
 
     manager_pipeline_fixture(&config, &callbacks, &trace);
     config.local[0] = 0U;
@@ -2118,7 +2216,7 @@ void test_media_session_manager_reports_reconnect_frame_failure(void) {
     static const uint8_t jpeg[] = {0xffU, 0xd8U, 0x11U, 0xffU, 0xd9U};
     unsigned scenario;
 
-    for (scenario = 0U; scenario < 3U; scenario++) {
+    for (scenario = 0U; scenario < 6U; scenario++) {
         struct df_media_module_config_v3 config;
         struct df_media_module_callbacks_v3 callbacks;
         struct manager_trace trace = {.available_kib = 4096U};
@@ -2126,19 +2224,28 @@ void test_media_session_manager_reports_reconnect_frame_failure(void) {
         struct df_media_session *session;
         uint64_t generation;
         struct df_media_module_status_v3 status = {0};
+        static const uint8_t confirmation[] = {0x1eU, 0U, 1U};
+        struct df_gvs_frame control = {.family = 3U, .opcode = 0x84U,
+            .payload = confirmation, .payload_length = sizeof(confirmation)};
+        unsigned controls_before_failure;
 
         manager_pipeline_fixture(&config, &callbacks, &trace);
-        config.local[0] = 0U; /* Exercise media failures without a control peer. */
         TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_init(&manager, &config, &callbacks));
         TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
             "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &generation));
         session = &manager.sessions[0];
+        memcpy(control.source, session->station, sizeof(control.source));
+        memcpy(control.destination, config.local, sizeof(control.destination));
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
+            &control, session->station_ipv4, 101U));
+        controls_before_failure = trace.control_count;
+        trace.fail_control = scenario >= 3U;
         session->encoder.input_fd = open("/dev/null", O_WRONLY);
         TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
         session->encoder.input_owned = true;
         session->encoder.running = true;
         session->encoder.generation = generation;
-        if (scenario == 0U) {
+        if (scenario % 3U == 0U) {
             TEST_ASSERT_INT_EQ(DF_ERR_IO, df_media_session_manager_push_jpeg(&manager,
                 session->station, config.local, session->station_ipv4,
                 jpeg, sizeof(jpeg), 32U, 32U, 200U));
@@ -2147,7 +2254,7 @@ void test_media_session_manager_reports_reconnect_frame_failure(void) {
                 session->station, config.local, session->station_ipv4,
                 jpeg, sizeof(jpeg), 640U, 480U, 200U));
             df_media_session_mark_source_lost(session, 300U);
-            if (scenario == 1U) {
+            if (scenario % 3U == 1U) {
                 TEST_ASSERT_INT_EQ(DF_ERR_IO, df_media_session_manager_push_jpeg(&manager,
                     session->station, config.local, session->station_ipv4,
                     jpeg, sizeof(jpeg), 800U, 600U, 301U));
@@ -2156,6 +2263,11 @@ void test_media_session_manager_reports_reconnect_frame_failure(void) {
                 TEST_ASSERT_INT_EQ(DF_ERR_IO, df_media_session_manager_tick(&manager, 300U));
             }
         }
+        TEST_ASSERT_INT_EQ((int)controls_before_failure + 1, (int)trace.control_count);
+        TEST_ASSERT_INT_EQ(3, trace.last_control_family);
+        TEST_ASSERT_INT_EQ(2, trace.last_control_opcode);
+        TEST_ASSERT_INT_EQ(0, memcmp(control.source, trace.last_control_destination, 6U));
+        TEST_ASSERT_INT_EQ(0, memcmp(config.local, trace.last_control_source, 6U));
         TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
         TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_RECONNECT_FRAME, status.failed_error);
         TEST_ASSERT_INT_EQ((int)generation, (int)status.failed_generation);

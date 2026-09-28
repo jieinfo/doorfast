@@ -970,9 +970,11 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
                 timestamp_ms);
             df_media_source_transition_log(session, previous_source, timestamp_ms);
 
-            if (session->state == DF_MEDIA_SESSION_FAILED)
+            if (session->state == DF_MEDIA_SESSION_FAILED) {
+                (void)df_media_session_manager_emit_stop_best_effort(manager,
+                    session, timestamp_ms);
                 (void)df_media_session_manager_release_failed(manager, session);
-            else if (result == DF_OK &&
+            } else if (result == DF_OK &&
                 session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO &&
                 df_gvs_monitor_mark_publishing(&session->monitor,
                     session->media_generation, timestamp_ms) != DF_OK)
@@ -1161,6 +1163,8 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
                 session->state = DF_MEDIA_SESSION_FAILED;
                 session->last_error = DF_MEDIA_ERROR_RECONNECT_FRAME;
             }
+            (void)df_media_session_manager_emit_stop_best_effort(manager,
+                session, now_ms);
             (void)df_media_session_manager_release_failed(manager, session);
             overall = DF_ERR_IO;
         }

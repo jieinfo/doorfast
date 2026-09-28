@@ -238,6 +238,12 @@ int df_media_session_reset_attempt(struct df_media_session *session,
         return DF_ERR_INVALID;
     df_gvs_video_reassembly_reset(&session->video);
     df_gvs_video_reassembly_init(&session->video);
+    /* Discard unsent frames from the old attempt, but finish any encoder
+     * pending bytes to preserve the JPEG stream boundary. */
+    if (session->queue_initialized &&
+        df_media_frame_queue_reset(&session->queue,
+            session->publication_generation) != DF_OK)
+        return DF_ERR_IO;
     session->monitor.media_ready = false;
     session->media_generation = media_generation;
     return DF_OK;
