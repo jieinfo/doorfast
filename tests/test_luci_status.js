@@ -70,7 +70,7 @@ assert.deepEqual(model.formatStatus(handshakePayload).at(-1), {
     title: '保活模拟（仅内存发送）', rows: [
         ['已启动', '是'], ['未回复次数', '2'],
         ['距下次探测（毫秒，最近采样）', '1800'],
-        ['发送事务', '等待重试'], ['累计丢弃动作', '3']
+        ['发送事务', 'Waiting to retry'], ['累计丢弃动作', '3']
     ]});
 const udpHandshakePayload = JSON.parse(JSON.stringify(handshakePayload));
 udpHandshakePayload.mode = 'active_host';

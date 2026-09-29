@@ -70,7 +70,7 @@ function callDispatchLabel(state) {
         empty: '空闲',
         queued: '已入队',
         sending: '发送中',
-        retry: '等待重试',
+        retry: 'Waiting to retry',
         sent: '已发送',
         failed: '发送失败',
         timeout: '发送超时',
