@@ -443,9 +443,11 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
         if (frame->payload[0] == 1U) {
-            /* The vendor ends the session for both reasons, but only 00
-             * requests an ACK. Keep duplicates from postponing recovery. */
+            /* Both vendor reason values terminate the session. A 03/82
+             * acknowledgement is required before the station releases its
+             * busy state; keep duplicate notifications from restarting it. */
             if (monitor->peer_stop_seen) return DF_OK;
+            result->hangup_reply = true;
             if (monitor->persistent) {
                 if (monitor->generation == UINT64_MAX) {
                     df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_STOP_TIMEOUT);

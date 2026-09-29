@@ -399,7 +399,7 @@ void test_gvs_monitor_retries_after_station_ends_short_preview(void) {
     TEST_ASSERT_INT_EQ(2201, (int)monitor.next_action_ms);
 }
 
-void test_gvs_monitor_retries_end_notification_without_reply(void) {
+void test_gvs_monitor_retries_end_notification_with_reply(void) {
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
     const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
     const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
@@ -420,7 +420,7 @@ void test_gvs_monitor_retries_end_notification_without_reply(void) {
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
         preview_status, sizeof(preview_status), 0x01020304U, 200U, &result));
     TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
-    TEST_ASSERT_INT_EQ(0, result.hangup_reply ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, result.hangup_reply ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
     TEST_ASSERT_INT_EQ(0, monitor.media_ready ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, monitor.retry_waiting ? 1 : 0);
@@ -429,7 +429,7 @@ void test_gvs_monitor_retries_end_notification_without_reply(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_stop(&monitor, 7U, 201U));
 }
 
-void test_gvs_monitor_end_notification_retries_without_accepting_stale_video(void) {
+void test_gvs_monitor_end_notification_acknowledges_and_retries(void) {
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
     const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
     const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
@@ -451,7 +451,7 @@ void test_gvs_monitor_end_notification_retries_without_accepting_stale_video(voi
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
         preview_status, sizeof(preview_status), 0x01020304U, 200U, &result));
     TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
-    TEST_ASSERT_INT_EQ(0, result.hangup_reply ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, result.hangup_reply ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, monitor.media_ready ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
     TEST_ASSERT_INT_EQ(8, (int)monitor.generation);
