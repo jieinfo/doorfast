@@ -279,6 +279,7 @@ assert sources == [
     'media_credentials.c',
     'media_encoder.c',
     'media_frame_queue.c',
+    'media_reconnect_frame.c',
     'media_module_config.c',
     'media_session.c',
     'media_session_manager.c',
@@ -314,12 +315,17 @@ print(' '.join('src/' + source for source in re.findall(r'/src/([a-z0-9_]+\.c)',
 MEDIA_SOURCES
 )
 case "$(uname -s)" in
-    Darwin) media_link_flags='-dynamiclib -Wl,-undefined,error' ;;
+    Darwin)
+        media_link_flags='-dynamiclib -Wl,-undefined,error'
+        jpeg_prefix=$(brew --prefix jpeg-turbo)
+        jpeg_flags="-I$jpeg_prefix/include -L$jpeg_prefix/lib"
+        ;;
     *) media_link_flags='-shared -Wl,-z,defs' ;;
 esac
 # shellcheck disable=SC2086
 ${CC:-cc} -D_DEFAULT_SOURCE -std=c17 -Wall -Wextra -Werror -pedantic \
-    -fPIC $media_link_flags -Isrc $media_sources -o "$media_link_dir/media-v3.so"
+    -fPIC $media_link_flags ${jpeg_flags:-} -Isrc $media_sources \
+    -o "$media_link_dir/media-v3.so" -ljpeg
 nm -g "$media_link_dir/media-v3.so" | grep -q 'df_media_module_api_v3'
 ! nm -g "$media_link_dir/media-v3.so" | grep -q 'df_media_module_api_v2'
 
