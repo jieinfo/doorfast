@@ -105,10 +105,10 @@ int df_media_reconnect_frame_create(uint16_t width, uint16_t height,
     if (out == NULL) return DF_ERR_INVALID;
     memset(out, 0, sizeof(*out));
     if (width < 64U || height < 64U ||
-        (size_t)width * (size_t)height > 4096U * 2160U ||
-        (size_t)width > SIZE_MAX / 3U) return DF_ERR_INVALID;
+        (size_t)width * (size_t)height > 4096U * 2160U) return DF_ERR_INVALID;
 
     row_length = (size_t)width * 3U;
+    if (row_length / 3U != (size_t)width) return DF_ERR_INVALID;
     state = calloc(1, sizeof(*state));
     if (state == NULL) return DF_ERR_IO;
     state->row = malloc(row_length);
