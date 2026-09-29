@@ -10,6 +10,7 @@
 
 #define DF_GVS_MONITOR_REQUEST_INTERVAL_MS 1000U
 #define DF_GVS_MONITOR_STATUS_RETRY_DELAY_MS 1000U
+#define DF_GVS_MONITOR_KEEPALIVE_INTERVAL_MS 2000U
 #define DF_GVS_MONITOR_BUSY_RETRY_LIMIT 3U
 #define DF_GVS_MONITOR_MAX_REQUESTS 20U
 #define DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS 8000U
@@ -77,9 +78,11 @@ struct df_gvs_monitor {
     uint64_t next_action_ms;
     uint64_t first_frame_deadline_ms;
     uint64_t status_retry_deadline_ms;
+    uint64_t keepalive_next_ms;
     uint64_t first_frame_timeout_ms;
     unsigned request_attempts;
     unsigned busy_rejections;
+    unsigned keepalive_misses;
     bool media_ready;
     bool persistent;
     bool status_retry_pending;
