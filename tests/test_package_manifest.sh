@@ -18,6 +18,7 @@ grep -Fq 'media_session_manager.c' package/doorfast-media/Makefile
 ! grep -Fq 'media_relay.h' package/doorfast-media/Makefile
 ! grep -Fq '$(wildcard $(PKG_BUILD_DIR)/src/*.c)' package/doorfast/Makefile
 grep -Fq '$(RM) $(DF_MEDIA_MODULE_SOURCES)' package/doorfast/Makefile
+grep -Fq '$(PKG_BUILD_DIR)/src/media_reconnect_frame.c' package/doorfast/Makefile
 test "$(grep -Fc '$(PKG_BUILD_DIR)/src/*.c' package/doorfast/Makefile)" -eq 2
 test -f package/doorfast/files/doorfast.init
 test -f package/doorfast/files/doorfast-group
