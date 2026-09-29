@@ -315,8 +315,6 @@ static int df_gvs_monitor_match(const struct df_gvs_monitor *monitor,
 int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
     const struct df_gvs_frame *frame, uint32_t source_ipv4, uint64_t now_ms,
     struct df_gvs_monitor_result *result) {
-    bool peer_retry_ready = false;
-
     if (monitor == NULL || frame == NULL || result == NULL ||
         now_ms < monitor->last_now_ms ||
         df_gvs_monitor_match(monitor, frame, source_ipv4) != DF_OK) {
@@ -392,6 +390,14 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             /* The vendor ends the session for both reasons, but only 00
              * requests an ACK. Keep duplicates from postponing recovery. */
             if (monitor->peer_stop_seen) return DF_OK;
+            if (monitor->persistent) {
+                if (monitor->generation == UINT64_MAX) {
+                    df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_STOP_TIMEOUT);
+                    result->failed = true;
+                    return DF_OK;
+                }
+                monitor->generation++;
+            }
             monitor->state = DF_GVS_MONITOR_REQUESTING;
             monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
             monitor->next_action_ms = now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
@@ -422,21 +428,20 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             } else if (monitor->peer_stop_seen) {
                 /* Duplicate peer hangup while the replacement request is in flight. */
             } else {
-                monitor->state = DF_GVS_MONITOR_REQUESTING;
-                monitor->next_action_ms = now_ms;
-                monitor->first_frame_deadline_ms = 0U;
-                monitor->status_retry_deadline_ms = 0U;
-                monitor->request_attempts = 0U;
-                monitor->busy_rejections = 0U;
-                monitor->media_ready = false;
-                monitor->status_retry_pending = false;
-                monitor->retry_waiting = false;
-                monitor->peer_stop_seen = false;
+                if (df_gvs_monitor_restart_after_peer_stop(monitor, now_ms) !=
+                        DF_OK) {
+                    df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_STOP_TIMEOUT);
+                    result->failed = true;
+                } else {
+                    monitor->retry_ready = false;
+                    result->retrying = true;
+                }
+                result->hangup_reply = true;
+                return DF_OK;
             }
         }
         result->hangup_reply = true;
-        result->retry_ready = peer_retry_ready;
-        result->retrying = !peer_retry_ready && !monitor->peer_stop_seen;
+        result->retrying = !monitor->peer_stop_seen;
         return DF_OK;
     }
     if (monitor->state == DF_GVS_MONITOR_STOPPING && frame->opcode == 0x02U) {

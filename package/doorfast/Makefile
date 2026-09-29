@@ -13,6 +13,7 @@ DF_MEDIA_MODULE_SOURCES:= \
 	$(PKG_BUILD_DIR)/src/media_capacity.c \
 	$(PKG_BUILD_DIR)/src/media_encoder.c \
 	$(PKG_BUILD_DIR)/src/media_frame_queue.c \
+	$(PKG_BUILD_DIR)/src/media_reconnect_frame.c \
 	$(PKG_BUILD_DIR)/src/media_module.c \
 	$(PKG_BUILD_DIR)/src/media_module_config.c \
 	$(PKG_BUILD_DIR)/src/media_session.c \

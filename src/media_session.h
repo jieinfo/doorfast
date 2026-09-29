@@ -6,6 +6,13 @@
 
 #include "media_module.h"
 #include "gvs_video_reassembly.h"
+#include "media_reconnect_frame.h"
+
+enum df_media_source_state {
+    DF_MEDIA_SOURCE_WAITING = 0,
+    DF_MEDIA_SOURCE_LIVE,
+    DF_MEDIA_SOURCE_RECONNECTING,
+};
 
 struct df_media_session {
     char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
@@ -14,6 +21,10 @@ struct df_media_session {
     uint32_t station_ipv4;
     uint64_t generation;
     uint64_t media_generation;
+    uint64_t publication_generation;
+    enum df_media_source_state source_state;
+    struct df_media_reconnect_frame reconnect_frame;
+    uint64_t next_reconnect_frame_ms;
     uint64_t call_generation;
     enum df_media_session_purpose purpose;
     enum df_media_session_state_v3 state;
@@ -57,6 +68,12 @@ int df_media_session_push_jpeg(struct df_media_session *,
     uint16_t width, uint16_t height, uint64_t timestamp_ms);
 int df_media_session_reset_pipeline(struct df_media_session *);
 int df_media_session_tick_pipeline(struct df_media_session *, uint64_t now_ms);
+int df_media_session_tick_reconnect(struct df_media_session *, uint8_t fps,
+    uint64_t now_ms);
+int df_media_session_reset_attempt(struct df_media_session *,
+    uint64_t media_generation);
+void df_media_session_mark_source_lost(struct df_media_session *,
+    uint64_t now_ms);
 int df_media_session_stop_pipeline(struct df_media_session *);
 int df_media_session_upgrade_to_call(struct df_media_session *,
     uint64_t generation, uint64_t call_generation, uint64_t now_ms);

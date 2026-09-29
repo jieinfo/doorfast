@@ -395,6 +395,9 @@ void test_gvs_monitor_retries_end_notification_without_reply(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
     TEST_ASSERT_INT_EQ(0, monitor.media_ready ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, monitor.retry_waiting ? 1 : 0);
+    /* Legacy nonpersistent sessions still expose this generation as the
+     * caller's stop key; only persistent preview attempts can replace it. */
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_stop(&monitor, 7U, 201U));
 }
 
 void test_gvs_monitor_end_notification_retries_without_accepting_stale_video(void) {
@@ -422,7 +425,7 @@ void test_gvs_monitor_end_notification_retries_without_accepting_stale_video(voi
     TEST_ASSERT_INT_EQ(0, result.hangup_reply ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, monitor.media_ready ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
-    TEST_ASSERT_INT_EQ(7, (int)monitor.generation);
+    TEST_ASSERT_INT_EQ(8, (int)monitor.generation);
     /* A duplicate end must not delay recovery or trigger a request flood. */
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
         preview_status, sizeof(preview_status), 0x01020304U, 300U, &result));
@@ -457,8 +460,10 @@ void test_gvs_monitor_end_notification_retries_without_accepting_stale_video(voi
     TEST_ASSERT_INT_EQ(0x04, action.opcode);
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
         confirmation, sizeof(confirmation), 0x01020304U, 2201U, &result));
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
         station, local, 0x01020304U, 7U, 2202U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, 8U, 2202U, &result));
     TEST_ASSERT_INT_EQ(1, monitor.media_ready ? 1 : 0);
     /* A subsequent real end must start another bounded retry. */
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
@@ -516,14 +521,18 @@ void test_gvs_monitor_persistent_preview_resumes_after_peer_end(void) {
     TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, result.retry_ready ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
-    TEST_ASSERT_INT_EQ(7, (int)monitor.generation);
+    TEST_ASSERT_INT_EQ(8, (int)monitor.generation);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, 8U, 200U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 200U, &action));
     TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(0x04, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, 8U, 200U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
         confirmation, sizeof(confirmation), 0x01020304U, 201U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
-        local, 0x01020304U, 7U, 202U, &result));
+        local, 0x01020304U, 8U, 202U, &result));
 }
 
 void test_gvs_monitor_preview_retry_waits_for_stop_ack(void) {
@@ -612,10 +621,17 @@ void test_gvs_monitor_accepts_peer_hangup_while_retry_stopping(void) {
         hangup, sizeof(hangup), 0x01020304U, 203U, &result));
     TEST_ASSERT_INT_EQ(0, result.retry_ready ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
-    TEST_ASSERT_INT_EQ((int)generation, (int)monitor.generation);
+    TEST_ASSERT_INT_EQ((int)(generation + 1U), (int)monitor.generation);
 
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
         station, local, 0x01020304U, monitor.generation, 204U, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 204U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
+        confirmation, sizeof(confirmation), 0x01020304U, 205U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, monitor.generation, 206U, &result));
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, monitor.state);
 }
 

@@ -16,6 +16,7 @@ DF_MEDIA_SOURCES:= \
 	$(PKG_BUILD_DIR)/src/media_credentials.c \
 	$(PKG_BUILD_DIR)/src/media_encoder.c \
 	$(PKG_BUILD_DIR)/src/media_frame_queue.c \
+	$(PKG_BUILD_DIR)/src/media_reconnect_frame.c \
 	$(PKG_BUILD_DIR)/src/media_module_config.c \
 	$(PKG_BUILD_DIR)/src/media_session.c \
 	$(PKG_BUILD_DIR)/src/media_session_manager.c
@@ -24,7 +25,7 @@ define Package/doorfast-media
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Doorfast optional H.264 preview media module
-  DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libx264
+  DEPENDS:=+doorfast +ffmpeg +libffmpeg-full +libx264 +libjpeg-turbo
 endef
 
 define Package/doorfast-media/description
@@ -42,7 +43,7 @@ define Build/Compile
 	$(TARGET_CC) $(TARGET_CFLAGS) $(TARGET_CPPFLAGS) -D_DEFAULT_SOURCE \
 		-std=c17 -Wall -Wextra -Werror -pedantic -fPIC -shared \
 		-Wl,-z,defs -I$(PKG_BUILD_DIR)/src $(DF_MEDIA_SOURCES) \
-		-o $(PKG_BUILD_DIR)/media-v3.so
+		-o $(PKG_BUILD_DIR)/media-v3.so -ljpeg
 endef
 
 define Package/doorfast-media/install

@@ -547,6 +547,14 @@ void test_runtime_ubus_media_controls_require_current_generation(void) {
     TEST_ASSERT_INT_EQ(7, (int)status.sessions[0].generation);
     TEST_ASSERT_INT_EQ(2, (int)status.sessions[0].queue_drops);
     TEST_ASSERT_INT_EQ(0, status.has_credential_text);
+    test.sessions[0].state = DF_MEDIA_SESSION_FAILED;
+    test.sessions[0].ready = false;
+    test.sessions[0].encoder_running = false;
+    test.sessions[0].last_error = DF_MEDIA_ERROR_RECONNECT_FRAME;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_read_media_status(&service, &status));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_RECONNECT_FRAME, status.sessions[0].last_error);
+    TEST_ASSERT_INT_EQ(0, status.sessions[0].ready);
+    TEST_ASSERT_INT_EQ(0, status.sessions[0].encoder_running);
     df_runtime_ubus_stop(&service);
 }
 

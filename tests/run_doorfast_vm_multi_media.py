@@ -23,6 +23,7 @@ MEDIA_SOURCES = (
     "media_encoder.c",
     "media_frame_queue.c",
     "media_module_config.c",
+    "media_reconnect_frame.c",
     "media_session.c",
     "media_session_manager.c",
 )
@@ -109,11 +110,17 @@ def _build_harness(source_root: Path, output: Path) -> Path:
     if missing:
         raise RuntimeError("media ABI v3 source set is incomplete: " + ", ".join(missing))
     binary = output / "media-v3-acceptance"
+    jpeg_include = Path("/opt/homebrew/include")
+    jpeg_lib = Path("/opt/homebrew/lib")
+    jpeg_flags = []
+    if (jpeg_include / "jpeglib.h").is_file():
+        jpeg_flags = [f"-I{jpeg_include}", f"-L{jpeg_lib}"]
     command = [
         os.environ.get("CC", "cc"), "-D_DEFAULT_SOURCE", "-std=c17",
-        "-Wall", "-Wextra", "-Werror", "-pedantic", f"-I{source_dir}",
+        "-Wall", "-Wextra", "-Werror", "-pedantic", *jpeg_flags,
+        f"-I{source_dir}",
         str(SUPPORT / "media_v3_acceptance.c"),
-        *(str(path) for path in sources), "-o", str(binary),
+        *(str(path) for path in sources), "-o", str(binary), "-ljpeg",
     ]
     compiled = subprocess.run(command, text=True, capture_output=True, timeout=45)
     if compiled.returncode:
