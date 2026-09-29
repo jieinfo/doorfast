@@ -135,6 +135,23 @@ static int df_media_session_manager_stop_resources(
     return result;
 }
 
+static void df_media_session_manager_record_cooldown(
+    struct df_media_session_manager *manager,
+    const struct df_media_session *session) {
+    size_t index;
+
+    if (manager == NULL || session == NULL ||
+        session->purpose != DF_MEDIA_SESSION_PREVIEW ||
+        manager->station_cooldown_until_ms == NULL) return;
+    for (index = 0U; index < manager->config.station_count; index++) {
+        if (strcmp(manager->stations[index].id, session->station_id) == 0) {
+            manager->station_cooldown_until_ms[index] =
+                session->monitor.cooldown_until_ms;
+            return;
+        }
+    }
+}
+
 static int df_media_session_manager_emit_stop_best_effort(
     struct df_media_session_manager *manager,
     struct df_media_session *session, uint64_t now_ms) {
@@ -146,6 +163,7 @@ static int df_media_session_manager_emit_stop_best_effort(
             now_ms) != DF_OK ||
         df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
         return DF_ERR_IO;
+    df_media_session_manager_record_cooldown(manager, session);
     if (action.send && manager->callbacks.emit_control(action.destination,
             session->station_ipv4, action.source, action.family,
             action.opcode, action.payload, action.payload_length,
@@ -195,10 +213,12 @@ static void df_media_session_manager_free_config(
         }
     }
     free(manager->stations);
+    free(manager->station_cooldown_until_ms);
     free(manager->go2rtc_host);
     free(manager->rtsp_username);
     free(manager->credentials_path);
     manager->stations = NULL;
+    manager->station_cooldown_until_ms = NULL;
     manager->go2rtc_host = NULL;
     manager->rtsp_username = NULL;
     manager->credentials_path = NULL;
@@ -213,7 +233,10 @@ static int df_media_session_manager_copy_config(
     if (config->station_count > 0U) {
         manager->stations = calloc(config->station_count,
             sizeof(*manager->stations));
-        if (manager->stations == NULL) return DF_ERR_IO;
+        manager->station_cooldown_until_ms = calloc(config->station_count,
+            sizeof(*manager->station_cooldown_until_ms));
+        if (manager->stations == NULL ||
+            manager->station_cooldown_until_ms == NULL) return DF_ERR_IO;
     }
     manager->config.stations = manager->stations;
     for (index = 0U; index < config->station_count; index++) {
@@ -547,6 +570,17 @@ int df_media_session_manager_start(struct df_media_session_manager *manager,
     result = df_media_session_prepare(session, station, station_ipv4, purpose,
         now_ms);
     if (result != DF_OK) return DF_ERR_INVALID;
+    if (purpose == DF_MEDIA_SESSION_PREVIEW) {
+        size_t station_index;
+        for (station_index = 0U;
+             station_index < manager->config.station_count; station_index++) {
+            if (strcmp(manager->stations[station_index].id, station_id) == 0) {
+                session->monitor.cooldown_until_ms =
+                    manager->station_cooldown_until_ms[station_index];
+                break;
+            }
+        }
+    }
     proposed_generation = manager->next_generation + 1U;
     resource_hooks = manager->resource_hooks;
     session->stop_resources = resource_hooks.stop;
@@ -717,6 +751,7 @@ static int df_media_session_manager_preempt_preview(
             session->monitor = previous_monitor;
             return DF_ERR_IO;
         }
+        df_media_session_manager_record_cooldown(manager, session);
     }
     return df_media_session_manager_stop_resources(session);
 }
@@ -866,6 +901,7 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
                     now_ms) != DF_OK ||
                 df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
                 return DF_ERR_INVALID;
+            df_media_session_manager_record_cooldown(manager, session);
             if (action.send && manager->callbacks.emit_control(
                     action.destination, session->station_ipv4, action.source,
                     action.family, action.opcode, action.payload,
