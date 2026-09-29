@@ -1268,11 +1268,11 @@ void test_media_session_manager_retries_stalled_video_session(void) {
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PUBLISHING, session->state);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
         DF_MEDIA_MODULE_COMMAND_VIEWER, &key, true, 302U));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 1299U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 4299U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 1U), (int)trace.control_count);
     trace.fail_control = true;
     TEST_ASSERT_INT_EQ(DF_ERR_IO,
-        df_media_session_manager_tick(&manager, 1300U));
+        df_media_session_manager_tick(&manager, 4300U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 2U), (int)trace.control_count);
     TEST_ASSERT_INT_EQ(1, session->monitor.retry_waiting ? 1 : 0);
     frame.opcode = 0x84U;
@@ -1280,49 +1280,49 @@ void test_media_session_manager_retries_stalled_video_session(void) {
     frame.payload_length = sizeof(confirmation);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_media_session_manager_receive_control(&manager, &frame,
-            session->station_ipv4, 1300U));
+            session->station_ipv4, 4300U));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_video(&manager,
-        &partial, session->station_ipv4, 1300U));
+        &partial, session->station_ipv4, 4300U));
     TEST_ASSERT_INT_EQ(1, session->video.buffer == NULL);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_session_manager_push_jpeg(
         &manager, session->station, config.local, session->station_ipv4,
-        jpeg, sizeof(jpeg), 640U, 480U, 1300U));
+        jpeg, sizeof(jpeg), 640U, 480U, 4300U));
     status.session_count = 1U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
     TEST_ASSERT_INT_EQ(1, entry.ready ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 1301U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 4301U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 2U), (int)trace.control_count);
     trace.fail_control = false;
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 2299U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 5299U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 2U), (int)trace.control_count);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 2300U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 5300U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 3U), (int)trace.control_count);
     TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, session->monitor.state);
     TEST_ASSERT_INT_EQ(1, df_media_encoder_is_running(&session->encoder) ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_session_manager_push_jpeg(
         &manager, session->station, config.local, session->station_ipv4,
-        jpeg, sizeof(jpeg), 640U, 480U, 2301U));
+        jpeg, sizeof(jpeg), 640U, 480U, 5301U));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_video(&manager,
-        &partial, session->station_ipv4, 2301U));
+        &partial, session->station_ipv4, 5301U));
     TEST_ASSERT_INT_EQ(1, session->video.buffer == NULL);
     /* Repeated notifications neither ACK nor reset the retry schedule. */
     frame.opcode = 0x02U;
     frame.payload = preview_status;
     frame.payload_length = sizeof(preview_status);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
-        &frame, session->station_ipv4, 2302U));
+        &frame, session->station_ipv4, 5302U));
     TEST_ASSERT_INT_EQ((int)(controls_before_end + 3U), (int)trace.control_count);
     TEST_ASSERT_INT_EQ((int)(first_generation + 1U), (int)session->media_generation);
     TEST_ASSERT_INT_EQ(1, session->viewer_active ? 1 : 0);
     TEST_ASSERT_INT_EQ(1, df_media_encoder_is_running(&session->encoder) ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 2302U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 5302U));
     TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
     frame.opcode = 0x84U;
     frame.payload = confirmation;
     frame.payload_length = sizeof(confirmation);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
-        &frame, session->station_ipv4, 2302U));
+        &frame, session->station_ipv4, 5302U));
     TEST_ASSERT_INT_EQ(original_fd, session->encoder.input_fd);
     TEST_ASSERT_INT_EQ((int)first_generation, (int)session->generation);
     TEST_ASSERT_INT_EQ((int)(first_generation + 1U),
@@ -1331,14 +1331,14 @@ void test_media_session_manager_retries_stalled_video_session(void) {
     /* The replacement station starts numbering again at one. */
     partial.frame_no = 1U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_video(&manager,
-        &partial, session->station_ipv4, 2399U));
+        &partial, session->station_ipv4, 5399U));
     status.session_count = 1U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
     TEST_ASSERT_INT_EQ(1, entry.ready ? 1 : 0);
     partial.chunk_index = 2U;
     partial.payload = jpeg + 10U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_video(&manager,
-        &partial, session->station_ipv4, 2400U));
+        &partial, session->station_ipv4, 5400U));
     status.session_count = 1U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
     TEST_ASSERT_INT_EQ(1, entry.ready ? 1 : 0);
@@ -1346,21 +1346,21 @@ void test_media_session_manager_retries_stalled_video_session(void) {
     TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
 
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 5199U));
+        df_media_session_manager_tick(&manager, 8199U));
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
         session->station, config.local, session->station_ipv4, jpeg,
-        sizeof(jpeg), 640U, 480U, 5199U));
+        sizeof(jpeg), 640U, 480U, 8199U));
     controls_before_stall = trace.control_count;
     /* Without an explicit peer end, retain the existing stall fallback. */
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 27198U));
+        df_media_session_manager_tick(&manager, 30198U));
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 35198U));
+        df_media_session_manager_tick(&manager, 38198U));
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, 35199U));
+        df_media_session_manager_tick(&manager, 38199U));
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     TEST_ASSERT_INT_EQ(1,
         df_media_encoder_is_running(&session->encoder) ? 1 : 0);
@@ -1369,7 +1369,7 @@ void test_media_session_manager_retries_stalled_video_session(void) {
     TEST_ASSERT_INT_EQ(0, trace.resource_stops);
     TEST_ASSERT_INT_EQ((int)(controls_before_stall + 2U),
         (int)trace.control_count);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 35200U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 38200U));
     TEST_ASSERT_INT_EQ((int)(controls_before_stall + 3U),
         (int)trace.control_count);
     TEST_ASSERT_INT_EQ(0x03, trace.last_control_family);
@@ -1384,22 +1384,22 @@ void test_media_session_manager_retries_stalled_video_session(void) {
     frame.payload = NULL;
     frame.payload_length = 0U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
-        &frame, stations[0].ipv4, 35201U));
+        &frame, stations[0].ipv4, 38201U));
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_VIEWING, session->state);
     TEST_ASSERT_INT_EQ((int)(first_generation + 2U),
         (int)session->media_generation);
     TEST_ASSERT_INT_EQ(1, session->viewer_active ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 35201U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 38201U));
     TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     key.station_id = "gate_main";
     key.generation = first_generation;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
-        DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 35201U));
+        DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 38201U));
     TEST_ASSERT_INT_EQ(1, df_media_session_manager_active(&manager));
     frame.opcode = 0x82U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
-        &frame, stations[0].ipv4, 35202U));
+        &frame, stations[0].ipv4, 38202U));
     TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
 
     df_media_session_manager_destroy(&manager);
@@ -1807,30 +1807,30 @@ static void manager_keeps_producer_across_busy_retry(uint8_t end_reason) {
     TEST_ASSERT_INT_EQ((int)key.generation, (int)entry.generation);
     TEST_ASSERT_INT_EQ((int)original_pid, (int)session->encoder.pid);
     TEST_ASSERT_INT_EQ(1, session->video.buffer == NULL);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 1200U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 4200U));
     control.opcode = 0x50U;
     control.payload = NULL;
     control.payload_length = 0U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
-        &control, session->station_ipv4, 1201U));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 2200U));
+        &control, session->station_ipv4, 4201U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 5200U));
     control.opcode = 0x84U;
     control.payload = confirmation;
     control.payload_length = sizeof(confirmation);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
-        &control, session->station_ipv4, 2201U));
+        &control, session->station_ipv4, 5201U));
     /* Old first half must not combine with this new attempt's second half. */
     fragment.chunk_index = 2U;
     fragment.payload = jpeg + 10U;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_video(&manager,
-        &fragment, session->station_ipv4, 2202U));
+        &fragment, session->station_ipv4, 5202U));
     TEST_ASSERT_INT_EQ(1, (int)session->frames_received);
     fragment.chunk_index = 1U;
     fragment.payload = jpeg;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_video(&manager,
-        &fragment, session->station_ipv4, 2203U));
+        &fragment, session->station_ipv4, 5203U));
     TEST_ASSERT_INT_EQ(2, (int)session->frames_received);
-    TEST_ASSERT_INT_EQ(2203, (int)session->last_frame_ms);
+    TEST_ASSERT_INT_EQ(5203, (int)session->last_frame_ms);
     TEST_ASSERT_INT_EQ(DF_MEDIA_SOURCE_LIVE, session->source_state);
     TEST_ASSERT_INT_EQ((int)(key.generation + 1U), (int)session->media_generation);
     TEST_ASSERT_INT_EQ((int)key.generation, (int)session->encoder.generation);
@@ -1853,7 +1853,7 @@ static void manager_keeps_producer_across_busy_retry(uint8_t end_reason) {
         free(captured);
     }
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
-        DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 2300U));
+        DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 5300U));
     TEST_ASSERT_INT_EQ(0, df_media_encoder_is_running(&session->encoder));
     TEST_ASSERT_INT_EQ(1, session->reconnect_frame.data == NULL);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));

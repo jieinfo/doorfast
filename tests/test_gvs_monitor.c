@@ -460,7 +460,7 @@ void test_gvs_monitor_end_notification_acknowledges_and_retries(void) {
         preview_status, sizeof(preview_status), 0x01020304U, 300U, &result));
     TEST_ASSERT_INT_EQ(0, result.retrying ? 1 : 0);
     TEST_ASSERT_INT_EQ(0, result.hangup_reply ? 1 : 0);
-    TEST_ASSERT_INT_EQ(1200, (int)monitor.next_action_ms);
+    TEST_ASSERT_INT_EQ(4200, (int)monitor.next_action_ms);
     /* Keepalives remain valid while the replacement request is waiting. */
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x51U,
         NULL, 0U, 0x01020304U, 301U, &result));
@@ -472,33 +472,41 @@ void test_gvs_monitor_end_notification_acknowledges_and_retries(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, monitor_receive(&monitor, station,
         local, 0x84U, confirmation, sizeof(confirmation), 0x01020304U,
         302U, &result));
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 1199U, &action));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 4199U, &action));
     TEST_ASSERT_INT_EQ(0, action.send ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 1200U, &action));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 4200U, &action));
     TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(0x04, action.opcode);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
-        station, local, 0x01020304U, 7U, 1201U, &result));
+        station, local, 0x01020304U, 7U, 4201U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
-        preview_status, sizeof(preview_status), 0x01020304U, 1202U, &result));
-    TEST_ASSERT_INT_EQ(2200, (int)monitor.next_action_ms);
+        preview_status, sizeof(preview_status), 0x01020304U, 4202U, &result));
+    TEST_ASSERT_INT_EQ(5200, (int)monitor.next_action_ms);
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x50U,
-        NULL, 0U, 0x01020304U, 1203U, &result));
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 2200U, &action));
+        NULL, 0U, 0x01020304U, 4203U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 5200U, &action));
     TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(0x04, action.opcode);
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
-        confirmation, sizeof(confirmation), 0x01020304U, 2201U, &result));
+        confirmation, sizeof(confirmation), 0x01020304U, 5201U, &result));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
-        station, local, 0x01020304U, 7U, 2202U, &result));
+        station, local, 0x01020304U, 7U, 5202U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
-        station, local, 0x01020304U, 8U, 2202U, &result));
+        station, local, 0x01020304U, 8U, 5202U, &result));
     TEST_ASSERT_INT_EQ(1, monitor.media_ready ? 1 : 0);
     /* A subsequent real end must start another bounded retry. */
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x02U,
-        preview_status, sizeof(preview_status), 0x01020304U, 2300U, &result));
+        preview_status, sizeof(preview_status), 0x01020304U, 5300U, &result));
     TEST_ASSERT_INT_EQ(1, result.retrying ? 1 : 0);
-    TEST_ASSERT_INT_EQ(3300, (int)monitor.next_action_ms);
+    TEST_ASSERT_INT_EQ(9300, (int)monitor.next_action_ms);
+    /* Reject a deadline that would wrap without altering the live attempt. */
+    {
+        struct df_gvs_monitor before = monitor;
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, monitor_receive(&monitor, station,
+            local, 0x02U, preview_status, sizeof(preview_status),
+            0x01020304U, UINT64_MAX - 3999U, &result));
+        TEST_ASSERT_INT_EQ(0, memcmp(&before, &monitor, sizeof(monitor)));
+    }
 }
 
 void test_gvs_monitor_end_notification_during_stop_does_not_reply_or_revive(void) {
