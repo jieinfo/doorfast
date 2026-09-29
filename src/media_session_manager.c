@@ -1080,8 +1080,12 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
                     action.payload_length, manager->callbacks.context) != DF_OK) {
                 bool retry_stop = previous_monitor.retry_after_stop;
                 uint64_t next_action_ms = session->monitor.next_action_ms;
+                uint64_t next_keepalive_ms =
+                    session->monitor.keepalive_next_ms;
 
                 session->monitor = previous_monitor;
+                if (action.opcode == 0x51U)
+                    session->monitor.keepalive_next_ms = next_keepalive_ms;
                 /* A failed replacement send must keep the confirmation
                  * gate closed without retrying on every runtime tick. */
                 if (action.opcode == 0x04U && previous_monitor.peer_stop_seen &&

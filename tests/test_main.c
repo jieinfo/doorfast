@@ -250,6 +250,7 @@ void test_gvs_monitor_retries_after_unconfirmed_response(void);
 void test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit(void);
 void test_gvs_monitor_persistent_preview_keeps_retrying(void);
 void test_gvs_monitor_persistent_preview_retries_after_first_frame_timeout(void);
+void test_gvs_monitor_persistent_preview_sends_keepalive_and_accepts_reply(void);
 void test_gvs_monitor_busy_response_retries_beyond_three_requests(void);
 void test_gvs_monitor_busy_cleanup_counts_rejections_not_requests(void);
 void test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout(void);
@@ -342,7 +343,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 174;
+    return 175;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -476,7 +477,7 @@ int main(int argc, char **argv) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(174, test_suite_count());
+    TEST_ASSERT_INT_EQ(175, test_suite_count());
     test_runtime_id_encodes_random_bytes_and_validates_exact_lowercase_hex();
     test_runtime_id_clears_output_when_random_fill_fails_or_is_short();
     test_event_stream_serializes_exact_json();
@@ -664,6 +665,7 @@ int main(int argc, char **argv) {
     test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit();
     test_gvs_monitor_persistent_preview_keeps_retrying();
     test_gvs_monitor_persistent_preview_retries_after_first_frame_timeout();
+    test_gvs_monitor_persistent_preview_sends_keepalive_and_accepts_reply();
     test_gvs_monitor_busy_response_retries_beyond_three_requests();
     test_gvs_monitor_busy_cleanup_counts_rejections_not_requests();
     test_gvs_monitor_admits_only_current_media_and_stops_locally_after_timeout();
