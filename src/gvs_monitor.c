@@ -444,7 +444,9 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         frame->opcode == 0x02U) {
         if (frame->payload_length != 1U || frame->payload == NULL ||
             frame->payload[0] > 1U ||
-            now_ms > UINT64_MAX - DF_GVS_MONITOR_REQUEST_INTERVAL_MS)
+            now_ms > UINT64_MAX - (frame->payload[0] == 1U ?
+                DF_GVS_MONITOR_PEER_RETRY_DELAY_MS :
+                DF_GVS_MONITOR_REQUEST_INTERVAL_MS))
             return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
         if (frame->payload[0] == 1U) {
@@ -463,7 +465,7 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             }
             monitor->state = DF_GVS_MONITOR_REQUESTING;
             monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
-            monitor->next_action_ms = now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+            monitor->next_action_ms = now_ms + DF_GVS_MONITOR_PEER_RETRY_DELAY_MS;
             monitor->first_frame_deadline_ms = 0U;
             monitor->status_retry_deadline_ms = 0U;
             monitor->keepalive_next_ms = 0U;
