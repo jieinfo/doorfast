@@ -100,7 +100,7 @@ int df_media_reconnect_frame_create(uint16_t width, uint16_t height,
     unsigned int start_x;
     unsigned int start_y;
     size_t row_length;
-    int result = DF_ERR_IO;
+    volatile int result = DF_ERR_IO;
 
     if (out == NULL) return DF_ERR_INVALID;
     memset(out, 0, sizeof(*out));
