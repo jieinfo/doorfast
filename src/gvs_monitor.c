@@ -101,13 +101,14 @@ int df_gvs_monitor_request_retry(struct df_gvs_monitor *monitor,
 static int df_gvs_monitor_restart_after_peer_stop(
     struct df_gvs_monitor *monitor, uint64_t now_ms) {
     if (monitor == NULL || now_ms < monitor->last_now_ms ||
-        monitor->generation == UINT64_MAX)
+        monitor->generation == UINT64_MAX ||
+        now_ms > UINT64_MAX - DF_GVS_MONITOR_PEER_RETRY_DELAY_MS)
         return DF_ERR_INVALID;
     monitor->last_now_ms = now_ms;
     monitor->generation++;
     monitor->state = DF_GVS_MONITOR_REQUESTING;
     monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
-    monitor->next_action_ms = now_ms;
+    monitor->next_action_ms = now_ms + DF_GVS_MONITOR_PEER_RETRY_DELAY_MS;
     monitor->first_frame_deadline_ms = 0U;
     monitor->status_retry_deadline_ms = 0U;
     monitor->keepalive_next_ms = 0U;
@@ -128,6 +129,7 @@ int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *monitor,
     const uint8_t local[6], const uint8_t station[6], uint32_t station_ipv4,
     uint64_t generation, uint64_t now_ms) {
     uint64_t first_frame_timeout_ms;
+    uint64_t cooldown_until_ms;
     bool persistent;
 
     if (monitor == NULL || !df_gvs_monitor_nonzero(local) ||
@@ -142,6 +144,7 @@ int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *monitor,
     first_frame_timeout_ms = monitor->first_frame_timeout_ms == 0U ?
         DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS :
         monitor->first_frame_timeout_ms;
+    cooldown_until_ms = monitor->cooldown_until_ms;
     persistent = monitor->persistent;
     memset(monitor, 0, sizeof(*monitor));
     monitor->first_frame_timeout_ms = first_frame_timeout_ms;
@@ -152,8 +155,10 @@ int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *monitor,
     monitor->station_ipv4 = station_ipv4;
     monitor->generation = generation;
     monitor->last_now_ms = now_ms;
+    monitor->cooldown_until_ms = cooldown_until_ms;
     monitor->status_retry_deadline_ms = 0U;
-    monitor->next_action_ms = now_ms;
+    monitor->next_action_ms = now_ms < cooldown_until_ms ?
+        cooldown_until_ms : now_ms;
     return DF_OK;
 }
 
@@ -635,12 +640,14 @@ int df_gvs_monitor_set_viewing(struct df_gvs_monitor *monitor,
 int df_gvs_monitor_stop(struct df_gvs_monitor *monitor, uint64_t generation,
     uint64_t now_ms) {
     if (monitor == NULL || generation == 0U || generation != monitor->generation ||
-        now_ms < monitor->last_now_ms || !df_gvs_monitor_active(monitor->state)) {
+        now_ms < monitor->last_now_ms || !df_gvs_monitor_active(monitor->state) ||
+        now_ms > UINT64_MAX - DF_GVS_MONITOR_USER_STOP_COOLDOWN_MS) {
         return DF_ERR_INVALID;
     }
     monitor->last_now_ms = now_ms;
     monitor->state = DF_GVS_MONITOR_STOPPING;
     monitor->next_action_ms = now_ms;
+    monitor->cooldown_until_ms = now_ms + DF_GVS_MONITOR_USER_STOP_COOLDOWN_MS;
     monitor->status_retry_deadline_ms = 0U;
     monitor->status_retry_pending = false;
     monitor->retry_after_stop = false;

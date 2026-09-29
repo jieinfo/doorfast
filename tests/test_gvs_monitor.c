@@ -523,6 +523,35 @@ void test_gvs_monitor_end_notification_during_stop_does_not_reply_or_revive(void
     TEST_ASSERT_INT_EQ(0, action.send ? 1 : 0);
 }
 
+void test_gvs_monitor_user_stop_cools_down_next_start(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    struct df_gvs_monitor monitor = {0};
+    struct df_gvs_monitor_result result = {0};
+    struct df_gvs_monitor_action action = {0};
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start_with_generation(
+        &monitor, local, station, 0x01020304U, 7U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 100U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_stop(&monitor, 7U, 200U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 200U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x82U,
+        NULL, 0U, 0x01020304U, 201U, &result));
+    TEST_ASSERT_INT_EQ(1, result.stopped ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_IDLE, monitor.state);
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start_with_generation(
+        &monitor, local, station, 0x01020304U, 8U, 202U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 4199U, &action));
+    TEST_ASSERT_INT_EQ(0, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 4200U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0x04, action.opcode);
+}
+
 void test_gvs_monitor_persistent_preview_resumes_after_peer_end(void) {
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
     const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
@@ -553,15 +582,17 @@ void test_gvs_monitor_persistent_preview_resumes_after_peer_end(void) {
     TEST_ASSERT_INT_EQ(8, (int)monitor.generation);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
         station, local, 0x01020304U, 8U, 200U, &result));
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 200U, &action));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 4199U, &action));
+    TEST_ASSERT_INT_EQ(0, action.send ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 4200U, &action));
     TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(0x04, action.opcode);
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
         station, local, 0x01020304U, 8U, 200U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
-        confirmation, sizeof(confirmation), 0x01020304U, 201U, &result));
+        confirmation, sizeof(confirmation), 0x01020304U, 4201U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
-        local, 0x01020304U, 8U, 202U, &result));
+        local, 0x01020304U, 8U, 4202U, &result));
 }
 
 void test_gvs_monitor_preview_retry_waits_for_stop_ack(void) {
@@ -655,12 +686,12 @@ void test_gvs_monitor_accepts_peer_hangup_while_retry_stopping(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_monitor_admit_jpeg(&monitor,
         station, local, 0x01020304U, monitor.generation, 204U, &result));
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 204U, &action));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 4203U, &action));
     TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
     TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local, 0x84U,
-        confirmation, sizeof(confirmation), 0x01020304U, 205U, &result));
+        confirmation, sizeof(confirmation), 0x01020304U, 4204U, &result));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
-        station, local, 0x01020304U, monitor.generation, 206U, &result));
+        station, local, 0x01020304U, monitor.generation, 4205U, &result));
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, monitor.state);
 }
 
