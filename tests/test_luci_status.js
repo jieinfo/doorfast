@@ -152,6 +152,24 @@ assert.equal(JSON.stringify(model.formatStatus(payload)).includes('secretkey'),
              false);
 assert.equal(JSON.stringify(model.formatStatus(payload)).includes('synthetic'),
              false);
+const aggregateMediaPayload = JSON.parse(JSON.stringify(payload));
+aggregateMediaPayload.media = {
+    installed: true,
+    available: true,
+    status_revision: 1,
+    configured_capacity: 3,
+    effective_capacity: 3,
+    active_encoders: 0,
+    rtsp_password_set: true,
+    sessions: []
+};
+assert.doesNotThrow(() => model.formatStatus(aggregateMediaPayload));
+assert.deepEqual(model.formatStatus(aggregateMediaPayload).at(-1), {
+    title: '媒体预览', rows: [
+        ['状态', '空闲'], ['代次', '1'], ['有效容量', '3'], ['队列丢帧', '0'],
+        ['RTSP 密码', '已设置'], ['编码器', '已停止'], ['失败原因', '无']
+    ]
+});
 const deployment = {schema_version: 1, configured: true, preflight_safe: false,
     passive_only: true, upstream: {name: 'up', present: true, carrier: true},
     downstream: {name: 'down', present: true},
