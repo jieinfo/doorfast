@@ -932,7 +932,8 @@ static int df_runtime_ubus_hangup_handler(
         struct df_runtime_media_status media = {0};
         size_t index;
         if (df_runtime_ubus_read_media_status(platform->owner, &media) != DF_OK)
-            return UBUS_STATUS_UNKNOWN_ERROR;
+            return df_runtime_ubus_send_media_error(context, request, platform,
+                DF_ERR_IO);
         for (index = 0U; index < media.session_count; index++) {
             const struct df_media_session_status_v3 *session = &media.sessions[index];
             if (strcmp(session->station_id, station_id) == 0 && session->active &&
@@ -940,10 +941,21 @@ static int df_runtime_ubus_hangup_handler(
                 int result = df_runtime_ubus_hangup_station(platform->owner,
                     blobmsg_get_string(fields[DF_UBUS_HANGUP_RUNTIME_ID]),
                     station_id, session->generation);
-                return result == DF_OK ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+                if (result != DF_OK)
+                    return df_runtime_ubus_send_media_error(context, request,
+                        platform, result);
+                blob_buf_init(&platform->response, 0);
+                blobmsg_add_u8(&platform->response, "queued", 1);
+                blobmsg_add_u64(&platform->response, "generation",
+                    session->generation);
+                result = ubus_send_reply(context, request,
+                    platform->response.head);
+                blob_buf_free(&platform->response);
+                return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
             }
         }
-        return UBUS_STATUS_NOT_FOUND;
+        return df_runtime_ubus_send_media_error(context, request, platform,
+            DF_MEDIA_ERROR_STATION_NOT_FOUND);
     }
     if (fields[DF_UBUS_HANGUP_GENERATION] == NULL && fields[DF_UBUS_HANGUP_REASON] == NULL) {
         return UBUS_STATUS_INVALID_ARGUMENT;
@@ -986,13 +998,8 @@ static int df_runtime_ubus_call_handler(struct ubus_context *context,
     station_id = blobmsg_get_string(fields[DF_UBUS_CALL_STATION_ID]);
     result = df_runtime_ubus_call_station(platform->owner, runtime_id, station_id, &generation);
     if (result != DF_OK) {
-        if (result == DF_ERR_INVALID) return UBUS_STATUS_INVALID_ARGUMENT;
-        if (result == DF_MEDIA_ERROR_STATION_NOT_FOUND) return UBUS_STATUS_NOT_FOUND;
-        if (result == DF_MEDIA_ERROR_ROUTE_UNAVAILABLE)
-            return UBUS_STATUS_UNKNOWN_ERROR;
-        if (result == DF_MEDIA_ERROR_CAPACITY_BUSY)
-            return UBUS_STATUS_UNKNOWN_ERROR;
-        return UBUS_STATUS_UNKNOWN_ERROR;
+        return df_runtime_ubus_send_media_error(context, request, platform,
+            result);
     }
     blob_buf_init(&platform->response, 0);
     blobmsg_add_u8(&platform->response, "queued", 1);
