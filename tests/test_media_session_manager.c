@@ -135,6 +135,37 @@ static void manager_fixture(struct df_media_module_config_v3 *config,
     callbacks->context = trace;
 }
 
+void test_media_session_manager_outbound_call_lock(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    uint64_t preview_generation = 0U;
+    uint64_t call_generation = 0U;
+    uint64_t second_generation = 99U;
+
+    manager_fixture(&config, &callbacks, &trace);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(
+        &manager, "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U,
+        &preview_generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(
+        &manager, "gate_main", DF_MEDIA_SESSION_CALL, 101U,
+        &call_generation));
+    TEST_ASSERT_INT_EQ(1, call_generation != preview_generation);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL,
+        df_media_session_manager_find(&manager, "gate_main")->purpose);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_CAPACITY_BUSY,
+        df_media_session_manager_start(&manager, "gate_side",
+            DF_MEDIA_SESSION_CALL, 102U, &second_generation));
+    TEST_ASSERT_INT_EQ(0, second_generation);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_STATION_NOT_FOUND,
+        df_media_session_manager_start(&manager, "missing",
+            DF_MEDIA_SESSION_CALL, 103U, &second_generation));
+    df_media_session_manager_destroy(&manager);
+}
+
 void test_media_session_manager_admits_dynamic_station_pool(void) {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
@@ -1028,7 +1059,8 @@ void test_media_session_manager_preempts_oldest_preview_for_call(void) {
         df_media_session_manager_init(&manager, &config, &callbacks));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
         "gate_main", DF_MEDIA_SESSION_CALL, 100U, &first_generation));
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_CAPACITY_BUSY,
+        df_media_session_manager_start(&manager,
         "gate_side", DF_MEDIA_SESSION_CALL, 200U, &second_generation));
     TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_CAPACITY_BUSY,
         df_media_session_manager_incoming_call(&manager, "gate_garage",

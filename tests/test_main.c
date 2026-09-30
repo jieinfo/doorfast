@@ -171,6 +171,7 @@ void test_media_session_encoder_exit_releases_reconnect_frame(void);
 void test_media_session_viewer_release_preserves_publishing_state(void);
 void test_media_session_viewer_release_preserves_pre_media_state(void);
 void test_media_session_manager_admits_dynamic_station_pool(void);
+void test_media_session_manager_outbound_call_lock(void);
 void test_media_session_manager_rejects_admission_without_mutating_sessions(void);
 void test_media_session_manager_commands_require_exact_key(void);
 void test_media_session_manager_status_revisions_are_monotonic(void);
@@ -430,6 +431,7 @@ int main(int argc, char **argv) {
     test_media_session_viewer_release_preserves_publishing_state();
     test_media_session_viewer_release_preserves_pre_media_state();
     test_media_session_manager_admits_dynamic_station_pool();
+    test_media_session_manager_outbound_call_lock();
     test_media_session_manager_rejects_admission_without_mutating_sessions();
     test_media_session_manager_commands_require_exact_key();
     test_media_session_manager_status_revisions_are_monotonic();
