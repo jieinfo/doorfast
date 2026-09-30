@@ -46,6 +46,7 @@ struct df_runtime_call_request {
     uint16_t secondary_media_port;
     uint8_t duration_seconds;
     uint8_t reason;
+    char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
 };
 
 typedef int (*df_runtime_call_submit_fn)(
