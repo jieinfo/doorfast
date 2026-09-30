@@ -285,6 +285,10 @@ struct df_runtime_ubus_platform {
     bool connected;
 };
 
+static int df_runtime_ubus_send_media_error(struct ubus_context *context,
+    struct ubus_request_data *request,
+    struct df_runtime_ubus_platform *platform, int media_result);
+
 static void df_ubus_link_health(struct blob_buf *b, const char *key,
     const struct df_link_health *link) {
     void *table = blobmsg_open_table(b, key);
