@@ -147,6 +147,36 @@ run /api/v1/answer '{"runtime_id":"0123456789abcdef","generation":7,"primary_med
 run_method /api/v1/hangup \
   '{"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}' POST \
   >/dev/null
+run_method /api/v1/call \
+  '{"runtime_id":"0123456789abcdef","station_id":"gate_main"}' POST \
+  >"$workspace/call"
+tr -d '\r' <"$workspace/call" >"$workspace/call-normalized"
+grep -Eq '^Content-Type: application/json$' "$workspace/call-normalized"
+test "$(grep -c '^Content-Type:' "$workspace/call-normalized")" -eq 1
+awk 'BEGIN { body = 0 } /^$/ { body = 1; next } body { print }' \
+  "$workspace/call-normalized" >"$workspace/call-body"
+grep -Eq '^\{.*\}$' "$workspace/call-body"
+! grep -Fq 'Content-Type:' "$workspace/call-body"
+(
+  export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+    TEST_UBUS_FAIL_METHOD=call PATH_INFO=/api/v1/call \
+    REQUEST_METHOD=POST CONTENT_TYPE=application/json \
+    CONTENT_LENGTH=58
+  printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main"}' |
+    sh package/doorfast/files/doorfast-http.sh >"$workspace/call-failed"
+)
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/call-failed"
+grep -aFq '"code":"service_unavailable"' "$workspace/call-failed"
+(
+  export PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+    TEST_UBUS_EMPTY_METHOD=hangup PATH_INFO=/api/v1/hangup \
+    REQUEST_METHOD=POST CONTENT_TYPE=application/json \
+    CONTENT_LENGTH=58
+  printf '%s' '{"runtime_id":"0123456789abcdef","station_id":"gate_main"}' |
+    sh package/doorfast/files/doorfast-http.sh >"$workspace/hangup-empty"
+)
+grep -aFq 'Status: 503 Service Unavailable' "$workspace/hangup-empty"
+grep -aFq '"code":"service_unavailable"' "$workspace/hangup-empty"
 run /api/v1/call_elevator '{"runtime_id":"0123456789abcdef","direction":"up"}'
 run_method /api/v1/stations '' GET >"$workspace/stations"
 grep -aFq 'Content-Type: application/json' "$workspace/stations"
@@ -177,7 +207,7 @@ run_method /api/v1/monitor/viewer \
   '{"active":true,"generation":7,"station_id":"gate_main","runtime_id":"0123456789abcdef"}' POST \
   >"$workspace/monitor-viewer"
 run_method /api/v1/monitor/status '' GET >"$workspace/monitor-status"
-test "$(wc -l <"$trace" | tr -d ' ')" -eq 12
+test "$(wc -l <"$trace" | tr -d ' ')" -eq 15
 grep -Fxq 'call doorfast stations' "$trace"
 grep -Fxq 'call doorfast monitor_start {"runtime_id":"0123456789abcdef","station_id":"gate_main"}' "$trace"
 grep -Fxq 'call doorfast monitor_stop {"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' "$trace"

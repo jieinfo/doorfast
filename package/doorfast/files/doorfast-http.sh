@@ -557,12 +557,14 @@ case "$path" in
     exit 0
     ;;
 esac
+case "$path" in
+  /api/v1/hangup) [ -n "$body" ] || body='{}'; monitor_call hangup "$body"; exit 0 ;;
+  /api/v1/call) [ -n "$body" ] || body='{}'; monitor_call call "$body"; exit 0 ;;
+esac
 printf 'Content-Type: application/json\r\n\r\n'
 case "$path" in
   /api/v1/status) ubus call doorfast status ;;
   /api/v1/unlock) [ -n "$body" ] || body='{}'; ubus call doorfast unlock "$body" ;;
   /api/v1/answer) [ -n "$body" ] || body='{}'; ubus call doorfast answer "$body" ;;
-  /api/v1/hangup) [ -n "$body" ] || body='{}'; ubus call doorfast hangup "$body" ;;
-  /api/v1/call) [ -n "$body" ] || body='{}'; ubus call doorfast call "$body" ;;
   /api/v1/call_elevator) [ -n "$body" ] || body='{}'; ubus call doorfast call_elevator "$body" ;;
 esac
