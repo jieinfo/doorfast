@@ -26,10 +26,15 @@ class Map {
         return {
             option: (optionType, optionName, label) => {
                 assert.equal(optionType, Flag);
-                assert.equal(optionName, 'call_elev');
-                assert.equal(label, '来电自动向上召梯');
-                this.option = {disabled: '0'};
-                return this.option;
+                if (optionName === 'call_elev') {
+                    assert.equal(label, '来电自动向上召梯');
+                    this.callElev = {disabled: '0'};
+                    return this.callElev;
+                }
+                assert.equal(optionName, 'auto_unlock');
+                assert.equal(label, '来电自动解锁');
+                this.autoUnlock = {disabled: '0'};
+                return this.autoUnlock;
             }
         };
     }
@@ -45,10 +50,13 @@ const settings = new Function('form', 'view', source)(form, view);
 const rendered = settings.render();
 
 assert.equal(rendered.config, 'doorfast-automation');
-assert.equal(rendered.option.default, '0');
-assert.equal(rendered.option.rmempty, false);
-assert.match(rendered.option.description, /默认关闭/);
-assert.match(rendered.option.description, /仅在主机模式下生效/);
-assert.match(rendered.option.description, /向上召梯/);
+assert.equal(rendered.callElev.default, '0');
+assert.equal(rendered.callElev.rmempty, false);
+assert.equal(rendered.autoUnlock.default, '0');
+assert.equal(rendered.autoUnlock.rmempty, false);
+assert.match(source, /默认关闭/);
+assert.match(source, /仅在主机模式下生效/);
+assert.match(source, /向上召梯/);
+assert.match(source, /来电自动解锁/);
 assert.doesNotMatch(source, /require rpc/);
 assert.doesNotMatch(source, /automation_status/);

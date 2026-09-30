@@ -75,6 +75,7 @@ struct df_config {
     bool passive_only;
     bool active_host;
     int unlock_delay_seconds;
+    bool auto_unlock;
     int hangup_delay_seconds;
     bool call_elev;
     struct df_media_config media;

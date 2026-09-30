@@ -142,7 +142,7 @@ run_method() {
     printf '%s' "$2" | sh package/doorfast/files/doorfast-http.sh)
 }
 run /api/v1/status ''
-run /api/v1/unlock '{"runtime_id":"0123456789abcdef","generation":7}'
+run /api/v1/unlock '{"station_id":"gate_main"}'
 run /api/v1/answer '{"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}'
 run_method /api/v1/hangup \
   '{"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}' POST \
@@ -441,7 +441,7 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-unavailable"
 grep -aFq 'Status: 404 Not Found' "$workspace/audio-unavailable"
 grep -Fxq 'call doorfast status' "$trace"
-grep -Fxq 'call doorfast unlock {"runtime_id":"0123456789abcdef","generation":7}' "$trace"
+grep -Fxq 'call doorfast unlock {"station_id":"gate_main"}' "$trace"
 grep -Fxq 'call doorfast answer {"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}' "$trace"
 grep -Fxq 'call doorfast hangup {"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}' "$trace"
 grep -Fxq 'call doorfast call_elevator {"runtime_id":"0123456789abcdef","direction":"up"}' "$trace"

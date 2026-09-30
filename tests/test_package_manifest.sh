@@ -155,8 +155,10 @@ grep -F "option media_go2rtc_port '8554'" package/doorfast/files/doorfast.config
 test -f package/doorfast/files/doorfast-automation.config
 grep -F "config automation 'main'" package/doorfast/files/doorfast-automation.config
 ! grep -Fq 'option call_elev' package/doorfast/files/doorfast-automation.config
+grep -F "option auto_unlock '0'" package/doorfast/files/doorfast-automation.config
 ! grep -Fq 'call_elev' package/doorfast/files/doorfast.config
 ! grep -Fq 'call_elev_direction' package/doorfast/files/doorfast.config
+grep -F "option auto_unlock '0'" package/doorfast/files/doorfast.config
 grep -Eq 'doorfast-automation\.config.+/doorfast-automation' package/doorfast/Makefile
 grep -Fq 'procd_add_reload_trigger doorfast doorfast-automation' package/doorfast/files/doorfast.init
 grep -Fq -- '--call-elev "$call_elev"' package/doorfast/files/doorfast.init

@@ -233,8 +233,6 @@ void test_runtime_ubus_stub_validates_lifecycle_without_side_effects(void) {
         df_runtime_ubus_station_scan(&service, 120100U));
     TEST_ASSERT_INT_EQ(1, scan.active);
     TEST_ASSERT_INT_EQ(1, df_runtime_id_is_valid(service.runtime_id) ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, NULL, 1));
     TEST_ASSERT_INT_EQ(0, service.active_host ? 1 : 0);
     df_runtime_ubus_set_active_host(&service, true);
     TEST_ASSERT_INT_EQ(1, service.active_host ? 1 : 0);
@@ -651,7 +649,8 @@ void test_runtime_ubus_media_credentials_preserve_blank_and_redact(void) {
 
 static int submit_access(const struct df_gvs_access_request *request, void *context) {
     unsigned *calls = context;
-    TEST_ASSERT_INT_EQ(7, (int)request->session_generation);
+    TEST_ASSERT_INT_EQ(1, request->destination[0] == 0x32 ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, request->session_generation > 0U ? 1 : 0);
     (*calls)++;
     return DF_OK;
 }
@@ -663,6 +662,10 @@ void test_runtime_ubus_access_requires_active_host(void) {
         .state = DF_GVS_RINGING, .generation = 7,
         .peer = {0x32, 2, 1, 0, 1, 0},
     };
+    struct df_gvs_session station_session = {0};
+    struct df_station station = {.id = "gate_main", .enabled = true,
+        .logical_address = {0x32, 2, 1, 0, 1, 0}};
+    struct df_station_registry registry = {.items = &station, .count = 1};
     const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
     unsigned calls = 0;
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(
@@ -671,26 +674,76 @@ void test_runtime_ubus_access_requires_active_host(void) {
         &service, provide_runtime_status, &calls, 10));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(
         &service, &access, &session, local));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(
+        &service, &station_session, &registry));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, service.runtime_id, 7));
+        df_runtime_ubus_unlock_station(&service, "gate_main", 10));
     TEST_ASSERT_INT_EQ(0, (int)calls);
     df_runtime_ubus_set_active_host(&service, true);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, NULL, 7));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, "0000000000000000", 7));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, service.runtime_id, 0));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, service.runtime_id, 6));
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_runtime_ubus_unlock(&service, service.runtime_id, 7));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, service.runtime_id, 7));
-    TEST_ASSERT_INT_EQ(1, (int)calls);
+        df_runtime_ubus_unlock_station(&service, "gate_main", 10));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_unlock_station(&service, "gate_main", 10));
+    TEST_ASSERT_INT_EQ(2, (int)calls);
     df_runtime_ubus_stop(&service);
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
-        df_runtime_ubus_unlock(&service, NULL, 7));
+}
+
+struct station_access_trace {
+    unsigned calls;
+    uint8_t destination[6];
+};
+
+static int submit_station_access(const struct df_gvs_access_request *request,
+                                 void *context) {
+    struct station_access_trace *trace = context;
+
+    if (request == NULL || trace == NULL) return DF_ERR_INVALID;
+    memcpy(trace->destination, request->destination,
+        sizeof(trace->destination));
+    trace->calls++;
+    return DF_OK;
+}
+
+void test_runtime_ubus_unlock_targets_requested_station(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t main_address[6] = {0x32, 2, 1, 0, 1, 0};
+    const uint8_t side_address[6] = {0x32, 2, 1, 0, 2, 0};
+    struct df_station stations[] = {
+        {.id = "gate_main", .enabled = true,
+            .logical_address = {0x32, 2, 1, 0, 1, 0}},
+        {.id = "gate_side", .enabled = true,
+            .logical_address = {0x32, 2, 1, 0, 2, 0}},
+    };
+    const struct df_station_registry registry = {
+        .items = stations, .count = 2,
+    };
+    struct df_runtime_ubus service = {0};
+    struct df_gvs_access_control access;
+    struct df_gvs_session session = {0};
+    struct station_access_trace trace = {0};
+    unsigned status_calls = 0;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(
+        &access, "0011223344556677", 0, submit_station_access, &trace));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &service, provide_runtime_status, &status_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(
+        &service, &access, &session, local));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(
+        &service, &session, &registry));
+    df_runtime_ubus_set_active_host(&service, true);
+
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_unlock_station(&service, "gate_side", 10));
+    TEST_ASSERT_INT_EQ(1, (int)trace.calls);
+    TEST_ASSERT_INT_EQ(0, memcmp(side_address, trace.destination, 6));
+    TEST_ASSERT_INT_EQ(0, memcmp(session.peer, side_address, 6));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_unlock_station(&service, "gate_main", 11));
+    TEST_ASSERT_INT_EQ(2, (int)trace.calls);
+    TEST_ASSERT_INT_EQ(0, memcmp(main_address, trace.destination, 6));
+    TEST_ASSERT_INT_EQ(0, memcmp(session.peer, main_address, 6));
+    df_runtime_ubus_stop(&service);
 }
 
 static int submit_elevator(

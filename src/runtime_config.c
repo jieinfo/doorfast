@@ -21,6 +21,7 @@
 #define DF_SEEN_PROMISCUOUS (1ULL << 6)
 #define DF_SEEN_CAPTURE_AUTO (1ULL << 7)
 #define DF_SEEN_UNLOCK_DELAY (1ULL << 8)
+#define DF_SEEN_AUTO_UNLOCK (1ULL << 37)
 #define DF_SEEN_HANGUP_DELAY (1ULL << 9)
 #define DF_SEEN_CALL_ELEV (1ULL << 10)
 #define DF_SEEN_SYNC_STATE_PATH (1ULL << 11)
@@ -84,6 +85,7 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     runtime->config.passive_only = true;
     runtime->config.active_host = false;
     runtime->config.unlock_delay_seconds = -1;
+    runtime->config.auto_unlock = false;
     runtime->config.hangup_delay_seconds = -1;
     runtime->config.media.go2rtc_port = 8554U;
     runtime->config.media.encoder = DF_MEDIA_ENCODER_AUTO;
@@ -417,6 +419,11 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
         option = DF_SEEN_UNLOCK_DELAY;
         if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
         return df_parse_delay(value, &runtime->config.unlock_delay_seconds);
+    }
+    if (strcmp(name, "auto_unlock") == 0 || strcmp(name, "unlock_on_call") == 0) {
+        option = DF_SEEN_AUTO_UNLOCK;
+        if (df_claim_option(seen, option) != DF_OK) return DF_ERR_INVALID;
+        return df_parse_boolean(value, &runtime->config.auto_unlock);
     }
     if (strcmp(name, "hangup") == 0 || strcmp(name, "hangup_delay_seconds") == 0) {
         option = DF_SEEN_HANGUP_DELAY;

@@ -15,6 +15,7 @@ doorfast_gvs_identity=IS:2-1-101-1
 doorfast_indoor_ipaddr=
 doorfast_indoor_netmask=255.0.0.0
 automation_call_elev=
+automation_auto_unlock=
 group_present=0
 group_creation_succeeds=1
 
@@ -27,6 +28,10 @@ config_get() {
 	if [ "$current_config" = doorfast-automation ] &&
 	   [ "$3" = call_elev ]; then
 		value=$automation_call_elev
+	fi
+	if [ "$current_config" = doorfast-automation ] &&
+	   [ "$3" = auto_unlock ]; then
+		value=$automation_auto_unlock
 	fi
 	if [ "$current_config" = doorfast ]; then
 		case "$3" in
@@ -48,6 +53,7 @@ config_get_bool() {
 			enabled) value=$doorfast_enabled ;;
 			active_host) value=$doorfast_active_host ;;
 			call_elev) value=$doorfast_call_elev ;;
+			auto_unlock) value=0 ;;
 		esac
 	fi
 	eval "$1=\$value"
@@ -79,12 +85,17 @@ HOST_ADDRESS_STATE="$trace.host-address"
 
 start_service
 grep -Fxq -- '-q set doorfast-automation.main.call_elev=1' "$trace"
+grep -Fxq -- '-q set doorfast-automation.main.auto_unlock=0' "$trace"
+grep -Fxq -- '-q set doorfast.main.auto_unlock=0' "$trace"
 grep -Fxq -- '-q commit doorfast-automation' "$trace"
+grep -Fxq -- '-q commit doorfast' "$trace"
 
 : >"$trace"
 automation_call_elev=0
+automation_auto_unlock=1
 start_service
-test ! -s "$trace"
+grep -Fxq -- '-q set doorfast-automation.main.call_elev=0' "$trace"
+grep -Fxq -- '-q set doorfast.main.auto_unlock=1' "$trace"
 
 : >"$trace"
 automation_call_elev=
