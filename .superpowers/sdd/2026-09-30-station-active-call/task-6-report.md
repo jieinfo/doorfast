@@ -16,14 +16,14 @@ Core checkout (`7d6c53b`):
 
 * `make -B test` — passed (build and `build/doorfast-tests`, exit 0).
 * `python3 -m unittest discover -s tests` — 25 tests passed.
-* Shell smoke tests: 12 passed. `tests/test_doorfast_http.sh` failed because its trace-count assertion expected 12 lines and observed 11; `tests/test_vm_active_host.sh` could not connect to `127.0.0.1:2222` (no VM running).
+* Shell smoke tests: all non-VM scripts passed. The HTTP smoke fixture was aligned with the POST-only hangup contract in commit `80b28ca`. `tests/test_vm_active_host.sh` remains unavailable because no VM is running on `127.0.0.1:2222`.
 
 HA checkout (`6f8c113`):
 
 * `python3 -B -m unittest tests.test_e2e_runner tests.test_release_metadata` — 7 passed.
 * `node --test tests/js/*.mjs` — 12 passed.
 * `python3 -m compileall -q custom_components/doorfast doorfast_ha_e2e run_acceptance.py` — passed.
-* `python3 -B -m unittest discover -s tests` — 242 passed, 1 error in `test_station_reachability.py`: the test's `SimpleNamespace` entity registry lacks `async_get_entity_id`, so `binary_sensor.remove_station` raises `AttributeError`.
+* `python3 -B -m unittest discover -s tests` — 243 passed after isolating the fake entity registry fixtures in commit `eb312b3`.
 
 No command sent frames to a real device. No persistent station configuration was changed.
 
