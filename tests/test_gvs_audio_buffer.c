@@ -58,6 +58,10 @@ void test_gvs_audio_buffer(void) {
     TEST_ASSERT_INT_EQ(8, (int)s.buffered_bytes);
     TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_ERROR,
         df_gvs_audio_buffer_push(&b, a, sizeof(a), 3, 0, 260));
+    TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_STALE,
+        df_gvs_audio_buffer_push(&b, c, sizeof(c), 3, 7, 261));
+    TEST_ASSERT_INT_EQ(8, (int)b.generation);
+    TEST_ASSERT_INT_EQ(8, (int)b.length);
 
     df_gvs_audio_buffer_init(&incremental);
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
