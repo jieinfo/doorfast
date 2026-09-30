@@ -537,7 +537,7 @@ if [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then
   body="$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
 fi
 case "$path" in
-  /api/v1/status|/api/v1/unlock|/api/v1/answer|/api/v1/hangup|/api/v1/call_elevator) ;;
+  /api/v1/status|/api/v1/unlock|/api/v1/answer|/api/v1/hangup|/api/v1/call|/api/v1/call_elevator) ;;
   *)
     http_error '404 Not Found' 'unknown endpoint'
     exit 0
@@ -549,5 +549,6 @@ case "$path" in
   /api/v1/unlock) [ -n "$body" ] || body='{}'; ubus call doorfast unlock "$body" ;;
   /api/v1/answer) [ -n "$body" ] || body='{}'; ubus call doorfast answer "$body" ;;
   /api/v1/hangup) [ -n "$body" ] || body='{}'; ubus call doorfast hangup "$body" ;;
+  /api/v1/call) [ -n "$body" ] || body='{}'; ubus call doorfast call "$body" ;;
   /api/v1/call_elevator) [ -n "$body" ] || body='{}'; ubus call doorfast call_elevator "$body" ;;
 esac
