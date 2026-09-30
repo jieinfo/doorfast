@@ -541,10 +541,14 @@ if [ "$path" = /api/v1/call ] || [ "$path" = /api/v1/hangup ]; then
   case "${CONTENT_TYPE:-}" in application/json|application/json';'*) ;; *) http_error '415 Unsupported Media Type' 'application/json required'; exit 0;; esac
   runtime_id="$(json_field "$body" '@.runtime_id' || true)"
   station_id="$(json_field "$body" '@.station_id' || true)"
+  if [ "$path" = /api/v1/hangup ] && [ -z "$station_id" ]; then
+    case "$body" in *generation*|*reason*) : ;; *) http_error '400 Bad Request' 'invalid request'; exit 0;; esac
+  else
   [ "${#runtime_id}" -eq 16 ] && case "$runtime_id" in *[!0-9a-f]*) false;; esac || { http_error '400 Bad Request' 'invalid request'; exit 0; }
   [ -n "$station_id" ] && [ "${#station_id}" -le 32 ] || { http_error '400 Bad Request' 'invalid request'; exit 0; }
   case "$station_id" in [!a-z]*|*[!a-z0-9_]*) http_error '400 Bad Request' 'invalid request'; exit 0;; esac
-  body="{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\"}"
+    body="{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\"}"
+  fi
 fi
 case "$path" in
   /api/v1/status|/api/v1/unlock|/api/v1/answer|/api/v1/hangup|/api/v1/call|/api/v1/call_elevator) ;;

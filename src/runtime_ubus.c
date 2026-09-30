@@ -985,7 +985,13 @@ static int df_runtime_ubus_call_handler(struct ubus_context *context,
     runtime_id = blobmsg_get_string(fields[DF_UBUS_CALL_RUNTIME_ID]);
     station_id = blobmsg_get_string(fields[DF_UBUS_CALL_STATION_ID]);
     result = df_runtime_ubus_call_station(platform->owner, runtime_id, station_id, &generation);
-    if (result != DF_OK) return result == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT : UBUS_STATUS_BUSY;
+    if (result != DF_OK) {
+        if (result == DF_ERR_INVALID) return UBUS_STATUS_INVALID_ARGUMENT;
+        if (result == DF_MEDIA_ERROR_STATION_NOT_FOUND) return UBUS_STATUS_NOT_FOUND;
+        if (result == DF_MEDIA_ERROR_ROUTE_UNAVAILABLE) return UBUS_STATUS_UNAVAILABLE;
+        if (result == DF_MEDIA_ERROR_CAPACITY_BUSY) return UBUS_STATUS_BUSY;
+        return UBUS_STATUS_UNKNOWN_ERROR;
+    }
     blob_buf_init(&platform->response, 0);
     blobmsg_add_u8(&platform->response, "queued", 1);
     blobmsg_add_u64(&platform->response, "generation", generation);
@@ -1784,10 +1790,13 @@ int df_runtime_ubus_hangup_station(struct df_runtime_ubus *service,
         (void)snprintf(request.runtime_id, sizeof(request.runtime_id), "%s", service->runtime_id);
         (void)snprintf(request.station_id, sizeof(request.station_id), "%s", station_id);
         result = service->submit_call(&request, service->last_now_ms, service->call_context);
+        int enqueue_result = result;
+        result = df_runtime_media_module_command(service->media,
+            DF_MEDIA_MODULE_COMMAND_STOP, &key, false, service->last_now_ms);
+        if (enqueue_result != DF_OK) return enqueue_result;
         if (result != DF_OK) return result;
     }
-    return df_runtime_media_module_command(service->media,
-        DF_MEDIA_MODULE_COMMAND_STOP, &key, false, service->last_now_ms);
+    return DF_OK;
 }
 
 static int df_runtime_ubus_read_credential_status(
