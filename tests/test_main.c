@@ -118,11 +118,15 @@ void test_deployment_snapshot_treats_missing_evidence_as_unsafe(void);
 void test_pcap_ring_rotates_and_recovers_oldest_slot(void);
 void test_gvs_udp_prefix_handles_vlan_and_truncation(void);
 void test_gvs_udp_sender_replies_to_observed_peer_route(void);
+void test_gvs_udp_sender_emits_access_to_configured_route_without_observation(
+    void);
 void test_gvs_udp_sender_expires_and_refreshes_observed_peer_route(void);
 void test_gvs_udp_sender_transmits_peer_reply_with_runtime_header(void);
 void test_gvs_udp_sender_transmits_periodic_sync_and_counts_packets(void);
 void test_gvs_udp_sender_emits_exact_control_to_configured_route(void);
 void test_gvs_udp_sender_accepts_only_fresh_observed_preview_routes(void);
+void test_gvs_udp_sender_preserves_configured_route_after_preview_observation(
+    void);
 void test_gvs_udp_sender_binds_configured_source_address(void);
 void test_gvs_udp_sender_broadcasts_exact_station_scan_frame(void);
 void test_gvs_udp_presence_treats_unsendable_presence_actions_as_local_only(void);
@@ -562,11 +566,13 @@ int main(int argc, char **argv) {
     test_evidence_log_preserves_fixed_fields_and_rotates();
     test_gvs_udp_prefix_handles_vlan_and_truncation();
     test_gvs_udp_sender_replies_to_observed_peer_route();
+    test_gvs_udp_sender_emits_access_to_configured_route_without_observation();
     test_gvs_udp_sender_expires_and_refreshes_observed_peer_route();
     test_gvs_udp_sender_transmits_peer_reply_with_runtime_header();
     test_gvs_udp_sender_transmits_periodic_sync_and_counts_packets();
     test_gvs_udp_sender_emits_exact_control_to_configured_route();
     test_gvs_udp_sender_accepts_only_fresh_observed_preview_routes();
+    test_gvs_udp_sender_preserves_configured_route_after_preview_observation();
     test_evidence_classifier_separates_recent_and_control();
     test_evidence_classifier_keeps_observed_incoming_call();
     test_pcap_ring_rotates_and_recovers_oldest_slot();

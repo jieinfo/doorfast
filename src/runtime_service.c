@@ -1019,6 +1019,22 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 df_gvs_vendor_header_fields, NULL) != DF_OK) {
             return DF_ERR_IO;
         }
+        {
+            size_t station_index;
+            for (station_index = 0U;
+                 station_index < runtime->stations.count; station_index++) {
+                const struct df_station *station =
+                    &runtime->stations.items[station_index];
+                if (station->configured_ipv4 == 0U)
+                    continue;
+                if (df_gvs_udp_sender_set_configured_route(
+                        &udp_sender, station->logical_address,
+                        station->configured_ipv4) != DF_OK) {
+                    df_gvs_udp_sender_close(&udp_sender);
+                    return DF_ERR_INVALID;
+                }
+            }
+        }
         if (df_gvs_media_receiver_open(&media_receiver,
                 runtime->config.indoor_ipaddr, DF_GVS_AUDIO_PORT,
                 DF_GVS_VIDEO_PORT) != DF_OK) {
