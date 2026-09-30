@@ -920,6 +920,7 @@ static int df_runtime_ubus_hangup_handler(
     };
     uint32_t reason = 0U;
     const char *station_id;
+    int send_result;
 
     (void)method;
     if (message == NULL) {
@@ -958,8 +959,13 @@ static int df_runtime_ubus_hangup_handler(
                 return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
             }
         }
-        return df_runtime_ubus_send_media_error(context, request, platform,
-            DF_MEDIA_ERROR_STATION_NOT_FOUND);
+        blob_buf_init(&platform->response, 0);
+        blobmsg_add_u8(&platform->response, "queued", 0);
+        blobmsg_add_string(&platform->response, "state", "idle");
+        blobmsg_add_string(&platform->response, "station_id", station_id);
+        send_result = ubus_send_reply(context, request, platform->response.head);
+        blob_buf_free(&platform->response);
+        return send_result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
     }
     if (fields[DF_UBUS_HANGUP_GENERATION] == NULL && fields[DF_UBUS_HANGUP_REASON] == NULL) {
         return UBUS_STATUS_INVALID_ARGUMENT;
