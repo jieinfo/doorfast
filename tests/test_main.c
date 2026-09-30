@@ -86,6 +86,7 @@ void test_runtime_station_scan_retries_failed_emit_without_consuming_frame(void)
 void test_runtime_ubus_keeps_routes_for_more_than_four_configured_stations(void);
 void test_runtime_media_builds_module_config_without_guessing_route(void);
 void test_runtime_media_preempts_before_incoming_call_state_changes(void);
+void test_runtime_auto_unlock_uses_calling_station_once(void);
 void test_runtime_media_capacity_busy_does_not_block_call_controls(void);
 void test_runtime_media_forwards_preview_keepalive_control(void);
 void test_runtime_media_forwards_station_preview_end_control(void);
@@ -286,6 +287,7 @@ void test_gvs_vendor_header_serializes_random_and_transformed_fields(void);
 void test_gvs_vendor_header_clears_fields_when_random_source_fails(void);
 void test_gvs_vendor_header_reads_system_random(void);
 void test_runtime_ubus_access_requires_active_host(void);
+void test_runtime_ubus_unlock_targets_requested_station(void);
 void test_runtime_ubus_elevator_requires_active_host_and_owns_ids(void);
 void test_runtime_ubus_elevator_status_is_bounded_and_aged(void);
 void test_runtime_ubus_audio_status_tracks_buffer(void);
@@ -349,7 +351,7 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
-    return 175;
+    return 177;
 }
 
 void test_gvs_call_control_handshake_memory_lifecycle(void);
@@ -473,6 +475,7 @@ int main(int argc, char **argv) {
     test_runtime_module_request_start_calls_loaded_module();
     test_runtime_media_builds_module_config_without_guessing_route();
     test_runtime_media_preempts_before_incoming_call_state_changes();
+    test_runtime_auto_unlock_uses_calling_station_once();
     test_runtime_media_capacity_busy_does_not_block_call_controls();
     test_runtime_media_forwards_preview_keepalive_control();
     test_runtime_media_forwards_station_preview_end_control();
@@ -486,7 +489,7 @@ int main(int argc, char **argv) {
     test_gvs_session_preemption_transaction();
     test_gvs_priority_valid_matrix_and_unknown_categories();
     test_gvs_pick_exchange();
-    TEST_ASSERT_INT_EQ(175, test_suite_count());
+    TEST_ASSERT_INT_EQ(177, test_suite_count());
     test_runtime_id_encodes_random_bytes_and_validates_exact_lowercase_hex();
     test_runtime_id_clears_output_when_random_fill_fails_or_is_short();
     test_event_stream_serializes_exact_json();
@@ -544,6 +547,7 @@ int main(int argc, char **argv) {
     test_gvs_elevator_rejects_invalid_identity_and_direction();
     test_gvs_elevator_serialize_failure_is_output_atomic();
     test_runtime_ubus_access_requires_active_host();
+    test_runtime_ubus_unlock_targets_requested_station();
     test_gvs_access_failed_send_and_late_reply();
     test_gvs_access_control_sends_once_and_requires_material();
     test_gvs_access_serializes_vendor_direct_unlock_shape();

@@ -210,9 +210,9 @@ python3 -B tests/run_doorfast_vm_stations.py \
 
 该 runner 只证明一次扫描生命周期的三帧发送结果（fixture 通过 `frames_sent=3` 暴露）、候选与已配置站点数量、ubus 与 `/api/v1/stations` 投影一致、revision、路由新鲜度和组播推导值；输出中的 `physical_registration` 与 `physical_actions` 固定为 `unconfirmed`，不代表物业系统已经注册，也不代表门口机、门锁或电梯已经动作。
 
-## 来电、控制和 generation
+## 来电、控制和站点解锁
 
-`ubus call doorfast status` 是运行状态的权威入口。来电创建 generation；接听、挂断和开锁都要求提交当前 generation。接听、挂断、开锁和召梯还必须提交状态中的 16 位小写十六进制 `runtime_id`，并与当前守护进程运行实例完全一致。召梯操作由服务生成独立 transaction ID。Doorfast 重启后，客户端必须重新读取状态并丢弃旧 runtime 下的 generation 和事件高水位。
+`ubus call doorfast status` 是运行状态的权威入口。来电创建 generation；接听和挂断仍要求提交当前 generation 以及状态中的 `runtime_id`。开锁按配置的 `station_id` 定位目标室外机，不依赖当前通话、generation 或 `runtime_id`；召梯操作由服务生成独立 transaction ID。Doorfast 重启后，客户端仍必须重新读取状态并丢弃旧 runtime 下的 generation 和事件高水位。
 
 常用 ubus 方法：
 
@@ -222,7 +222,7 @@ python3 -B tests/run_doorfast_vm_stations.py \
 | `logs` | `{}` | 最多 128 条内存日志；重启后清空 |
 | `answer` | `runtime_id`、`generation`、`primary_media_port`、`secondary_media_port`、`duration_seconds` | `queued=true` 只表示已进入发送事务 |
 | `hangup` | `runtime_id`、`generation`、`reason` | `queued=true` 只表示已进入发送事务 |
-| `unlock` | `runtime_id`、`generation` | `submitted=true` 只表示协议事务已提交 |
+| `unlock` | `station_id` | `submitted=true` 只表示指定室外机的协议事务已提交 |
 | `call_elevator` | `runtime_id`、`direction=up|down` | 返回 transaction ID，不宣称电梯已动作 |
 | `monitor_start` | `{}` | 返回新的预览 generation 和 `queued` 状态 |
 | `monitor_stop` | `generation` | 只停止匹配的预览 |
@@ -240,14 +240,14 @@ runtime_id="$(printf '%s' "$status" | jsonfilter -e '@.runtime_id')"
 ubus call doorfast answer \
   "{\"runtime_id\":\"$runtime_id\",\"generation\":$generation,\"primary_media_port\":8303,\"secondary_media_port\":8302,\"duration_seconds\":60}"
 ubus call doorfast unlock \
-  "{\"runtime_id\":\"$runtime_id\",\"generation\":$generation}"
+  '{"station_id":"gate_main"}'
 ubus call doorfast call_elevator \
   "{\"runtime_id\":\"$runtime_id\",\"direction\":\"up\"}"
 ubus call doorfast hangup \
   "{\"runtime_id\":\"$runtime_id\",\"generation\":$generation,\"reason\":0}"
 ```
 
-来电自动向上召梯位于 LuCI 的“来电自动化”页，配置保存在 `/etc/config/doorfast-automation`。默认关闭；启用后每个来电 generation 最多提交一次向上召梯。
+来电自动化位于 LuCI 的“来电自动化”页，配置保存在 `/etc/config/doorfast-automation`。默认关闭；“来电自动向上召梯”按每个来电 generation 最多提交一次，“来电自动解锁”按来电来源的逻辑地址只提交对应室外机的开锁事务，不会解锁其他站点。
 
 ## HTTP 接口
 
@@ -388,7 +388,7 @@ config relay 'main'
 | 状态 | 每 5 秒读取 ubus；显示同步、呼叫、开锁、电梯、音频、视频和媒体运行状态 |
 | 门口机 | 主机模式下扫描候选、人工采用配置、显示候选和已配置站点的路由新鲜度 |
 | 媒体预览 | 配置门口机逻辑地址、组播/RTSP、编码器、帧率、码率、内存阈值和预览超时 |
-| 来电自动化 | 开关“来电自动向上召梯”；默认关闭 |
+| 来电自动化 | 开关“来电自动向上召梯”和“来电自动解锁”；默认关闭 |
 | 部署配置 | 清晰分离被动接口与主机接口；配置 GVS 身份、室内机 IP/掩码、门禁材料和上行接口 |
 | HA 事件 relay | 配置 HTTP/HTTPS 地址、配置项 ID、长期令牌和 CA 文件 |
 | 日志 | 显示守护进程内存日志；内部最多保存 128 条，重启清空 |

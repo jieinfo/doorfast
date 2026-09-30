@@ -605,7 +605,7 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
         return DF_ERR_INVALID;
     }
     *media_result = DF_OK;
-    if (media != NULL && media->available && frame.family == 0x03U &&
+    if (frame.family == 0x03U &&
         frame.opcode == 0x01U && df_gvs_frame_is_for_identity(&frame, local)) {
         struct df_gvs_call_control next_control = *control;
         struct df_gvs_session next_session = *session;
@@ -616,7 +616,9 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
                 &next_session, &next_deadline, now_ms, &next_result) != DF_OK) {
             return DF_ERR_INVALID;
         }
-        if (next_result.runtime.receive.accepted_call && stations != NULL) {
+        if (next_result.runtime.receive.accepted_call &&
+            next_result.runtime.receive.transition.count > 0U &&
+            stations != NULL) {
             size_t index;
             char preempted_station_id[DF_MEDIA_MODULE_STATION_ID_MAX] = {0};
             uint64_t preempted_generation = 0U;
@@ -625,10 +627,22 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
             for (index = 0U; index < stations->count; index++) {
                 if (memcmp(stations->items[index].logical_address,
                         frame.source, sizeof(frame.source)) == 0) {
-                    *media_result = df_runtime_media_module_incoming_call(media,
-                        stations->items[index].id, next_session.generation,
-                        now_ms, preempted_station_id,
-                        &preempted_generation);
+                    if (ubus != NULL && ubus->auto_unlock) {
+                        int unlock_status = df_runtime_ubus_unlock_station(ubus,
+                            stations->items[index].id, now_ms);
+                        (void)df_runtime_ubus_log_event(ubus, now_ms,
+                            unlock_status == DF_OK ?
+                            "event=auto_unlock_submitted" :
+                            "event=auto_unlock_failed");
+                    }
+                    if (media != NULL && media->available) {
+                        *media_result = df_runtime_media_module_incoming_call(
+                            media, stations->items[index].id,
+                            next_session.generation, now_ms,
+                            preempted_station_id, &preempted_generation);
+                    } else {
+                        *media_result = DF_OK;
+                    }
                     if (*media_result == DF_OK &&
                         preempted_station_id[0] != '\0') {
                         char message[DF_RUNTIME_UBUS_LOG_MESSAGE_MAX];
@@ -869,6 +883,7 @@ static void df_runtime_receive_video_payload(
 int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_capture *capture = NULL;
     struct df_gvs_session session = {0};
+    struct df_gvs_session station_access_session = {0};
     struct df_gvs_deadline deadline = {0};
     struct df_capture_retry retry = {0};
     struct df_gvs_reply_queue reply_queue = {0};
@@ -1091,6 +1106,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             &ubus, df_runtime_call_status_provider, df_runtime_call_submit,
             &call_binding) == DF_OK &&
         df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK &&
+        df_runtime_ubus_bind_station_access(&ubus, &station_access_session,
+            &runtime->stations) == DF_OK &&
         df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK &&
         df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK &&
         df_runtime_ubus_bind_audio_tx(&ubus, &audio_tx) == DF_OK &&
@@ -1103,6 +1120,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         wait_context.ubus_started = true;
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
+        df_runtime_ubus_set_auto_unlock(&ubus, runtime->config.auto_unlock);
         df_runtime_log_public_event(&ubus, started_ms,
             runtime->config.active_host ? "service_started_active_host" :
                 "service_started_passive", 0);
@@ -1187,7 +1205,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 &event_stream, now_ms) != DF_OK) {
             (void)fputs("doorfast: event=media_module_tick_failed\n", stderr);
         }
-        (void)df_gvs_access_result_tick(&access.result, &session, identity, now_ms);
+        (void)df_gvs_access_result_tick(&access.result,
+            ubus.station_access_active ? &station_access_session : &session,
+            identity, now_ms);
         if (df_gvs_elevator_control_tick(&elevator, identity, now_ms) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
@@ -1498,7 +1518,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 if (df_gvs_frame_parse(payload, payload_length, &access_frame,
                         &access_event) == DF_OK && access_frame.family == 0x04 &&
                     access_frame.opcode == 0x89) {
-                    if (df_gvs_access_result_observe(&access.result, &session,
+                    if (df_gvs_access_result_observe(&access.result,
+                            ubus.station_access_active ? &station_access_session : &session,
                             identity, &access_frame, now_ms) == DF_OK)
                         (void)fprintf(stdout, "doorfast: event=access_result state=%s raw_status=%u\n",
                             df_gvs_access_state_name(access.result.state),

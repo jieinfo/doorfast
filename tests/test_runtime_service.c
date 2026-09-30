@@ -16,6 +16,31 @@ struct delay_trace {
     bool fail_second;
 };
 
+static int runtime_service_status(
+    struct df_gvs_runtime_sync_status *status, void *context) {
+    (void)context;
+    if (status == NULL) return DF_ERR_INVALID;
+    memset(status, 0, sizeof(*status));
+    status->phase = DF_GVS_PRESENCE_PERIODIC;
+    status->role = DF_GVS_SYNC_ROLE_FOLLOWER;
+    return DF_OK;
+}
+
+struct auto_unlock_trace {
+    unsigned calls;
+    uint8_t destination[6];
+};
+
+static int record_auto_unlock(
+    const struct df_gvs_access_request *request, void *context) {
+    struct auto_unlock_trace *trace = context;
+    if (request == NULL || trace == NULL) return DF_ERR_INVALID;
+    memcpy(trace->destination, request->destination,
+        sizeof(trace->destination));
+    trace->calls++;
+    return DF_OK;
+}
+
 struct station_scan_trace {
     struct df_gvs_station_scan_action actions[3];
     size_t count;
@@ -358,6 +383,58 @@ void test_runtime_media_preempts_before_incoming_call_state_changes(void) {
     TEST_ASSERT_INT_EQ(0, strcmp(
         "event=monitor_preempted station_id=gate_side generation=8",
         log_entry.message));
+}
+
+void test_runtime_auto_unlock_uses_calling_station_once(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t station_address[6] = {0x32, 2, 1, 0, 2, 0};
+    struct df_station station = {
+        .id = "gate_side", .logical_address = {0x32, 2, 1, 0, 2, 0},
+        .enabled = true,
+    };
+    const struct df_station_registry stations = {
+        .items = &station, .count = 1U,
+    };
+    struct df_runtime_ubus ubus = {0};
+    struct df_gvs_access_control access;
+    struct df_gvs_session access_session = {0};
+    struct auto_unlock_trace unlock = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    struct df_gvs_session session = {0};
+    struct df_gvs_deadline deadline = {0};
+    struct df_runtime_media_module media = {0};
+    uint8_t packet[DF_GVS_CONTROL_HEADER_SIZE];
+    size_t packet_length = 0U;
+    int media_result = DF_ERR_INVALID;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(
+        &access, "0011223344556677", 0, record_auto_unlock, &unlock));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
+        &ubus, runtime_service_status, NULL, 10U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(
+        &ubus, &access, &access_session, local));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(
+        &ubus, &access_session, &stations));
+    df_runtime_ubus_set_active_host(&ubus, true);
+    df_runtime_ubus_set_auto_unlock(&ubus, true);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(&control, 0U,
+        df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_control_serialize(packet, sizeof(packet),
+        &packet_length, local, station_address, 0x03U, 0x01U, NULL, 0U,
+        df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_receive_control_with_media(
+        &media, &ubus, NULL, &stations, &control, packet, packet_length,
+        local, &session, &deadline, htonl(0x7f000001U), 100U, &result,
+        &media_result));
+    TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
+    TEST_ASSERT_INT_EQ(0, memcmp(station_address, unlock.destination, 6));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_receive_control_with_media(
+        &media, &ubus, NULL, &stations, &control, packet, packet_length,
+        local, &session, &deadline, htonl(0x7f000001U), 101U, &result,
+        &media_result));
+    TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
+    df_runtime_ubus_stop(&ubus);
 }
 
 void test_runtime_media_capacity_busy_does_not_block_call_controls(void) {

@@ -125,7 +125,11 @@ struct df_runtime_ubus {
     void *call_context;
     struct df_gvs_access_control *access;
     const struct df_gvs_session *access_session;
+    struct df_gvs_session *station_access_session;
+    const struct df_station_registry *access_station_registry;
     const uint8_t *access_identity;
+    bool auto_unlock;
+    bool station_access_active;
     struct df_gvs_elevator_control *elevator;
     struct df_gvs_audio_buffer *audio;
     struct df_gvs_audio_tx *audio_tx;
@@ -179,8 +183,11 @@ void df_runtime_ubus_stop(struct df_runtime_ubus *service);
 int df_runtime_ubus_bind_access(struct df_runtime_ubus *,
     struct df_gvs_access_control *, const struct df_gvs_session *,
     const uint8_t [6]);
-int df_runtime_ubus_unlock(struct df_runtime_ubus *, const char *runtime_id,
-    uint64_t);
+int df_runtime_ubus_bind_station_access(struct df_runtime_ubus *,
+    struct df_gvs_session *, const struct df_station_registry *);
+void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *, bool);
+int df_runtime_ubus_unlock_station(struct df_runtime_ubus *,
+    const char *, uint64_t);
 int df_runtime_ubus_bind_elevator(struct df_runtime_ubus *,
     struct df_gvs_elevator_control *, const uint8_t [6]);
 int df_runtime_ubus_call_elevator(struct df_runtime_ubus *,

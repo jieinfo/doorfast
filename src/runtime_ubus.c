@@ -1020,16 +1020,13 @@ static int df_runtime_ubus_call_handler(struct ubus_context *context,
 }
 
 enum {
-    DF_UBUS_UNLOCK_RUNTIME_ID,
-    DF_UBUS_UNLOCK_GENERATION,
+    DF_UBUS_UNLOCK_STATION_ID,
     __DF_UBUS_UNLOCK_MAX,
 };
 
 static const struct blobmsg_policy df_runtime_ubus_unlock_policy[] = {
-    [DF_UBUS_UNLOCK_RUNTIME_ID] = {
-        .name = "runtime_id", .type = BLOBMSG_TYPE_STRING},
-    [DF_UBUS_UNLOCK_GENERATION] = {
-        .name = "generation", .type = BLOBMSG_TYPE_UNSPEC},
+    [DF_UBUS_UNLOCK_STATION_ID] = {
+        .name = "station_id", .type = BLOBMSG_TYPE_STRING},
 };
 
 enum {
@@ -1052,19 +1049,17 @@ static int df_runtime_ubus_unlock_handler(
     struct df_runtime_ubus_platform *platform =
         container_of(object, struct df_runtime_ubus_platform, object);
     struct blob_attr *fields[__DF_UBUS_UNLOCK_MAX] = {0};
-    const char *runtime_id;
-    uint64_t generation;
+    const char *station_id;
     int status;
     (void)method;
     if (message == NULL) return UBUS_STATUS_INVALID_ARGUMENT;
     blobmsg_parse(df_runtime_ubus_unlock_policy, __DF_UBUS_UNLOCK_MAX, fields,
         blob_data(message), blob_len(message));
-    if (fields[DF_UBUS_UNLOCK_RUNTIME_ID] == NULL ||
-        !df_runtime_ubus_get_generation(
-            fields[DF_UBUS_UNLOCK_GENERATION], &generation))
+    if (fields[DF_UBUS_UNLOCK_STATION_ID] == NULL)
         return UBUS_STATUS_INVALID_ARGUMENT;
-    runtime_id = blobmsg_get_string(fields[DF_UBUS_UNLOCK_RUNTIME_ID]);
-    status = df_runtime_ubus_unlock(platform->owner, runtime_id, generation);
+    station_id = blobmsg_get_string(fields[DF_UBUS_UNLOCK_STATION_ID]);
+    status = df_runtime_ubus_unlock_station(platform->owner, station_id,
+        platform->owner->last_now_ms);
     if (status != DF_OK)
         return status == DF_ERR_INVALID ? UBUS_STATUS_INVALID_ARGUMENT :
                                          UBUS_STATUS_UNKNOWN_ERROR;
@@ -1072,7 +1067,7 @@ static int df_runtime_ubus_unlock_handler(
         platform->owner->last_now_ms, "event=unlock_submitted");
     blob_buf_init(&platform->response, 0);
     blobmsg_add_u8(&platform->response, "submitted", 1);
-    blobmsg_add_u64(&platform->response, "generation", generation);
+    blobmsg_add_string(&platform->response, "station_id", station_id);
     status = ubus_send_reply(context, request, platform->response.head);
     blob_buf_free(&platform->response);
     return status == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
@@ -1968,15 +1963,43 @@ int df_runtime_ubus_bind_access(struct df_runtime_ubus *service,
     return DF_OK;
 }
 
-int df_runtime_ubus_unlock(struct df_runtime_ubus *service,
-    const char *runtime_id, uint64_t generation) {
-    if (service == NULL || !service->started || !service->active_host ||
-        service->access == NULL || generation == 0U ||
-        !df_runtime_id_is_valid(runtime_id) ||
-        strcmp(runtime_id, service->runtime_id) != 0)
+int df_runtime_ubus_bind_station_access(struct df_runtime_ubus *service,
+    struct df_gvs_session *session, const struct df_station_registry *registry) {
+    if (service == NULL || !service->started || session == NULL ||
+        registry == NULL || service->station_access_session != NULL)
         return DF_ERR_INVALID;
-    return df_gvs_access_control_submit(service->access, service->access_session,
-        generation, service->access_identity, service->last_now_ms);
+    service->station_access_session = session;
+    service->access_station_registry = registry;
+    return DF_OK;
+}
+
+void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *service, bool enabled) {
+    if (service != NULL) service->auto_unlock = enabled;
+}
+
+int df_runtime_ubus_unlock_station(struct df_runtime_ubus *service,
+    const char *station_id, uint64_t now_ms) {
+    const struct df_station *station;
+    uint64_t generation;
+    if (service == NULL || !service->started || !service->active_host ||
+        service->access == NULL || service->station_access_session == NULL ||
+        service->access_station_registry == NULL || station_id == NULL ||
+        station_id[0] == '\0' || now_ms < service->last_now_ms)
+        return DF_ERR_INVALID;
+    station = df_station_registry_find(service->access_station_registry, station_id);
+    if (station == NULL || !station->enabled ||
+        service->station_access_session->generation == UINT64_MAX)
+        return DF_ERR_INVALID;
+    generation = service->station_access_session->generation + 1U;
+    memset(service->station_access_session, 0,
+        sizeof(*service->station_access_session));
+    service->station_access_session->state = DF_GVS_PREVIEW;
+    service->station_access_session->generation = generation;
+    memcpy(service->station_access_session->peer, station->logical_address, 6U);
+    service->station_access_active = true;
+    return df_gvs_access_control_submit(service->access,
+        service->station_access_session, generation,
+        service->access_identity, now_ms);
 }
 
 int df_runtime_ubus_bind_elevator(struct df_runtime_ubus *service,
