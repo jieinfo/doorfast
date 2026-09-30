@@ -35,14 +35,16 @@ static int df_gvs_call_command_begin(
     return DF_OK;
 }
 
-int df_gvs_call_command_prepare_answer(
+static int df_gvs_call_command_prepare_pick(
     const struct df_gvs_session *session, uint64_t expected_generation,
     const uint8_t local[6], uint16_t primary_media_port,
     uint16_t secondary_media_port, uint8_t duration_seconds,
+    enum df_gvs_call_command_type type,
+    enum df_gvs_session_state required_state,
     struct df_gvs_call_command *command) {
     if (df_gvs_call_command_begin(
-            session, expected_generation, local, DF_GVS_CALL_COMMAND_ANSWER,
-            0x03, command) != DF_OK || session->state != DF_GVS_RINGING ||
+            session, expected_generation, local, type,
+            0x03, command) != DF_OK || session->state != required_state ||
         primary_media_port == 0U || secondary_media_port == 0U ||
         duration_seconds == 0U) {
         if (command != NULL) {
@@ -60,6 +62,26 @@ int df_gvs_call_command_prepare_answer(
     command->payload_length = sizeof(command->payload);
     command->valid = true;
     return DF_OK;
+}
+
+int df_gvs_call_command_prepare_answer(
+    const struct df_gvs_session *session, uint64_t expected_generation,
+    const uint8_t local[6], uint16_t primary_media_port,
+    uint16_t secondary_media_port, uint8_t duration_seconds,
+    struct df_gvs_call_command *command) {
+    return df_gvs_call_command_prepare_pick(session, expected_generation,
+        local, primary_media_port, secondary_media_port, duration_seconds,
+        DF_GVS_CALL_COMMAND_ANSWER, DF_GVS_RINGING, command);
+}
+
+int df_gvs_call_command_prepare_call(
+    const struct df_gvs_session *session, uint64_t expected_generation,
+    const uint8_t local[6], uint16_t primary_media_port,
+    uint16_t secondary_media_port, uint8_t duration_seconds,
+    struct df_gvs_call_command *command) {
+    return df_gvs_call_command_prepare_pick(session, expected_generation,
+        local, primary_media_port, secondary_media_port, duration_seconds,
+        DF_GVS_CALL_COMMAND_CALL, DF_GVS_PREVIEW, command);
 }
 
 int df_gvs_call_command_prepare_hangup(
@@ -107,9 +129,11 @@ int df_gvs_call_command_serialize(
     if (command == NULL || !command->valid || output_length == NULL ||
         command->session_generation == 0U ||
         (command->type != DF_GVS_CALL_COMMAND_ANSWER &&
+         command->type != DF_GVS_CALL_COMMAND_CALL &&
          command->type != DF_GVS_CALL_COMMAND_HANGUP) ||
         (command->opcode != 0x03 && command->opcode != 0x02) ||
-        (command->type == DF_GVS_CALL_COMMAND_ANSWER &&
+        ((command->type == DF_GVS_CALL_COMMAND_ANSWER ||
+          command->type == DF_GVS_CALL_COMMAND_CALL) &&
          (command->opcode != 0x03 || command->payload_length != 7U)) ||
         (command->type == DF_GVS_CALL_COMMAND_HANGUP &&
          (command->opcode != 0x02 || command->payload_length != 1U))) {

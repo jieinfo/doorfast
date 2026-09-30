@@ -94,6 +94,21 @@ int df_gvs_call_control_submit_answer(
     return df_gvs_call_control_enqueue(control, &command, now_ms);
 }
 
+int df_gvs_call_control_submit_call(
+    struct df_gvs_call_control *control, const struct df_gvs_session *session,
+    uint64_t expected_generation, const uint8_t local[6],
+    uint16_t primary_media_port, uint16_t secondary_media_port,
+    uint8_t duration_seconds, uint64_t now_ms) {
+    struct df_gvs_call_command command;
+
+    if (df_gvs_call_command_prepare_call(
+            session, expected_generation, local, primary_media_port,
+            secondary_media_port, duration_seconds, &command) != DF_OK) {
+        return DF_ERR_INVALID;
+    }
+    return df_gvs_call_control_enqueue(control, &command, now_ms);
+}
+
 int df_gvs_call_control_submit_hangup(
     struct df_gvs_call_control *control, const struct df_gvs_session *session,
     uint64_t expected_generation, const uint8_t local[6], uint8_t reason,
@@ -184,7 +199,8 @@ int df_gvs_call_control_step(
     }
     if (previous != DF_GVS_CALL_SENT &&
         next.dispatch.state == DF_GVS_CALL_SENT) {
-        if (next.dispatch.command.type == DF_GVS_CALL_COMMAND_ANSWER) {
+        if (next.dispatch.command.type == DF_GVS_CALL_COMMAND_ANSWER ||
+            next.dispatch.command.type == DF_GVS_CALL_COMMAND_CALL) {
             struct df_gvs_receive_result sent_result;
             uint8_t sent_frame[DF_GVS_CALL_COMMAND_MAX_FRAME_SIZE];
             size_t sent_length = 0;
@@ -284,6 +300,7 @@ const char *df_gvs_call_command_type_name(enum df_gvs_call_command_type type) {
     case DF_GVS_CALL_COMMAND_HANGUP: return "hangup";
     case DF_GVS_CALL_COMMAND_HAND_ASK: return "hand_ask";
     case DF_GVS_CALL_COMMAND_HAND_REPLY: return "hand_reply";
+    case DF_GVS_CALL_COMMAND_CALL: return "call";
     default: return NULL;
     }
 }

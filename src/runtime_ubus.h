@@ -46,6 +46,7 @@ struct df_runtime_call_request {
     uint16_t secondary_media_port;
     uint8_t duration_seconds;
     uint8_t reason;
+    char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
 };
 
 typedef int (*df_runtime_call_submit_fn)(
@@ -207,6 +208,10 @@ int df_runtime_ubus_monitor_stop(struct df_runtime_ubus *,
 int df_runtime_ubus_monitor_viewer(struct df_runtime_ubus *,
     const char *runtime_id, const char *station_id, uint64_t generation,
     bool active);
+int df_runtime_ubus_call_station(struct df_runtime_ubus *,
+    const char *runtime_id, const char *station_id, uint64_t *generation);
+int df_runtime_ubus_hangup_station(struct df_runtime_ubus *,
+    const char *runtime_id, const char *station_id, uint64_t generation);
 int df_runtime_ubus_read_media_status(struct df_runtime_ubus *,
     struct df_runtime_media_status *);
 int df_runtime_ubus_update_media_credentials(struct df_runtime_ubus *,

@@ -118,6 +118,37 @@ int df_runtime_media_module_request_start(struct df_runtime_media_module *module
     return result;
 }
 
+int df_runtime_media_module_call(struct df_runtime_media_module *module,
+    const char *station_id, uint64_t now_ms, uint64_t *generation) {
+    struct df_media_module_status_v3 status = {0};
+    size_t index;
+    int result;
+
+    if (generation == NULL) return DF_ERR_INVALID;
+    *generation = 0U;
+    if (df_runtime_media_module_available(module) != DF_OK ||
+        station_id == NULL || station_id[0] == '\0' ||
+        module->session_snapshot == NULL || module->session_snapshot_capacity == 0U)
+        return DF_ERR_INVALID;
+    result = module->api->start(module->instance, station_id,
+        DF_MEDIA_SESSION_CALL, 0U, now_ms);
+    if (result != DF_OK) return result;
+    status.sessions = module->session_snapshot;
+    status.session_count = module->session_snapshot_capacity;
+    result = module->api->status(module->instance, &status);
+    if (result != DF_OK || status.session_count > module->session_snapshot_capacity)
+        return DF_ERR_IO;
+    for (index = 0U; index < status.session_count; index++) {
+        if (status.sessions[index].active &&
+            status.sessions[index].purpose == DF_MEDIA_SESSION_CALL &&
+            strcmp(status.sessions[index].station_id, station_id) == 0) {
+            *generation = status.sessions[index].generation;
+            return *generation == 0U ? DF_ERR_IO : DF_OK;
+        }
+    }
+    return DF_ERR_IO;
+}
+
 int df_runtime_media_module_incoming_call(
     struct df_runtime_media_module *module, const char *station_id,
     uint64_t generation, uint64_t now_ms,

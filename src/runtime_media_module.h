@@ -33,6 +33,8 @@ int df_runtime_media_module_start_with_api(struct df_runtime_media_module *,
     const struct df_media_module_callbacks_v3 *);
 int df_runtime_media_module_request_start(struct df_runtime_media_module *,
     const char *station_id, uint64_t now_ms, uint64_t *generation);
+int df_runtime_media_module_call(struct df_runtime_media_module *,
+    const char *station_id, uint64_t now_ms, uint64_t *generation);
 int df_runtime_media_module_incoming_call(struct df_runtime_media_module *,
     const char *station_id, uint64_t generation, uint64_t now_ms,
     char preempted_station_id[DF_MEDIA_MODULE_STATION_ID_MAX],

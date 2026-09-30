@@ -30,6 +30,8 @@ static bool current(const struct df_gvs_call_dispatch *d,
         memcmp(d->command.source, local, 6) == 0 &&
         (d->command.type == DF_GVS_CALL_COMMAND_ANSWER
             ? s->state == DF_GVS_RINGING
+            : d->command.type == DF_GVS_CALL_COMMAND_CALL
+            ? s->state == DF_GVS_PREVIEW
             : (s->state == DF_GVS_PREVIEW || s->state == DF_GVS_RINGING ||
                s->state == DF_GVS_TALKING));
 }
@@ -71,8 +73,13 @@ int df_gvs_call_dispatch_enqueue(struct df_gvs_call_dispatch *d,
     s.state = DF_GVS_RINGING;
     s.generation = c->session_generation;
     memcpy(s.peer, c->destination, 6);
-    if (c->type == DF_GVS_CALL_COMMAND_ANSWER && c->payload_length == 7) {
-        status = df_gvs_call_command_prepare_answer(&s, s.generation, c->source,
+    if ((c->type == DF_GVS_CALL_COMMAND_ANSWER ||
+         c->type == DF_GVS_CALL_COMMAND_CALL) && c->payload_length == 7) {
+        s.state = c->type == DF_GVS_CALL_COMMAND_CALL
+            ? DF_GVS_PREVIEW : DF_GVS_RINGING;
+        status = (c->type == DF_GVS_CALL_COMMAND_CALL
+            ? df_gvs_call_command_prepare_call
+            : df_gvs_call_command_prepare_answer)(&s, s.generation, c->source,
             (uint16_t)((c->payload[1] << 8) | c->payload[2]),
             (uint16_t)((c->payload[4] << 8) | c->payload[5]), c->payload[6], &checked);
     } else if (c->type == DF_GVS_CALL_COMMAND_HANGUP && c->payload_length == 1) {

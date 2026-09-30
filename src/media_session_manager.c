@@ -544,6 +544,34 @@ int df_media_session_manager_start(struct df_media_session_manager *manager,
     if (station == NULL) return DF_MEDIA_ERROR_STATION_NOT_FOUND;
     if (!manager->config.enabled || !station->enabled)
         return DF_MEDIA_ERROR_STATION_DISABLED;
+    /* Formal calls own the shared GVS call/audio runtime.  Reuse an
+     * already active call for the same station, but never admit a second
+     * station while one is in progress. */
+    if (purpose == DF_MEDIA_SESSION_CALL) {
+        size_t call_index;
+        struct df_media_session *active =
+            df_media_session_manager_find_active(manager, station_id);
+
+        if (active != NULL && active->purpose == DF_MEDIA_SESSION_CALL) {
+            *generation = active->generation;
+            return DF_OK;
+        }
+        for (call_index = 0U; call_index < manager->capacity; call_index++) {
+            if (manager->sessions[call_index].active &&
+                manager->sessions[call_index].purpose == DF_MEDIA_SESSION_CALL)
+                return DF_MEDIA_ERROR_CAPACITY_BUSY;
+        }
+        if (manager->next_generation == UINT64_MAX)
+            return DF_MEDIA_ERROR_RESOURCE_EXHAUSTED;
+        result = df_media_session_manager_incoming_call(manager, station_id,
+            manager->next_generation + 1U, now_ms);
+        if (result == DF_OK) {
+            session = df_media_session_manager_find_active(manager, station_id);
+            if (session == NULL) return DF_ERR_IO;
+            *generation = session->generation;
+        }
+        return result;
+    }
     session = df_media_session_manager_find_active(manager, station_id);
     if (session != NULL) {
         *generation = session->generation;
@@ -814,6 +842,15 @@ int df_media_session_manager_incoming_call(
     if (!manager->config.enabled || !station->enabled)
         return DF_MEDIA_ERROR_STATION_DISABLED;
     session = df_media_session_manager_find_active(manager, station_id);
+    {
+        size_t call_index;
+        for (call_index = 0U; call_index < manager->capacity; call_index++) {
+            struct df_media_session *candidate = &manager->sessions[call_index];
+            if (candidate->active && candidate->purpose == DF_MEDIA_SESSION_CALL &&
+                (session == NULL || candidate != session))
+                return DF_MEDIA_ERROR_CAPACITY_BUSY;
+        }
+    }
     if (session != NULL && session->purpose == DF_MEDIA_SESSION_CALL) {
         if (call_generation == session->call_generation)
             return DF_OK;

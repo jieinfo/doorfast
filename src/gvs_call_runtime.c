@@ -7,7 +7,8 @@ static bool df_gvs_call_runtime_expected_ack(
     if (frame->family != 0x03) {
         return false;
     }
-    return (ack->command.type == DF_GVS_CALL_COMMAND_ANSWER &&
+    return ((ack->command.type == DF_GVS_CALL_COMMAND_ANSWER ||
+             ack->command.type == DF_GVS_CALL_COMMAND_CALL) &&
             frame->opcode == 0x83) ||
            (ack->command.type == DF_GVS_CALL_COMMAND_HANGUP &&
             frame->opcode == 0x82);

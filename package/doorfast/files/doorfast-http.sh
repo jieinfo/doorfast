@@ -536,8 +536,22 @@ body=''
 if [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then
   body="$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
 fi
+if [ "$path" = /api/v1/call ] || [ "$path" = /api/v1/hangup ]; then
+  [ "${REQUEST_METHOD:-GET}" = POST ] || { http_error '405 Method Not Allowed' 'method not allowed' POST; exit 0; }
+  case "${CONTENT_TYPE:-}" in application/json|application/json';'*) ;; *) http_error '415 Unsupported Media Type' 'application/json required'; exit 0;; esac
+  runtime_id="$(json_field "$body" '@.runtime_id' || true)"
+  station_id="$(json_field "$body" '@.station_id' || true)"
+  if [ "$path" = /api/v1/hangup ] && [ -z "$station_id" ]; then
+    case "$body" in *generation*|*reason*) : ;; *) http_error '400 Bad Request' 'invalid request'; exit 0;; esac
+  else
+  [ "${#runtime_id}" -eq 16 ] && case "$runtime_id" in *[!0-9a-f]*) false;; esac || { http_error '400 Bad Request' 'invalid request'; exit 0; }
+  [ -n "$station_id" ] && [ "${#station_id}" -le 32 ] || { http_error '400 Bad Request' 'invalid request'; exit 0; }
+  case "$station_id" in [!a-z]*|*[!a-z0-9_]*) http_error '400 Bad Request' 'invalid request'; exit 0;; esac
+    body="{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\"}"
+  fi
+fi
 case "$path" in
-  /api/v1/status|/api/v1/unlock|/api/v1/answer|/api/v1/hangup|/api/v1/call_elevator) ;;
+  /api/v1/status|/api/v1/unlock|/api/v1/answer|/api/v1/hangup|/api/v1/call|/api/v1/call_elevator) ;;
   *)
     http_error '404 Not Found' 'unknown endpoint'
     exit 0
@@ -549,5 +563,6 @@ case "$path" in
   /api/v1/unlock) [ -n "$body" ] || body='{}'; ubus call doorfast unlock "$body" ;;
   /api/v1/answer) [ -n "$body" ] || body='{}'; ubus call doorfast answer "$body" ;;
   /api/v1/hangup) [ -n "$body" ] || body='{}'; ubus call doorfast hangup "$body" ;;
+  /api/v1/call) [ -n "$body" ] || body='{}'; ubus call doorfast call "$body" ;;
   /api/v1/call_elevator) [ -n "$body" ] || body='{}'; ubus call doorfast call_elevator "$body" ;;
 esac

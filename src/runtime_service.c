@@ -506,6 +506,12 @@ static int df_runtime_call_submit(
             binding->identity, request->primary_media_port,
             request->secondary_media_port, request->duration_seconds, now_ms);
     }
+    if (request->type == DF_GVS_CALL_COMMAND_CALL) {
+        return df_gvs_call_control_submit_call(
+            binding->control, binding->session, request->session_generation,
+            binding->identity, request->primary_media_port,
+            request->secondary_media_port, request->duration_seconds, now_ms);
+    }
     if (request->type == DF_GVS_CALL_COMMAND_HANGUP) {
         return df_gvs_call_control_submit_hangup(
             binding->control, binding->session, request->session_generation,

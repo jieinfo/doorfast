@@ -171,6 +171,49 @@ void test_gvs_call_control_answer_reaches_confirmation(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_TALKING, session.state);
 }
 
+void test_gvs_call_control_promotes_preview_after_station_ack(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t reply[7] = {0, 0x20, 0x6f, 0, 0x20, 0x6e, 30};
+    struct df_gvs_session session = {.state = DF_GVS_PREVIEW, .generation = 9,
+        .peer = {0x32, 2, 1, 0, 1, 0}};
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    uint8_t packet[64];
+    size_t length;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control, 0, df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_call_control_submit_answer(
+        &control, &session, 9, local, 8303, 8302, 120, 0));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_call_control_submit_call(
+        &control, &session, 8, local, 8303, 8302, 120, 0));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_submit_call(
+        &control, &session, 9, local, 8303, 8302, 120, 0));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
+        &control, &session, local, &deadline, 0, &result));
+    TEST_ASSERT_INT_EQ(1, result.frame_ready);
+    TEST_ASSERT_INT_EQ(1, result.confirmation_started);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_COMMAND_CALL, control.dispatch.command.type);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_ACK_WAITING, control.acknowledgement.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_PREVIEW, session.state);
+    TEST_ASSERT_INT_EQ(49, (int)control.sender.length);
+    TEST_ASSERT_INT_EQ(3, control.sender.bytes[39]);
+    TEST_ASSERT_INT_EQ(2, control.sender.bytes[42]);
+    length = control_reply(packet, local, session.peer, 0x83, reply, 7);
+    packet[16]++;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_receive(&control, packet,
+        length, local, &session, &deadline, 10, &result));
+    TEST_ASSERT_INT_EQ(1, result.runtime.acknowledgement_rejected);
+    TEST_ASSERT_INT_EQ(DF_GVS_PREVIEW, session.state);
+    packet[16]--;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_receive(&control, packet,
+        length, local, &session, &deadline, 11, &result));
+    TEST_ASSERT_INT_EQ(1, result.runtime.acknowledgement_confirmed);
+    TEST_ASSERT_INT_EQ(1, result.runtime.receive.talking_transition);
+    TEST_ASSERT_INT_EQ(DF_GVS_TALKING, session.state);
+}
+
 void test_gvs_call_control_tracks_answer_sent_by_external_transport(void) {
     const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
     struct df_gvs_session session = {.state = DF_GVS_RINGING, .generation = 9,

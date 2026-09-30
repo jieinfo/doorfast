@@ -54,6 +54,9 @@ void df_gvs_call_control_set_handshake_sender(struct df_gvs_call_control *,
 int df_gvs_call_control_submit_answer(struct df_gvs_call_control *,
     const struct df_gvs_session *, uint64_t, const uint8_t local[6],
     uint16_t, uint16_t, uint8_t, uint64_t);
+int df_gvs_call_control_submit_call(struct df_gvs_call_control *,
+    const struct df_gvs_session *, uint64_t, const uint8_t local[6],
+    uint16_t, uint16_t, uint8_t, uint64_t);
 int df_gvs_call_control_submit_hangup(struct df_gvs_call_control *,
     const struct df_gvs_session *, uint64_t, const uint8_t local[6],
     uint8_t, uint64_t);

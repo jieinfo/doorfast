@@ -11,6 +11,7 @@ enum df_gvs_audio_buffer_result {
     DF_GVS_AUDIO_BUFFER_ACCEPTED = 0,
     DF_GVS_AUDIO_BUFFER_DUPLICATE = 1,
     DF_GVS_AUDIO_BUFFER_LATE = 2,
+    DF_GVS_AUDIO_BUFFER_STALE = 3,
 };
 
 struct df_gvs_audio_buffer {

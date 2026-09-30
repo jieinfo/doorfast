@@ -61,6 +61,37 @@ void test_gvs_call_command_prepares_exact_answer_frame(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_RINGING, session.state);
 }
 
+void test_gvs_call_command_prepares_preview_call_for_selected_station(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t expected_payload[7] = {2, 0x20, 0x6f, 0, 0x20, 0x6e, 120};
+    struct df_gvs_session session = ringing_session();
+    struct df_gvs_call_command command;
+    uint8_t packet[DF_GVS_CALL_COMMAND_MAX_FRAME_SIZE];
+    size_t length = 0;
+
+    session.state = DF_GVS_PREVIEW;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_call_command_prepare_answer(
+        &session, 7, local, 8303, 8302, 120, &command));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_command_prepare_call(
+        &session, 7, local, 8303, 8302, 120, &command));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_COMMAND_CALL, command.type);
+    TEST_ASSERT_INT_EQ(7, (int)command.session_generation);
+    TEST_ASSERT_INT_EQ(0, memcmp(session.peer, command.destination, 6));
+    TEST_ASSERT_INT_EQ(0, memcmp(expected_payload, command.payload, 7));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_command_serialize(&command,
+        packet, sizeof(packet), &length, call_command_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(49, (int)length);
+    TEST_ASSERT_INT_EQ(3, packet[38]);
+    TEST_ASSERT_INT_EQ(3, packet[39]);
+    TEST_ASSERT_INT_EQ(0, memcmp(expected_payload, packet + 42, 7));
+    TEST_ASSERT_INT_EQ(DF_GVS_PREVIEW, session.state);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_call_command_prepare_call(
+        &session, 6, local, 8303, 8302, 120, &command));
+    session.state = DF_GVS_RINGING;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_call_command_prepare_call(
+        &session, 7, local, 8303, 8302, 120, &command));
+}
+
 void test_gvs_call_command_prepares_hangup_for_each_active_state(void) {
     const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
     const enum df_gvs_session_state states[] = {
