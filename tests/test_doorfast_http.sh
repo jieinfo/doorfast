@@ -144,7 +144,9 @@ run_method() {
 run /api/v1/status ''
 run /api/v1/unlock '{"runtime_id":"0123456789abcdef","generation":7}'
 run /api/v1/answer '{"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}'
-run /api/v1/hangup '{"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}'
+run_method /api/v1/hangup \
+  '{"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}' POST \
+  >/dev/null
 run /api/v1/call_elevator '{"runtime_id":"0123456789abcdef","direction":"up"}'
 run_method /api/v1/stations '' GET >"$workspace/stations"
 grep -aFq 'Content-Type: application/json' "$workspace/stations"
