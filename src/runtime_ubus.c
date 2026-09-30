@@ -1756,9 +1756,10 @@ int df_runtime_ubus_call_station(struct df_runtime_ubus *service,
     if (generation == NULL) return DF_ERR_INVALID;
     *generation = 0U;
     if (result != DF_OK) return result;
+    if (service->submit_call == NULL) return DF_ERR_IO;
     result = df_runtime_media_module_call(service->media, station_id,
         service->last_now_ms, generation);
-    if (result == DF_OK && service->submit_call != NULL) {
+    if (result == DF_OK) {
         struct df_runtime_call_request request = {.type = DF_GVS_CALL_COMMAND_CALL,
             .session_generation = *generation, .primary_media_port = 8303,
             .secondary_media_port = 8302, .duration_seconds = 120};
@@ -1775,7 +1776,16 @@ int df_runtime_ubus_hangup_station(struct df_runtime_ubus *service,
         .station_id = station_id, .generation = generation,
     };
     int result = df_runtime_ubus_media_identity(service, runtime_id, station_id);
-    if (result != DF_OK || generation == 0U) return DF_ERR_INVALID;
+    if (result != DF_OK || generation == 0U || service->submit_call == NULL)
+        return DF_ERR_INVALID;
+    {
+        struct df_runtime_call_request request = {.type = DF_GVS_CALL_COMMAND_HANGUP,
+            .session_generation = generation, .reason = 1U};
+        (void)snprintf(request.runtime_id, sizeof(request.runtime_id), "%s", service->runtime_id);
+        (void)snprintf(request.station_id, sizeof(request.station_id), "%s", station_id);
+        result = service->submit_call(&request, service->last_now_ms, service->call_context);
+        if (result != DF_OK) return result;
+    }
     return df_runtime_media_module_command(service->media,
         DF_MEDIA_MODULE_COMMAND_STOP, &key, false, service->last_now_ms);
 }
