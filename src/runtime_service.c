@@ -479,7 +479,20 @@ struct df_runtime_call_binding {
     struct df_gvs_call_control *control;
     struct df_gvs_session *session;
     const uint8_t *identity;
+    const struct df_station_registry *stations;
 };
+
+static const struct df_station *df_runtime_call_station_find(
+    const struct df_station_registry *registry, const char *station_id) {
+    size_t index;
+
+    if (registry == NULL || station_id == NULL) return NULL;
+    for (index = 0U; index < registry->count; index++) {
+        if (strcmp(registry->items[index].id, station_id) == 0)
+            return &registry->items[index];
+    }
+    return NULL;
+}
 
 static int df_runtime_call_status_provider(
     struct df_gvs_call_control_status *status, void *context) {
@@ -507,8 +520,18 @@ static int df_runtime_call_submit(
             request->secondary_media_port, request->duration_seconds, now_ms);
     }
     if (request->type == DF_GVS_CALL_COMMAND_CALL) {
+        const struct df_station *station = df_runtime_call_station_find(
+            binding->stations, request->station_id);
+        struct df_gvs_session station_session;
+
+        if (station == NULL) return DF_ERR_INVALID;
+        station_session = *binding->session;
+        station_session.state = DF_GVS_PREVIEW;
+        station_session.generation = request->session_generation;
+        memcpy(station_session.peer, station->logical_address,
+            sizeof(station_session.peer));
         return df_gvs_call_control_submit_call(
-            binding->control, binding->session, request->session_generation,
+            binding->control, &station_session, request->session_generation,
             binding->identity, request->primary_media_port,
             request->secondary_media_port, request->duration_seconds, now_ms);
     }
@@ -890,6 +913,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         .control = &call_control,
         .session = &session,
         .identity = identity,
+        .stations = &runtime->stations,
     };
     uint16_t persisted_version;
     uint64_t started_ms;
