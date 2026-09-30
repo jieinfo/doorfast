@@ -96,7 +96,32 @@ function unsignedText(value, name) {
 
 function formatMediaStatus(payload) {
     var media = requireObject(payload, 'media');
-    var state = enumLabel(media.state, {
+    var stateValue = media.state;
+    var generation = media.generation;
+    var queueDrops = media.queue_drops;
+    var encoderRunning = media.encoder_running;
+
+    if (typeof media.available !== 'boolean' ||
+        typeof media.rtsp_password_set !== 'boolean')
+        throw new TypeError('media status flag must be boolean');
+    if (stateValue === undefined) {
+        if (!Number.isInteger(media.active_encoders) ||
+            media.active_encoders < 0)
+            throw new TypeError('active encoders must be an unsigned integer');
+        stateValue = !media.available ? 'unavailable' :
+            media.active_encoders > 0 ? 'publishing' : 'idle';
+    }
+    if (generation === undefined)
+        generation = media.status_revision;
+    if (queueDrops === undefined)
+        queueDrops = 0;
+    if (encoderRunning === undefined) {
+        if (!Number.isInteger(media.active_encoders) ||
+            media.active_encoders < 0)
+            throw new TypeError('active encoders must be an unsigned integer');
+        encoderRunning = media.active_encoders > 0;
+    }
+    var state = enumLabel(stateValue, {
         unavailable: 'Unavailable',
         idle: 'Idle',
         requesting: 'Requesting',
@@ -108,9 +133,7 @@ function formatMediaStatus(payload) {
     }, 'media state');
     var failure = media.failure;
 
-    if (typeof media.available !== 'boolean' ||
-        typeof media.encoder_running !== 'boolean' ||
-        typeof media.rtsp_password_set !== 'boolean')
+    if (typeof encoderRunning !== 'boolean')
         throw new TypeError('media status flag must be boolean');
     if (failure === undefined)
         failure = '';
@@ -119,12 +142,12 @@ function formatMediaStatus(payload) {
 
     return [
         ['State', state],
-        ['Generation', unsignedText(media.generation, 'media generation')],
+        ['Generation', unsignedText(generation, 'media generation')],
         ['Effective capacity', unsignedText(media.effective_capacity,
                                               'effective capacity')],
-        ['Queue drops', unsignedText(media.queue_drops, 'queue drops')],
+        ['Queue drops', unsignedText(queueDrops, 'queue drops')],
         ['RTSP password', media.rtsp_password_set ? 'Set' : 'Not set'],
-        ['Encoder', media.encoder_running ? 'Running' : 'Stopped'],
+        ['Encoder', encoderRunning ? 'Running' : 'Stopped'],
         ['Failure', failure === '' ? 'None' : failure]
     ];
 }
