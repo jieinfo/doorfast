@@ -18,6 +18,7 @@ enum df_gvs_call_command_type {
     DF_GVS_CALL_COMMAND_HANGUP,
     DF_GVS_CALL_COMMAND_HAND_ASK,
     DF_GVS_CALL_COMMAND_HAND_REPLY,
+    DF_GVS_CALL_COMMAND_CALL,
 };
 
 struct df_gvs_call_command {
@@ -34,6 +35,13 @@ struct df_gvs_call_command {
 /* Prepares an offline, generation-bound command without mutating the session.
  * Port fields use network byte order inside the seven-byte 03/03 payload. */
 int df_gvs_call_command_prepare_answer(
+    const struct df_gvs_session *session, uint64_t expected_generation,
+    const uint8_t local[6], uint16_t primary_media_port,
+    uint16_t secondary_media_port, uint8_t duration_seconds,
+    struct df_gvs_call_command *command);
+
+/* Promotes an existing PREVIEW session to a call with the same 03/03 wire frame. */
+int df_gvs_call_command_prepare_call(
     const struct df_gvs_session *session, uint64_t expected_generation,
     const uint8_t local[6], uint16_t primary_media_port,
     uint16_t secondary_media_port, uint8_t duration_seconds,

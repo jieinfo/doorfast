@@ -12,7 +12,8 @@ static bool df_gvs_call_ack_command_valid(
         memcmp(command->destination, zero, 6) == 0) {
         return false;
     }
-    if (command->type == DF_GVS_CALL_COMMAND_ANSWER) {
+    if (command->type == DF_GVS_CALL_COMMAND_ANSWER ||
+        command->type == DF_GVS_CALL_COMMAND_CALL) {
         return command->opcode == 0x03 && command->payload_length == 7U &&
                command->payload[0] == 0x02 && command->payload[3] == 0U &&
                (command->payload[1] != 0U || command->payload[2] != 0U) &&
@@ -34,6 +35,9 @@ static bool df_gvs_call_ack_current(
     if (ack->command.type == DF_GVS_CALL_COMMAND_ANSWER) {
         return session->state == DF_GVS_RINGING;
     }
+    if (ack->command.type == DF_GVS_CALL_COMMAND_CALL) {
+        return session->state == DF_GVS_PREVIEW;
+    }
     return ack->command.type == DF_GVS_CALL_COMMAND_HANGUP &&
            (session->state == DF_GVS_PREVIEW ||
             session->state == DF_GVS_RINGING ||
@@ -50,7 +54,8 @@ static bool df_gvs_call_ack_frame_matches(
     if (ack->command.type == DF_GVS_CALL_COMMAND_HANGUP) {
         return frame->opcode == 0x82 && frame->payload_length == 0U;
     }
-    return ack->command.type == DF_GVS_CALL_COMMAND_ANSWER &&
+    return (ack->command.type == DF_GVS_CALL_COMMAND_ANSWER ||
+            ack->command.type == DF_GVS_CALL_COMMAND_CALL) &&
            frame->opcode == 0x83 && frame->payload_length == 7U &&
            frame->payload != NULL && frame->payload[0] == 0U &&
            memcmp(frame->payload + 1, ack->command.payload + 1, 5) == 0 &&
