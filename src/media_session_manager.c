@@ -1276,9 +1276,14 @@ static int df_media_module_api_start_v3(void *instance, const char *station_id,
     struct df_media_session_manager *manager = instance;
     uint64_t generation = 0U;
 
-    if (purpose == DF_MEDIA_SESSION_CALL)
+    if (purpose == DF_MEDIA_SESSION_CALL) {
+        if (request_generation == 0U) {
+            return df_media_session_manager_start(manager, station_id,
+                purpose, now_ms, &generation);
+        }
         return df_media_session_manager_incoming_call(manager, station_id,
             request_generation, now_ms);
+    }
     if (purpose != DF_MEDIA_SESSION_PREVIEW || request_generation != 0U)
         return DF_ERR_INVALID;
     return df_media_session_manager_start(manager, station_id, purpose, now_ms,

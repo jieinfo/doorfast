@@ -166,6 +166,28 @@ void test_media_session_manager_outbound_call_lock(void) {
     df_media_session_manager_destroy(&manager);
 }
 
+void test_media_module_api_starts_outbound_call_without_incoming_generation(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    struct df_media_module_status_v3 status = {0};
+    struct df_media_session_status_v3 entries[4] = {0};
+
+    manager_fixture(&config, &callbacks, &trace);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    status.sessions = entries;
+    status.session_count = sizeof(entries) / sizeof(entries[0]);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(
+        &manager, "gate_main", DF_MEDIA_SESSION_CALL, 0U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
+    TEST_ASSERT_INT_EQ(1, status.session_count > 0U ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL, entries[0].purpose);
+    TEST_ASSERT_INT_EQ(1, entries[0].active ? 1 : 0);
+    df_media_session_manager_destroy(&manager);
+}
+
 void test_media_session_manager_admits_dynamic_station_pool(void) {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
