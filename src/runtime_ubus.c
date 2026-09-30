@@ -932,7 +932,7 @@ static int df_runtime_ubus_hangup_handler(
         struct df_runtime_media_status media = {0};
         size_t index;
         if (df_runtime_ubus_read_media_status(platform->owner, &media) != DF_OK)
-            return UBUS_STATUS_UNAVAILABLE;
+            return UBUS_STATUS_UNKNOWN_ERROR;
         for (index = 0U; index < media.session_count; index++) {
             const struct df_media_session_status_v3 *session = &media.sessions[index];
             if (strcmp(session->station_id, station_id) == 0 && session->active &&
@@ -988,8 +988,10 @@ static int df_runtime_ubus_call_handler(struct ubus_context *context,
     if (result != DF_OK) {
         if (result == DF_ERR_INVALID) return UBUS_STATUS_INVALID_ARGUMENT;
         if (result == DF_MEDIA_ERROR_STATION_NOT_FOUND) return UBUS_STATUS_NOT_FOUND;
-        if (result == DF_MEDIA_ERROR_ROUTE_UNAVAILABLE) return UBUS_STATUS_UNAVAILABLE;
-        if (result == DF_MEDIA_ERROR_CAPACITY_BUSY) return UBUS_STATUS_BUSY;
+        if (result == DF_MEDIA_ERROR_ROUTE_UNAVAILABLE)
+            return UBUS_STATUS_UNKNOWN_ERROR;
+        if (result == DF_MEDIA_ERROR_CAPACITY_BUSY)
+            return UBUS_STATUS_UNKNOWN_ERROR;
         return UBUS_STATUS_UNKNOWN_ERROR;
     }
     blob_buf_init(&platform->response, 0);
