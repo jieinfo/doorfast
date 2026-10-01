@@ -1974,7 +1974,135 @@ int df_runtime_ubus_bind_station_access(struct df_runtime_ubus *service,
 }
 
 void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *service, bool enabled) {
-    if (service != NULL) service->auto_unlock = enabled;
+    if (service != NULL) {
+        service->auto_unlock = enabled;
+        if (!enabled) {
+            service->auto_unlock_pending = false;
+            service->auto_unlock_inflight = false;
+            service->auto_unlock_station_id[0] = '\0';
+        }
+    }
+}
+
+void df_runtime_ubus_set_auto_unlock_delay(struct df_runtime_ubus *service,
+    int delay_seconds) {
+    if (service == NULL) return;
+    service->auto_unlock_delay_seconds = delay_seconds < 0 ? 0 : delay_seconds;
+}
+
+int df_runtime_ubus_schedule_auto_unlock(struct df_runtime_ubus *service,
+    const char *station_id, const struct df_gvs_session *call, uint64_t now_ms) {
+    uint64_t delay_ms;
+    const struct df_station *station;
+
+    if (service == NULL || !service->started || !service->auto_unlock ||
+        station_id == NULL || strlen(station_id) >=
+            sizeof(service->auto_unlock_station_id) ||
+        call == NULL || call->generation == 0U ||
+        call->state != DF_GVS_RINGING ||
+        service->access_station_registry == NULL)
+        return DF_ERR_INVALID;
+    station = df_station_registry_find(service->access_station_registry,
+        station_id);
+    if (station == NULL || !station->enabled ||
+        memcmp(station->logical_address, call->peer, 6U) != 0)
+        return DF_ERR_INVALID;
+    if ((service->auto_unlock_pending || service->auto_unlock_inflight) &&
+        service->auto_unlock_call_generation == call->generation &&
+        memcmp(service->auto_unlock_peer, call->peer, 6U) == 0)
+        return DF_OK;
+    delay_ms = (uint64_t)service->auto_unlock_delay_seconds * 1000U;
+    if (delay_ms > UINT64_MAX - now_ms) return DF_ERR_INVALID;
+    if (snprintf(service->auto_unlock_station_id,
+            sizeof(service->auto_unlock_station_id), "%s", station_id) < 0)
+        return DF_ERR_INVALID;
+    service->auto_unlock_due_ms = now_ms + delay_ms;
+    service->auto_unlock_call_generation = call->generation;
+    memcpy(service->auto_unlock_peer, call->peer, 6U);
+    service->auto_unlock_inflight = false;
+    service->auto_unlock_pending = true;
+    return DF_OK;
+}
+
+int df_runtime_ubus_tick_auto_unlock(struct df_runtime_ubus *service,
+    const struct df_runtime_media_status *media, uint64_t now_ms) {
+    size_t index;
+
+    if (service == NULL || media == NULL)
+        return DF_ERR_INVALID;
+    if (!service->auto_unlock_pending && !service->auto_unlock_inflight)
+        return DF_OK;
+    if (!service->auto_unlock || service->access_session == NULL ||
+        service->access_session->generation !=
+            service->auto_unlock_call_generation ||
+        memcmp(service->access_session->peer, service->auto_unlock_peer, 6U) != 0 ||
+        (service->access_session->state != DF_GVS_RINGING &&
+         service->access_session->state != DF_GVS_TALKING)) {
+        service->auto_unlock_pending = false;
+        service->auto_unlock_inflight = false;
+        return DF_OK;
+    }
+    if (service->auto_unlock_inflight) {
+        if (service->access == NULL ||
+            service->access->result.session_generation !=
+                service->auto_unlock_access_generation ||
+            service->access->result.state == DF_GVS_ACCESS_PROTOCOL_EXPIRED ||
+            service->access->result.state == DF_GVS_ACCESS_PROTOCOL_CANCELLED)
+            service->auto_unlock_inflight = false;
+        return DF_OK;
+    }
+    if (now_ms < service->auto_unlock_due_ms) return DF_OK;
+    for (index = 0U; index < media->session_count; index++) {
+        const struct df_media_session_status_v3 *session = &media->sessions[index];
+        if (strcmp(session->station_id, service->auto_unlock_station_id) != 0)
+            continue;
+        if (!session->active || session->purpose != DF_MEDIA_SESSION_CALL)
+            return DF_OK;
+        if (!session->ready) return DF_OK;
+        service->auto_unlock_pending = false;
+        if (df_runtime_ubus_unlock_station(service,
+                service->auto_unlock_station_id, now_ms) != DF_OK)
+            return DF_ERR_INVALID;
+        service->auto_unlock_inflight = true;
+        service->auto_unlock_access_generation =
+            service->access->result.session_generation;
+        (void)df_runtime_ubus_log_event(service, now_ms,
+            "event=auto_unlock_submitted");
+        return DF_OK;
+    }
+    return DF_OK;
+}
+
+int df_runtime_ubus_handle_auto_unlock_result(
+    struct df_runtime_ubus *service, uint64_t now_ms) {
+    struct df_runtime_call_request request = {
+        .type = DF_GVS_CALL_COMMAND_HANGUP, .reason = 1U,
+    };
+
+    if (service == NULL || !service->auto_unlock_inflight)
+        return DF_OK;
+    if (service->access == NULL ||
+        service->access->result.session_generation !=
+            service->auto_unlock_access_generation ||
+        (service->access->result.state != DF_GVS_ACCESS_PROTOCOL_COMPLETED &&
+         service->access->result.state != DF_GVS_ACCESS_PROTOCOL_REJECTED))
+        return DF_OK;
+    service->auto_unlock_inflight = false;
+    if (!service->auto_unlock || service->access_session == NULL ||
+        service->access_session->generation !=
+            service->auto_unlock_call_generation ||
+        memcmp(service->access_session->peer, service->auto_unlock_peer, 6U) != 0 ||
+        (service->access_session->state != DF_GVS_RINGING &&
+         service->access_session->state != DF_GVS_TALKING))
+        return DF_OK;
+    request.session_generation = service->auto_unlock_call_generation;
+    (void)snprintf(request.runtime_id, sizeof(request.runtime_id), "%s",
+        service->runtime_id);
+    if (df_runtime_ubus_submit_call(service, &request) != DF_OK)
+        return DF_ERR_IO;
+    (void)df_runtime_ubus_log_event(service, now_ms,
+        "event=auto_unlock_hangup_submitted");
+    return DF_OK;
 }
 
 int df_runtime_ubus_unlock_station(struct df_runtime_ubus *service,

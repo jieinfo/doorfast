@@ -627,14 +627,6 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
             for (index = 0U; index < stations->count; index++) {
                 if (memcmp(stations->items[index].logical_address,
                         frame.source, sizeof(frame.source)) == 0) {
-                    if (ubus != NULL && ubus->auto_unlock) {
-                        int unlock_status = df_runtime_ubus_unlock_station(ubus,
-                            stations->items[index].id, now_ms);
-                        (void)df_runtime_ubus_log_event(ubus, now_ms,
-                            unlock_status == DF_OK ?
-                            "event=auto_unlock_submitted" :
-                            "event=auto_unlock_failed");
-                    }
                     if (media != NULL && media->available) {
                         *media_result = df_runtime_media_module_incoming_call(
                             media, stations->items[index].id,
@@ -642,6 +634,14 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
                             preempted_station_id, &preempted_generation);
                     } else {
                         *media_result = DF_OK;
+                    }
+                    if (ubus != NULL && ubus->auto_unlock &&
+                        *media_result == DF_OK) {
+                        if (df_runtime_ubus_schedule_auto_unlock(ubus,
+                                stations->items[index].id, &next_session,
+                                now_ms) != DF_OK)
+                            (void)df_runtime_ubus_log_event(ubus, now_ms,
+                                "event=auto_unlock_schedule_failed");
                     }
                     if (*media_result == DF_OK &&
                         preempted_station_id[0] != '\0') {
@@ -1137,6 +1137,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_ubus_set_active_host(&ubus,
             !runtime->config.passive_only || runtime->config.active_host);
         df_runtime_ubus_set_auto_unlock(&ubus, runtime->config.auto_unlock);
+        df_runtime_ubus_set_auto_unlock_delay(&ubus,
+            runtime->config.unlock_delay_seconds);
         df_runtime_log_public_event(&ubus, started_ms,
             runtime->config.active_host ? "service_started_active_host" :
                 "service_started_passive", 0);
@@ -1220,6 +1222,15 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             df_runtime_media_tick_with_event(&media_module, &ubus,
                 &event_stream, now_ms) != DF_OK) {
             (void)fputs("doorfast: event=media_module_tick_failed\n", stderr);
+        }
+        if (wait_context.ubus_started &&
+            (ubus.auto_unlock_pending || ubus.auto_unlock_inflight)) {
+            struct df_runtime_media_status media_status = {0};
+            if (df_runtime_ubus_read_media_status(&ubus, &media_status) != DF_OK ||
+                df_runtime_ubus_tick_auto_unlock(&ubus, &media_status,
+                    now_ms) != DF_OK)
+                (void)df_runtime_ubus_log_event(&ubus, now_ms,
+                    "event=auto_unlock_tick_failed");
         }
         (void)df_gvs_access_result_tick(&access.result,
             ubus.station_access_active ? &station_access_session : &session,
@@ -1536,10 +1547,15 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                     access_frame.opcode == 0x89) {
                     if (df_gvs_access_result_observe(&access.result,
                             ubus.station_access_active ? &station_access_session : &session,
-                            identity, &access_frame, now_ms) == DF_OK)
+                            identity, &access_frame, now_ms) == DF_OK) {
                         (void)fprintf(stdout, "doorfast: event=access_result state=%s raw_status=%u\n",
                             df_gvs_access_state_name(access.result.state),
                             (unsigned)access.result.raw_status);
+                        if (df_runtime_ubus_handle_auto_unlock_result(
+                                &ubus, now_ms) != DF_OK)
+                            (void)df_runtime_ubus_log_event(&ubus, now_ms,
+                                "event=auto_unlock_hangup_failed");
+                    }
                     goto iteration_end;
                 }
             }

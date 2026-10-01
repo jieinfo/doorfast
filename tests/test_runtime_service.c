@@ -31,6 +31,30 @@ struct auto_unlock_trace {
     uint8_t destination[6];
 };
 
+struct auto_hangup_trace {
+    unsigned calls;
+    struct df_runtime_call_request request;
+};
+
+static int auto_hangup_status(struct df_gvs_call_control_status *status,
+    void *context) {
+    (void)context;
+    if (status == NULL) return DF_ERR_INVALID;
+    memset(status, 0, sizeof(*status));
+    status->session_state = DF_GVS_RINGING;
+    return DF_OK;
+}
+
+static int record_auto_hangup(const struct df_runtime_call_request *request,
+    uint64_t now_ms, void *context) {
+    struct auto_hangup_trace *trace = context;
+    (void)now_ms;
+    if (request == NULL || trace == NULL) return DF_ERR_INVALID;
+    trace->request = *request;
+    trace->calls++;
+    return DF_OK;
+}
+
 static int record_auto_unlock(
     const struct df_gvs_access_request *request, void *context) {
     struct auto_unlock_trace *trace = context;
@@ -399,6 +423,7 @@ void test_runtime_auto_unlock_uses_calling_station_once(void) {
     struct df_gvs_access_control access;
     struct df_gvs_session access_session = {0};
     struct auto_unlock_trace unlock = {0};
+    struct auto_hangup_trace hangup = {0};
     struct df_gvs_call_control control;
     struct df_gvs_call_control_result result;
     struct df_gvs_session session = {0};
@@ -412,8 +437,10 @@ void test_runtime_auto_unlock_uses_calling_station_once(void) {
         &access, "0011223344556677", 0, record_auto_unlock, &unlock));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(
         &ubus, runtime_service_status, NULL, 10U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_call(
+        &ubus, auto_hangup_status, record_auto_hangup, &hangup));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(
-        &ubus, &access, &access_session, local));
+        &ubus, &access, &session, local));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(
         &ubus, &access_session, &stations));
     df_runtime_ubus_set_active_host(&ubus, true);
@@ -427,13 +454,40 @@ void test_runtime_auto_unlock_uses_calling_station_once(void) {
         &media, &ubus, NULL, &stations, &control, packet, packet_length,
         local, &session, &deadline, htonl(0x7f000001U), 100U, &result,
         &media_result));
-    TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
-    TEST_ASSERT_INT_EQ(0, memcmp(station_address, unlock.destination, 6));
+    TEST_ASSERT_INT_EQ(0, (int)unlock.calls);
+    TEST_ASSERT_INT_EQ(1, ubus.auto_unlock_pending);
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_receive_control_with_media(
         &media, &ubus, NULL, &stations, &control, packet, packet_length,
         local, &session, &deadline, htonl(0x7f000001U), 101U, &result,
         &media_result));
-    TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
+    TEST_ASSERT_INT_EQ(0, (int)unlock.calls);
+    {
+        struct df_media_session_status_v3 entry = {
+            .station_id = "gate_side", .generation = 20U,
+            .purpose = DF_MEDIA_SESSION_CALL, .active = true,
+        };
+        struct df_runtime_media_status status = {
+            .sessions = &entry, .session_count = 1U,
+        };
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_tick_auto_unlock(&ubus, &status, 102U));
+        TEST_ASSERT_INT_EQ(0, (int)unlock.calls);
+        entry.ready = true;
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_tick_auto_unlock(&ubus, &status, 103U));
+        TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
+        TEST_ASSERT_INT_EQ(0, memcmp(station_address, unlock.destination, 6));
+        access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_handle_auto_unlock_result(&ubus, 105U));
+        TEST_ASSERT_INT_EQ(1, (int)hangup.calls);
+        TEST_ASSERT_INT_EQ(DF_GVS_CALL_COMMAND_HANGUP,
+            hangup.request.type);
+        TEST_ASSERT_INT_EQ(1, (int)hangup.request.session_generation);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_tick_auto_unlock(&ubus, &status, 104U));
+        TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
+    }
     df_runtime_ubus_stop(&ubus);
 }
 
