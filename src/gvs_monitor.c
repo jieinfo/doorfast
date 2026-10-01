@@ -387,7 +387,9 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         if (monitor->persistent && monitor->busy_rejections < UINT_MAX)
             monitor->busy_rejections++;
         if (monitor->persistent &&
-            monitor->busy_rejections >= DF_GVS_MONITOR_BUSY_RETRY_LIMIT) {
+            monitor->busy_rejections >= (monitor->media_ready ?
+                DF_GVS_MONITOR_BUSY_RETRY_LIMIT :
+                DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT)) {
             /* A busy response is not a successful retry.  Tear down the
              * rejected attempt before asking the station again. */
             monitor->state = DF_GVS_MONITOR_STOPPING;
