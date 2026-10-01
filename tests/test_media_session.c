@@ -1,6 +1,9 @@
 #include <fcntl.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <jpeglib.h>
 
 #include "doorfast.h"
 #include "media_session.h"
@@ -27,6 +30,126 @@ static void preview_session_with_encoder(struct df_media_session *session,
     session->encoder.generation = 7U;
     session->encoder.source_width = 640U;
     session->encoder.source_height = 480U;
+}
+
+/* Capture the actual JPEG written during reconnect, not merely a frame count. */
+void test_media_session_reconnect_preserves_last_real_image(void) {
+    struct df_media_session session = {0};
+    struct df_media_module_config_v3 config = {.fps = 8U};
+    struct jpeg_compress_struct compressor;
+    struct jpeg_decompress_struct decoder;
+    struct jpeg_error_mgr error;
+    unsigned char *jpeg = NULL, row[640U * 3U];
+    unsigned long length = 0U;
+    char path[] = "/tmp/doorfast-frozen-frame.XXXXXX";
+    int fd = mkstemp(path);
+    TEST_ASSERT_INT_EQ(1, fd >= 0);
+    if (fd < 0) return;
+    memset(row, 0, sizeof(row));
+    for (size_t x = 0U; x < 640U; x++) row[x * 3U] = 220U;
+    compressor.err = jpeg_std_error(&error);
+    jpeg_create_compress(&compressor);
+    jpeg_mem_dest(&compressor, &jpeg, &length);
+    compressor.image_width = 640U;
+    compressor.image_height = 480U;
+    compressor.input_components = 3;
+    compressor.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&compressor);
+    jpeg_start_compress(&compressor, TRUE);
+    while (compressor.next_scanline < 480U) {
+        JSAMPROW scanline = row;
+        jpeg_write_scanlines(&compressor, &scanline, 1);
+    }
+    jpeg_finish_compress(&compressor);
+    jpeg_destroy_compress(&compressor);
+    preview_session_with_encoder(&session, DF_MEDIA_SESSION_PREVIEW);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_push_jpeg(&session, &config,
+        NULL, jpeg, length, 640U, 480U, 200U));
+    free(jpeg);
+    close(session.encoder.input_fd);
+    session.encoder.input_fd = fd;
+    df_media_session_mark_source_lost(&session, 300U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_reset_attempt(&session, 8U));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_tick_reconnect(&session, 8U, 300U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SOURCE_RECONNECTING, session.source_state);
+    TEST_ASSERT_INT_EQ(200, (int)session.last_frame_ms);
+    TEST_ASSERT_INT_EQ(1, (int)session.frames_received);
+    TEST_ASSERT_INT_EQ(1, lseek(fd, 0, SEEK_END) > 0);
+    TEST_ASSERT_INT_EQ(0, (int)lseek(fd, 0, SEEK_SET));
+    FILE *input = fdopen(dup(fd), "rb");
+    decoder.err = jpeg_std_error(&error);
+    jpeg_create_decompress(&decoder);
+    jpeg_stdio_src(&decoder, input);
+    TEST_ASSERT_INT_EQ(JPEG_HEADER_OK, jpeg_read_header(&decoder, TRUE));
+    decoder.out_color_space = JCS_RGB;
+    TEST_ASSERT_INT_EQ(TRUE, jpeg_start_decompress(&decoder));
+    unsigned bright_corner = 0U;
+    while (decoder.output_scanline < decoder.output_height) {
+        unsigned y = decoder.output_scanline;
+        JSAMPROW scanline = row;
+        jpeg_read_scanlines(&decoder, &scanline, 1);
+        if (y == 240U) {
+            /* The scene center must remain red, not the old full-screen slate. */
+            TEST_ASSERT_INT_EQ(1, row[320U * 3U] > 180U);
+            TEST_ASSERT_INT_EQ(1, row[320U * 3U + 1U] < 40U);
+        }
+        if (y < 60U) for (size_t x = 0U; x < 640U; x++)
+            if (row[x * 3U + 1U] > 160U) bright_corner++;
+    }
+    TEST_ASSERT_INT_EQ(1, bright_corner > 30U); /* Small frozen-frame notice. */
+    jpeg_finish_decompress(&decoder);
+    jpeg_destroy_decompress(&decoder);
+    fclose(input);
+    /* A later real frame must replace the first outage's cached scene. */
+    memset(row, 0, sizeof(row));
+    for (size_t x = 0U; x < 640U; x++) row[x * 3U + 2U] = 220U;
+    jpeg = NULL;
+    length = 0U;
+    compressor.err = jpeg_std_error(&error);
+    jpeg_create_compress(&compressor);
+    jpeg_mem_dest(&compressor, &jpeg, &length);
+    compressor.image_width = 640U;
+    compressor.image_height = 480U;
+    compressor.input_components = 3;
+    compressor.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&compressor);
+    jpeg_start_compress(&compressor, TRUE);
+    while (compressor.next_scanline < 480U) {
+        JSAMPROW scanline = row;
+        jpeg_write_scanlines(&compressor, &scanline, 1);
+    }
+    jpeg_finish_compress(&compressor);
+    jpeg_destroy_compress(&compressor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_push_jpeg(&session, &config,
+        NULL, jpeg, length, 640U, 480U, 400U));
+    free(jpeg);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SOURCE_LIVE, session.source_state);
+    TEST_ASSERT_INT_EQ(2, (int)session.frames_received);
+    TEST_ASSERT_INT_EQ(400, (int)session.last_frame_ms);
+    df_media_session_mark_source_lost(&session, 500U);
+    decoder.err = jpeg_std_error(&error);
+    jpeg_create_decompress(&decoder);
+    jpeg_mem_src(&decoder, session.reconnect_frame.data,
+        (unsigned long)session.reconnect_frame.length);
+    TEST_ASSERT_INT_EQ(JPEG_HEADER_OK, jpeg_read_header(&decoder, TRUE));
+    decoder.out_color_space = JCS_RGB;
+    jpeg_start_decompress(&decoder);
+    while (decoder.output_scanline < decoder.output_height) {
+        unsigned y = decoder.output_scanline;
+        JSAMPROW scanline = row;
+        jpeg_read_scanlines(&decoder, &scanline, 1);
+        if (y == 240U) {
+            TEST_ASSERT_INT_EQ(1, row[320U * 3U + 2U] > 180U);
+            TEST_ASSERT_INT_EQ(1, row[320U * 3U] < 40U);
+        }
+    }
+    jpeg_finish_decompress(&decoder);
+    jpeg_destroy_decompress(&decoder);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_stop_pipeline(&session));
+    TEST_ASSERT_INT_EQ(0, session.last_real_frame.data != NULL);
+    df_media_session_reset(&session);
+    unlink(path);
 }
 
 void test_media_session_preview_publisher_survives_source_attempt(void) {

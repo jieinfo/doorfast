@@ -11,6 +11,23 @@
 #include "media_module.h"
 #include "test.h"
 
+/* Lock the pre-extension v3 ABI on both host and router architectures. */
+struct legacy_session_status_v3 {
+    char station_id[33], stream_name[65];
+    uint64_t generation;
+    enum df_media_session_purpose purpose;
+    enum df_media_session_state_v3 state;
+    enum df_media_error_v3 last_error;
+    bool active, ready, viewer_active, encoder_running;
+    uint64_t started_ms, status_revision;
+    unsigned queue_drops;
+};
+_Static_assert(sizeof(struct df_media_session_status_v3) ==
+    sizeof(struct legacy_session_status_v3), "v3 status array stride changed");
+_Static_assert(offsetof(struct df_media_session_status_v3, started_ms) ==
+    offsetof(struct legacy_session_status_v3, started_ms),
+    "v3 status timestamp layout changed");
+
 typedef int (*expected_deprecated_relay_send_fn)(const char *, const char *,
     const char *, void *);
 

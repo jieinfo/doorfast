@@ -1431,6 +1431,8 @@ static int df_media_module_api_status_v3(const void *instance,
         entry->last_error = session->last_error;
         entry->active = session->active;
         entry->ready = df_media_session_status_ready(session);
+        entry->source_live = session->source_state == DF_MEDIA_SOURCE_LIVE &&
+            session->monitor.media_ready;
         entry->viewer_active = session->viewer_active;
         entry->encoder_running =
             df_media_encoder_is_running(&session->encoder);
