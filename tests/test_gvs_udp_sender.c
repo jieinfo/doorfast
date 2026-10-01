@@ -435,6 +435,53 @@ void test_gvs_udp_sender_replies_to_observed_peer_route(void) {
     close(receiver);
 }
 
+void test_gvs_udp_sender_emits_access_to_configured_route_without_observation(
+    void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t door[6] = {0x32, 2, 1, 0, 1, 0};
+    const uint8_t material[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    struct df_gvs_session session = {
+        .state = DF_GVS_RINGING,
+        .peer = {0x32, 2, 1, 0, 1, 0},
+        .generation = 7,
+    };
+    struct df_gvs_access_request access;
+    struct sockaddr_in address;
+    socklen_t address_length = sizeof(address);
+    struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
+    uint8_t received[128];
+    int receiver;
+    ssize_t received_length;
+
+    receiver = socket(AF_INET, SOCK_DGRAM, 0);
+    TEST_ASSERT_INT_EQ(1, receiver >= 0);
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    TEST_ASSERT_INT_EQ(0, bind(receiver, (const struct sockaddr *)&address,
+                               sizeof(address)));
+    TEST_ASSERT_INT_EQ(0, getsockname(receiver, (struct sockaddr *)&address,
+                                      &address_length));
+    TEST_ASSERT_INT_EQ(0, setsockopt(receiver, SOL_SOCKET, SO_RCVTIMEO,
+                                     &timeout, sizeof(timeout)));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_open(&sender, "0.0.0.0",
+        ntohs(address.sin_port), udp_sender_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_set_configured_route(
+        &sender, door, address.sin_addr.s_addr));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_prepare_direct(
+        &session, 7, local, material, &access));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_access_emit(&access, &sender));
+    received_length = recv(receiver, received, sizeof(received), 0);
+    TEST_ASSERT_INT_EQ(50, (int)received_length);
+    TEST_ASSERT_INT_EQ(4, received[38]);
+    TEST_ASSERT_INT_EQ(9, received[39]);
+    TEST_ASSERT_INT_EQ(12, received[40]);
+    TEST_ASSERT_INT_EQ(0, memcmp(received + 42, material, 8));
+    df_gvs_udp_sender_close(&sender);
+    close(receiver);
+}
+
 void test_gvs_udp_sender_expires_and_refreshes_observed_peer_route(void) {
     const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
     const uint8_t door[6] = {0x32, 2, 1, 0, 1, 0};
@@ -531,6 +578,28 @@ void test_gvs_udp_sender_accepts_only_fresh_observed_preview_routes(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_gvs_udp_sender_resolve_preview_route(&sender, station, 1100U,
             1000U, &ipv4));
+}
+
+void test_gvs_udp_sender_preserves_configured_route_after_preview_observation(
+    void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t station[6] = {0x32, 2, 1, 0, 2, 0};
+    const uint8_t observed_ipv4[4] = {127, 0, 0, 2};
+    struct df_gvs_udp_sender sender = {.fd = -1};
+    uint8_t packet[128];
+    size_t packet_length;
+    uint32_t ipv4 = 0U;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_set_configured_route(
+        &sender, station, htonl(0x7f000001U)));
+    packet_length = udp_sender_preview_packet(packet, sizeof(packet), local,
+                                              station, observed_ipv4);
+    TEST_ASSERT_INT_EQ(1, packet_length > 0U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_observe_preview_route(
+        &sender, packet, packet_length, local, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_udp_sender_resolve_preview_route(
+        &sender, station, 100U, 1000U, &ipv4));
+    TEST_ASSERT_INT_EQ((int)htonl(0x7f000001U), (int)ipv4);
 }
 
 void test_gvs_udp_sender_emits_elevator_request_to_observed_route(void) {

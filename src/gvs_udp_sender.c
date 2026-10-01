@@ -54,6 +54,7 @@ static int df_gvs_udp_resolve_destination(
     const struct df_gvs_udp_sender *sender, const uint8_t peer[6],
     struct sockaddr_in *destination) {
     const struct df_gvs_observed_route *route;
+    size_t index;
     char host[INET_ADDRSTRLEN];
 
     if (sender == NULL || peer == NULL || destination == NULL)
@@ -63,6 +64,15 @@ static int df_gvs_udp_resolve_destination(
     if (route != NULL) {
         destination->sin_addr.s_addr = route->ipv4;
         return DF_OK;
+    }
+    for (index = 0U; index < DF_GVS_PREVIEW_ROUTE_CAPACITY; index++) {
+        const struct df_gvs_preview_route *configured =
+            &sender->preview_routes[index];
+        if (configured->valid && configured->configured &&
+            memcmp(configured->peer, peer, 6U) == 0) {
+            destination->sin_addr.s_addr = configured->ipv4;
+            return DF_OK;
+        }
     }
     if (df_gvs_identity_unicast_ip(peer, host) != DF_OK ||
         inet_pton(AF_INET, host, &destination->sin_addr) != 1)
@@ -286,6 +296,8 @@ int df_gvs_udp_sender_observe_preview_route(struct df_gvs_udp_sender *sender,
         !df_gvs_frame_is_for_identity(&frame, identity) ||
         df_gvs_station_validate(frame.source) != DF_OK) return DF_ERR_INVALID;
     route = df_gvs_udp_preview_route_mutable(sender, frame.source);
+    if (route->configured)
+        return DF_OK;
     memcpy(route->peer, frame.source, sizeof(route->peer));
     route->ipv4 = prefix.source_ipv4;
     route->observed_ms = now_ms;
