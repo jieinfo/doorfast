@@ -1820,7 +1820,6 @@ static void manager_keeps_producer_across_busy_retry(uint8_t end_reason) {
         jpeg, sizeof(jpeg), 640U, 480U, 102U));
     original_pid = session->encoder.pid;
     TEST_ASSERT_INT_EQ(1, original_pid > 0);
-    prompt_length = session->reconnect_frame.length;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
     revision = entry.status_revision;
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_video(&manager,
@@ -1830,6 +1829,7 @@ static void manager_keeps_producer_across_busy_retry(uint8_t end_reason) {
     control.payload_length = sizeof(ended);
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(&manager,
         &control, session->station_ipv4, 200U));
+    prompt_length = session->reconnect_frame.length;
     if (end_reason == 0U) {
         unsigned controls_after_end = trace.control_count;
 
@@ -1854,6 +1854,7 @@ static void manager_keeps_producer_across_busy_retry(uint8_t end_reason) {
     TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 200U));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
     TEST_ASSERT_INT_EQ(1, entry.ready);
+    TEST_ASSERT_INT_EQ(0, entry.source_live);
     TEST_ASSERT_INT_EQ(1, entry.encoder_running);
     TEST_ASSERT_INT_EQ(1, (int)status.active_encoders);
     TEST_ASSERT_INT_EQ(1, entry.status_revision > revision);
@@ -1886,6 +1887,8 @@ static void manager_keeps_producer_across_busy_retry(uint8_t end_reason) {
     TEST_ASSERT_INT_EQ(2, (int)session->frames_received);
     TEST_ASSERT_INT_EQ(5203, (int)session->last_frame_ms);
     TEST_ASSERT_INT_EQ(DF_MEDIA_SOURCE_LIVE, session->source_state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
+    TEST_ASSERT_INT_EQ(1, entry.source_live);
     TEST_ASSERT_INT_EQ((int)(key.generation + 1U), (int)session->media_generation);
     TEST_ASSERT_INT_EQ((int)key.generation, (int)session->encoder.generation);
     TEST_ASSERT_INT_EQ((int)original_pid, (int)session->encoder.pid);

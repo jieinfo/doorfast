@@ -49,6 +49,7 @@ static int submit_call(const struct df_runtime_call_request *request,
 }
 
 struct media_binding_test {
+    int status_result;
     struct df_media_module_status_v3 status;
     struct df_media_session_status_v3 sessions[2];
     enum df_media_module_command command;
@@ -71,6 +72,8 @@ static int media_start(void *instance, const char *station_id,
     if (strcmp(station_id, "gate_main") != 0)
         return DF_MEDIA_ERROR_STATION_NOT_FOUND;
     test->start_calls++;
+    if (test->status.required_session_count == 0U)
+        test->status.required_session_count = 1U;
     (void)snprintf(test->start_station_id, sizeof(test->start_station_id),
         "%s", station_id);
     test->command_now_ms = now_ms;
@@ -98,6 +101,7 @@ static int media_command(void *instance, enum df_media_module_command command,
 static int media_status(const void *instance,
     struct df_media_module_status_v3 *status) {
     const struct media_binding_test *test = instance;
+    if (test->status_result != DF_OK) return test->status_result;
     struct df_media_session_status_v3 *sessions = status->sessions;
     size_t capacity = status->session_count;
     size_t copied = test->status.required_session_count < capacity ?
@@ -667,6 +671,16 @@ void test_runtime_ubus_access_requires_active_host(void) {
         .logical_address = {0x32, 2, 1, 0, 1, 0}};
     struct df_station_registry registry = {.items = &station, .count = 1};
     const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct media_binding_test media = {
+        .status = {.required_session_count = 1U},
+        .sessions = {{.station_id = "gate_main", .generation = 7U,
+            .active = true, .ready = true, .source_live = true,
+            .state = DF_MEDIA_SESSION_PUBLISHING}},
+    };
+    struct df_media_session_status_v3 snapshot[1];
+    struct df_runtime_media_module module = {.api = &media_api,
+        .instance = &media, .available = true, .session_snapshot = snapshot,
+        .session_snapshot_capacity = 1U};
     unsigned calls = 0;
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(
         &access, "0011223344556677", 0, submit_access, &calls));
@@ -676,6 +690,8 @@ void test_runtime_ubus_access_requires_active_host(void) {
         &service, &access, &session, local));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(
         &service, &station_session, &registry));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(&service,
+        &module, "/tmp/doorfast-unused-manual-credentials"));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_unlock_station(&service, "gate_main", 10));
     TEST_ASSERT_INT_EQ(0, (int)calls);
@@ -684,7 +700,7 @@ void test_runtime_ubus_access_requires_active_host(void) {
         df_runtime_ubus_unlock_station(&service, "gate_main", 10));
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_unlock_station(&service, "gate_main", 10));
-    TEST_ASSERT_INT_EQ(2, (int)calls);
+    TEST_ASSERT_INT_EQ(1, (int)calls);
     df_runtime_ubus_stop(&service);
 }
 
@@ -722,6 +738,20 @@ void test_runtime_ubus_unlock_targets_requested_station(void) {
     struct df_gvs_session session = {0};
     struct station_access_trace trace = {0};
     unsigned status_calls = 0;
+    struct media_binding_test media = {
+        .status = {.required_session_count = 2U},
+        .sessions = {
+            {.station_id = "gate_main", .generation = 7U,
+                .active = true, .ready = true, .source_live = true,
+                .state = DF_MEDIA_SESSION_PUBLISHING},
+            {.station_id = "gate_side", .generation = 8U,
+                .active = true, .ready = true, .source_live = true,
+                .state = DF_MEDIA_SESSION_PUBLISHING}},
+    };
+    struct df_media_session_status_v3 snapshot[2];
+    struct df_runtime_media_module module = {.api = &media_api,
+        .instance = &media, .available = true, .session_snapshot = snapshot,
+        .session_snapshot_capacity = 2U};
 
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(
         &access, "0011223344556677", 0, submit_station_access, &trace));
@@ -732,18 +762,175 @@ void test_runtime_ubus_unlock_targets_requested_station(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(
         &service, &session, &registry));
     df_runtime_ubus_set_active_host(&service, true);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(&service,
+        &module, "/tmp/doorfast-unused-manual-credentials"));
 
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_unlock_station(&service, "gate_side", 10));
     TEST_ASSERT_INT_EQ(1, (int)trace.calls);
     TEST_ASSERT_INT_EQ(0, memcmp(side_address, trace.destination, 6));
     TEST_ASSERT_INT_EQ(0, memcmp(session.peer, side_address, 6));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_unlock_station(&service, "gate_main", 11));
+    TEST_ASSERT_INT_EQ(1, (int)trace.calls);
+    access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 11));
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_unlock_station(&service, "gate_main", 11));
     TEST_ASSERT_INT_EQ(2, (int)trace.calls);
     TEST_ASSERT_INT_EQ(0, memcmp(main_address, trace.destination, 6));
     TEST_ASSERT_INT_EQ(0, memcmp(session.peer, main_address, 6));
     df_runtime_ubus_stop(&service);
+}
+
+/* An idle station must establish real media before emitting 04/09. */
+void test_runtime_ubus_manual_unlock_defers_idle_station(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_station station = {.id = "gate_main", .enabled = true,
+        .logical_address = {0x32, 2, 1, 0, 1, 0}};
+    struct df_station_registry registry = {.items = &station, .count = 1};
+    struct df_runtime_ubus service = {0};
+    struct df_gvs_access_control access;
+    struct df_gvs_session call = {0}, access_session = {0};
+    struct station_access_trace trace = {0};
+    struct media_binding_test media = {
+        .status = {.required_session_count = 0U},
+        .sessions = {{.station_id = "gate_main", .generation = 7U,
+            .active = true, .state = DF_MEDIA_SESSION_REQUESTING}},
+    };
+    struct df_media_session_status_v3 snapshot[1];
+    struct df_runtime_media_module module = {.api = &media_api,
+        .instance = &media, .available = true, .session_snapshot = snapshot,
+        .session_snapshot_capacity = 1U};
+    unsigned calls = 0;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(&access,
+        "0011223344556677", 0U, submit_station_access, &trace));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(&service,
+        provide_runtime_status, &calls, 10U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(&service,
+        &access, &call, local));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(&service,
+        &access_session, &registry));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(&service,
+        &module, "/tmp/doorfast-unused-manual-credentials"));
+    df_runtime_ubus_set_active_host(&service, true);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_unlock_station(&service, "gate_main", 10U));
+    TEST_ASSERT_INT_EQ(0, (int)trace.calls);
+    TEST_ASSERT_INT_EQ(1, service.manual_unlock_owns_preview);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_unlock_station(&service, "gate_main", 10U));
+    TEST_ASSERT_INT_EQ(0, (int)trace.calls);
+    TEST_ASSERT_INT_EQ(1, (int)media.start_calls);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 11U));
+    TEST_ASSERT_INT_EQ(0, (int)trace.calls);
+    media.sessions[0].ready = true;
+    media.sessions[0].state = DF_MEDIA_SESSION_PUBLISHING;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 12U));
+    TEST_ASSERT_INT_EQ(0, (int)trace.calls); /* Frozen publisher is not live. */
+    media.sessions[0].source_live = true;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 13U));
+    TEST_ASSERT_INT_EQ(1, (int)trace.calls);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_unlock_station(&service, "gate_main", 13U));
+    TEST_ASSERT_INT_EQ(1, (int)trace.calls);
+    access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 14U));
+    TEST_ASSERT_INT_EQ(1, (int)media.command_calls);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_STOP, media.command);
+    TEST_ASSERT_INT_EQ(7, (int)media.command_generation);
+    TEST_ASSERT_INT_EQ(0, service.manual_unlock_inflight);
+    df_runtime_ubus_stop(&service);
+}
+
+void test_runtime_ubus_manual_unlock_cleanup_and_adoption(void) {
+    /* terminal reply, timeout, viewer takeover, replacement, disappearance,
+     * stalled startup, failed media, and HA start before viewer notification */
+    for (unsigned scenario = 0U; scenario < 10U; scenario++) {
+        const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+        struct df_station station = {.id = "gate_main", .enabled = true,
+            .logical_address = {0x32, 2, 1, 0, 1, 0}};
+        struct df_station_registry registry = {.items = &station, .count = 1};
+        struct df_runtime_ubus service = {0};
+        struct df_gvs_access_control access;
+        struct df_gvs_session call = {0}, access_session = {0};
+        struct station_access_trace trace = {0};
+        struct media_binding_test media = {
+            .sessions = {{.station_id = "gate_main", .generation = 7U,
+                .active = true, .state = DF_MEDIA_SESSION_REQUESTING}},
+        };
+        struct df_media_session_status_v3 snapshot[1];
+        struct df_runtime_media_module module = {.api = &media_api,
+            .instance = &media, .available = true, .session_snapshot = snapshot,
+            .session_snapshot_capacity = 1U};
+        struct call_binding_test binding = {0};
+        unsigned calls = 0U;
+        uint64_t tick = 12U;
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_init(&access,
+            "0011223344556677", 0U, submit_station_access, &trace));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(&service,
+            provide_runtime_status, &calls, 10U));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(&service,
+            &access, &call, local));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(&service,
+            &access_session, &registry));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(&service,
+            &module, "/tmp/doorfast-unused-manual-credentials"));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_call(&service,
+            provide_call_status, submit_call, &binding));
+        df_runtime_ubus_set_active_host(&service, true);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_unlock_station(&service, "gate_main", 10U));
+        TEST_ASSERT_INT_EQ(1, (int)media.start_calls);
+        if (scenario <= 2U || scenario == 7U) {
+            media.sessions[0].ready = true;
+            media.sessions[0].source_live = true;
+            media.sessions[0].state = DF_MEDIA_SESSION_PUBLISHING;
+            TEST_ASSERT_INT_EQ(DF_OK,
+                df_runtime_ubus_tick_manual_unlock(&service, 11U));
+            TEST_ASSERT_INT_EQ(1, (int)trace.calls);
+        }
+        switch (scenario) {
+        case 0U: access.result.state = DF_GVS_ACCESS_PROTOCOL_REJECTED; break;
+        case 1U: access.result.state = DF_GVS_ACCESS_PROTOCOL_EXPIRED; break;
+        case 2U:
+            media.sessions[0].viewer_active = true;
+            access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
+            break;
+        case 3U: media.sessions[0].generation = 8U; break;
+        case 4U: media.status.required_session_count = 0U; break;
+        case 5U: tick = 30010U; break;
+        case 6U: media.sessions[0].state = DF_MEDIA_SESSION_FAILED; break;
+        case 7U: {
+            uint64_t generation = 0U;
+            TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_monitor_start(&service,
+                service.runtime_id, "gate_main", &generation));
+            access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
+            break;
+        }
+        case 8U: media.status_result = DF_ERR_IO; tick = 30010U; break;
+        case 9U:
+            media.sessions[0].ready = true;
+            media.sessions[0].source_live = true;
+            media.sessions[0].state = DF_MEDIA_SESSION_PUBLISHING;
+            service.auto_unlock_pending = true;
+            call.state = DF_GVS_RINGING;
+            memcpy(call.peer, station.logical_address, 6U);
+            call.peer[4] = 2U;
+            break;
+        }
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_tick_manual_unlock(&service, tick));
+        TEST_ASSERT_INT_EQ(0, service.manual_unlock_pending);
+        TEST_ASSERT_INT_EQ(0, service.manual_unlock_inflight);
+        TEST_ASSERT_INT_EQ((scenario == 0U || scenario == 1U ||
+            scenario == 5U || scenario == 6U || scenario == 8U ||
+            scenario == 9U) ? 1 : 0,
+            (int)media.command_calls);
+        TEST_ASSERT_INT_EQ((scenario <= 2U || scenario == 7U) ? 1 : 0,
+            (int)trace.calls);
+        df_runtime_ubus_stop(&service);
+    }
 }
 
 static int submit_elevator(

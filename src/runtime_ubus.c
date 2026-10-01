@@ -380,6 +380,7 @@ static void df_ubus_add_media_status(struct blob_buf *buffer,
         blobmsg_add_string(buffer, "purpose", purpose);
         blobmsg_add_string(buffer, "state", state);
         blobmsg_add_u8(buffer, "ready", session->ready);
+        blobmsg_add_u8(buffer, "source_live", session->source_live);
         blobmsg_add_u8(buffer, "viewer_active", session->viewer_active);
         blobmsg_add_string(buffer, "stream_name", session->stream_name);
         blobmsg_add_u8(buffer, "encoder_running", session->encoder_running);
@@ -596,6 +597,13 @@ static int df_runtime_ubus_status_handler(
             access->result.state == DF_GVS_ACCESS_PROTOCOL_REJECTED)
             blobmsg_add_u32(&platform->response, "raw_status", access->result.raw_status);
         blobmsg_add_u8(&platform->response, "physical_result_confirmed", 0);
+        blobmsg_add_string(&platform->response, "manual_state",
+            platform->owner->manual_unlock_pending ? "waiting_media" :
+            platform->owner->manual_unlock_inflight ? "waiting_reply" : "idle");
+        if (platform->owner->manual_unlock_pending ||
+            platform->owner->manual_unlock_inflight)
+            blobmsg_add_string(&platform->response, "manual_station_id",
+                platform->owner->manual_unlock_station_id);
         blobmsg_close_table(&platform->response, table);
     }
     if (df_runtime_ubus_read_media_status(
@@ -1740,8 +1748,13 @@ int df_runtime_ubus_monitor_start(struct df_runtime_ubus *service,
     if (call_status.session_state == DF_GVS_RINGING ||
         call_status.session_state == DF_GVS_TALKING)
         return DF_ERR_INVALID;
-    return df_runtime_media_module_request_start(
+    result = df_runtime_media_module_request_start(
         service->media, station_id, service->last_now_ms, generation);
+    if (result == DF_OK &&
+        strcmp(service->manual_unlock_station_id, station_id) == 0 &&
+        *generation == service->manual_unlock_media_generation)
+        service->manual_unlock_owns_preview = false;
+    return result;
 }
 
 int df_runtime_ubus_monitor_stop(struct df_runtime_ubus *service,
@@ -1765,9 +1778,14 @@ int df_runtime_ubus_monitor_viewer(struct df_runtime_ubus *service,
     int result = df_runtime_ubus_media_identity(service, runtime_id, station_id);
 
     if (result != DF_OK) return result;
-    return df_runtime_media_module_command(service->media,
+    result = df_runtime_media_module_command(service->media,
         DF_MEDIA_MODULE_COMMAND_VIEWER, &key, active,
         service->last_now_ms);
+    if (result == DF_OK && active &&
+        strcmp(service->manual_unlock_station_id, station_id) == 0 &&
+        generation == service->manual_unlock_media_generation)
+        service->manual_unlock_owns_preview = false;
+    return result;
 }
 
 int df_runtime_ubus_call_station(struct df_runtime_ubus *service,
@@ -2024,6 +2042,9 @@ int df_runtime_ubus_schedule_auto_unlock(struct df_runtime_ubus *service,
     return DF_OK;
 }
 
+static int df_runtime_ubus_send_unlock_station(struct df_runtime_ubus *,
+    const char *, uint64_t);
+
 int df_runtime_ubus_tick_auto_unlock(struct df_runtime_ubus *service,
     const struct df_runtime_media_status *media, uint64_t now_ms) {
     size_t index;
@@ -2059,8 +2080,13 @@ int df_runtime_ubus_tick_auto_unlock(struct df_runtime_ubus *service,
         if (!session->active || session->purpose != DF_MEDIA_SESSION_CALL)
             return DF_OK;
         if (!session->ready) return DF_OK;
+        if (service->manual_unlock_pending || service->manual_unlock_inflight)
+            return DF_OK;
+        if (service->access == NULL ||
+            service->access->result.state == DF_GVS_ACCESS_PROTOCOL_WAITING)
+            return DF_OK;
         service->auto_unlock_pending = false;
-        if (df_runtime_ubus_unlock_station(service,
+        if (df_runtime_ubus_send_unlock_station(service,
                 service->auto_unlock_station_id, now_ms) != DF_OK)
             return DF_ERR_INVALID;
         service->auto_unlock_inflight = true;
@@ -2105,12 +2131,13 @@ int df_runtime_ubus_handle_auto_unlock_result(
     return DF_OK;
 }
 
-int df_runtime_ubus_unlock_station(struct df_runtime_ubus *service,
+static int df_runtime_ubus_send_unlock_station(struct df_runtime_ubus *service,
     const char *station_id, uint64_t now_ms) {
     const struct df_station *station;
     uint64_t generation;
     if (service == NULL || !service->started || !service->active_host ||
         service->access == NULL || service->station_access_session == NULL ||
+        service->access->result.state == DF_GVS_ACCESS_PROTOCOL_WAITING ||
         service->access_station_registry == NULL || station_id == NULL ||
         station_id[0] == '\0' || now_ms < service->last_now_ms)
         return DF_ERR_INVALID;
@@ -2128,6 +2155,155 @@ int df_runtime_ubus_unlock_station(struct df_runtime_ubus *service,
     return df_gvs_access_control_submit(service->access,
         service->station_access_session, generation,
         service->access_identity, now_ms);
+}
+
+static const struct df_media_session_status_v3 *df_manual_unlock_session(
+    const struct df_runtime_ubus *service,
+    const struct df_runtime_media_status *media) {
+    for (size_t i = 0U; i < media->session_count; i++) {
+        const struct df_media_session_status_v3 *entry = &media->sessions[i];
+        if (entry->active && entry->generation ==
+                service->manual_unlock_media_generation &&
+            strcmp(entry->station_id, service->manual_unlock_station_id) == 0)
+            return entry;
+    }
+    return NULL;
+}
+
+static int df_manual_unlock_finish(struct df_runtime_ubus *service,
+    const struct df_media_session_status_v3 *entry, bool status_unavailable,
+    uint64_t now_ms) {
+    int result = DF_OK;
+    /* Never stop a preview adopted by HA, a replacement, or an upgraded call. */
+    if (service->manual_unlock_owns_preview &&
+        (status_unavailable || (entry != NULL &&
+            entry->purpose == DF_MEDIA_SESSION_PREVIEW &&
+            !entry->viewer_active))) {
+        const struct df_media_session_key key = {
+            .station_id = service->manual_unlock_station_id,
+            .generation = service->manual_unlock_media_generation,
+        };
+        result = df_runtime_media_module_command(service->media,
+            DF_MEDIA_MODULE_COMMAND_STOP, &key, false, now_ms);
+    }
+    service->manual_unlock_pending = false;
+    service->manual_unlock_inflight = false;
+    service->manual_unlock_owns_preview = false;
+    service->manual_unlock_station_id[0] = '\0';
+    return result;
+}
+
+int df_runtime_ubus_tick_manual_unlock(struct df_runtime_ubus *service,
+    uint64_t now_ms) {
+    struct df_runtime_media_status media = {0};
+    const struct df_media_session_status_v3 *entry;
+    int result;
+    if (service == NULL || now_ms < service->last_now_ms) return DF_ERR_INVALID;
+    if (!service->manual_unlock_pending && !service->manual_unlock_inflight)
+        return DF_OK;
+    if (df_runtime_ubus_read_media_status(service, &media) != DF_OK) {
+        /* Status/credentials failure must not bypass the bounded deadline.
+         * HA claims ownership synchronously through start/viewer APIs; STOP
+         * uses the original generation, so replacements cannot be stopped. */
+        if ((service->auto_unlock_pending && service->manual_unlock_pending) ||
+            now_ms >= service->manual_unlock_deadline_ms ||
+            (service->manual_unlock_inflight &&
+             service->access->result.state != DF_GVS_ACCESS_PROTOCOL_WAITING))
+            return df_manual_unlock_finish(service, NULL, true, now_ms);
+        return DF_OK;
+    }
+    entry = df_manual_unlock_session(service, &media);
+    if ((service->auto_unlock_pending && service->manual_unlock_pending) ||
+        !service->active_host || entry == NULL ||
+        entry->state == DF_MEDIA_SESSION_FAILED ||
+        entry->state == DF_MEDIA_SESSION_PREEMPTED ||
+        now_ms >= service->manual_unlock_deadline_ms) {
+        (void)df_runtime_ubus_log_event(service, now_ms,
+            "event=manual_unlock_cancelled");
+        return df_manual_unlock_finish(service, entry, false, now_ms);
+    }
+    if (entry->viewer_active || entry->purpose == DF_MEDIA_SESSION_CALL)
+        service->manual_unlock_owns_preview = false;
+    if (service->manual_unlock_inflight) {
+        if (service->access->result.session_generation !=
+                service->manual_unlock_access_generation ||
+            service->access->result.state != DF_GVS_ACCESS_PROTOCOL_WAITING)
+            return df_manual_unlock_finish(service, entry, false, now_ms);
+        return DF_OK;
+    }
+    if (!entry->ready || !entry->source_live ||
+        (entry->state != DF_MEDIA_SESSION_PUBLISHING &&
+         entry->state != DF_MEDIA_SESSION_VIEWING)) return DF_OK;
+    result = df_runtime_ubus_send_unlock_station(service,
+        service->manual_unlock_station_id, now_ms);
+    if (result != DF_OK) {
+        (void)df_manual_unlock_finish(service, entry, false, now_ms);
+        return result;
+    }
+    service->manual_unlock_pending = false;
+    service->manual_unlock_inflight = true;
+    service->manual_unlock_access_generation =
+        service->access->result.session_generation;
+    (void)df_runtime_ubus_log_event(service, now_ms,
+        "event=manual_unlock_sent");
+    return DF_OK;
+}
+
+int df_runtime_ubus_unlock_station(struct df_runtime_ubus *service,
+    const char *station_id, uint64_t now_ms) {
+    struct df_runtime_media_status media = {0};
+    const struct df_station *station;
+    uint64_t generation = 0U;
+    bool owns_preview = false;
+    int result;
+    if (service == NULL || !service->started || !service->active_host ||
+        station_id == NULL || station_id[0] == '\0' ||
+        strlen(station_id) >= sizeof(service->manual_unlock_station_id) ||
+        service->access == NULL || !service->access->configured ||
+        service->station_access_session == NULL ||
+        service->access_station_registry == NULL ||
+        now_ms < service->last_now_ms || now_ms > UINT64_MAX - 30000U)
+        return DF_ERR_INVALID;
+    station = df_station_registry_find(service->access_station_registry, station_id);
+    if (station == NULL || !station->enabled) return DF_ERR_INVALID;
+    if (service->manual_unlock_pending || service->manual_unlock_inflight)
+        return strcmp(service->manual_unlock_station_id, station_id) == 0 ?
+            DF_OK : DF_ERR_INVALID;
+    if (service->auto_unlock_pending || service->auto_unlock_inflight ||
+        service->access->result.state == DF_GVS_ACCESS_PROTOCOL_WAITING)
+        return DF_ERR_INVALID;
+    if (df_runtime_ubus_read_media_status(service, &media) != DF_OK ||
+        !media.available) return DF_ERR_IO;
+    for (size_t i = 0U; i < media.session_count; i++) {
+        const struct df_media_session_status_v3 *entry = &media.sessions[i];
+        if (entry->active && strcmp(entry->station_id, station_id) == 0) {
+            if (entry->state == DF_MEDIA_SESSION_FAILED ||
+                entry->state == DF_MEDIA_SESSION_STOPPING ||
+                entry->state == DF_MEDIA_SESSION_PREEMPTED)
+                return DF_ERR_INVALID;
+            generation = entry->generation;
+            break;
+        }
+    }
+    if (generation == 0U) {
+        /* Do not initiate another preview while a different station is calling. */
+        if (service->access_session != NULL &&
+            (service->access_session->state == DF_GVS_RINGING ||
+             service->access_session->state == DF_GVS_TALKING))
+            return DF_ERR_INVALID;
+        result = df_runtime_media_module_request_start(service->media,
+            station_id, now_ms, &generation);
+        if (result != DF_OK) return result;
+        owns_preview = true;
+    }
+    (void)snprintf(service->manual_unlock_station_id,
+        sizeof(service->manual_unlock_station_id), "%s", station_id);
+    service->manual_unlock_media_generation = generation;
+    service->manual_unlock_owns_preview = owns_preview;
+    service->manual_unlock_deadline_ms = now_ms + 30000U;
+    service->manual_unlock_pending = true;
+    result = df_runtime_ubus_tick_manual_unlock(service, now_ms);
+    return result;
 }
 
 int df_runtime_ubus_bind_elevator(struct df_runtime_ubus *service,

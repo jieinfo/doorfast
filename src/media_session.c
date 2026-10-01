@@ -1,6 +1,7 @@
 #include "media_session.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "doorfast.h"
@@ -14,6 +15,7 @@ static void df_media_session_queue_destroy(struct df_media_session *session) {
 
 static void df_media_session_clear_publication(struct df_media_session *session) {
     df_media_reconnect_frame_destroy(&session->reconnect_frame);
+    df_media_reconnect_frame_destroy(&session->last_real_frame);
     session->publication_generation = 0U;
     session->next_reconnect_frame_ms = 0U;
     session->source_state = DF_MEDIA_SOURCE_WAITING;
@@ -110,6 +112,7 @@ void df_media_session_reset(struct df_media_session *session) {
 
         df_gvs_video_reassembly_reset(&session->video);
         df_media_reconnect_frame_destroy(&session->reconnect_frame);
+        df_media_reconnect_frame_destroy(&session->last_real_frame);
         memset(session, 0, sizeof(*session));
         session->status_fingerprint = status_fingerprint;
         session->status_revision = status_revision;
@@ -256,6 +259,21 @@ void df_media_session_mark_source_lost(struct df_media_session *session,
         session->publication_generation == 0U ||
         session->source_state == DF_MEDIA_SOURCE_RECONNECTING) return;
     session->source_state = DF_MEDIA_SOURCE_RECONNECTING;
+    if (session->last_real_frame.data != NULL) {
+        struct df_media_reconnect_frame frozen = {0};
+        if (df_media_reconnect_frame_freeze(session->last_real_frame.data,
+                session->last_real_frame.length, session->last_real_frame.width,
+                session->last_real_frame.height, &frozen) == DF_OK) {
+            df_media_reconnect_frame_destroy(&session->reconnect_frame);
+            session->reconnect_frame = frozen;
+        } else {
+            /* Never fall back to an older outage's scene. Under decode/OOM
+             * failure retain the latest received JPEG without reencoding. */
+            df_media_reconnect_frame_destroy(&session->reconnect_frame);
+            session->reconnect_frame = session->last_real_frame;
+            memset(&session->last_real_frame, 0, sizeof(session->last_real_frame));
+        }
+    }
     session->next_reconnect_frame_ms = now_ms;
 }
 
@@ -409,6 +427,21 @@ int df_media_session_push_jpeg(struct df_media_session *session,
     if (df_media_frame_queue_push(&session->queue, jpeg, length,
             session->publication_generation, timestamp_ms) != DF_OK) return DF_ERR_IO;
     session->frames_received++;
+    if (session->purpose == DF_MEDIA_SESSION_PREVIEW) {
+        uint8_t *copy = realloc(session->last_real_frame.data, length);
+        if (copy == NULL) {
+            /* Do not present an older scene as this frame after allocation
+             * failure. Release the publication rather than keep stale data. */
+            df_media_session_fail_encoder(session);
+            session->last_error = DF_MEDIA_ERROR_RESOURCE_EXHAUSTED;
+            return DF_ERR_IO;
+        }
+        memcpy(copy, jpeg, length);
+        session->last_real_frame.data = copy;
+        session->last_real_frame.length = length;
+        session->last_real_frame.width = width;
+        session->last_real_frame.height = height;
+    }
     session->last_frame_ms = timestamp_ms;
     session->source_state = DF_MEDIA_SOURCE_LIVE;
     session->next_reconnect_frame_ms = 0U;

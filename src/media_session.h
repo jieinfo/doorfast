@@ -24,6 +24,7 @@ struct df_media_session {
     uint64_t publication_generation;
     enum df_media_source_state source_state;
     struct df_media_reconnect_frame reconnect_frame;
+    struct df_media_reconnect_frame last_real_frame;
     uint64_t next_reconnect_frame_ms;
     uint64_t call_generation;
     enum df_media_session_purpose purpose;

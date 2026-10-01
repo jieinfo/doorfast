@@ -473,9 +473,26 @@ void test_runtime_auto_unlock_uses_calling_station_once(void) {
             df_runtime_ubus_tick_auto_unlock(&ubus, &status, 102U));
         TEST_ASSERT_INT_EQ(0, (int)unlock.calls);
         entry.ready = true;
+        /* A manually sent request remains serialized even when its media
+         * generation has been replaced by an incoming call. */
+        access_session.state = DF_GVS_PREVIEW;
+        access_session.generation = 5U;
+        memcpy(access_session.peer, station_address, 6U);
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_control_submit(&access,
+            &access_session, 5U, local, 102U));
+        TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
         TEST_ASSERT_INT_EQ(DF_OK,
             df_runtime_ubus_tick_auto_unlock(&ubus, &status, 103U));
         TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
+        TEST_ASSERT_INT_EQ(1, ubus.auto_unlock_pending);
+        TEST_ASSERT_INT_EQ(0, ubus.auto_unlock_inflight);
+        access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_handle_auto_unlock_result(&ubus, 103U));
+        TEST_ASSERT_INT_EQ(0, (int)hangup.calls);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_runtime_ubus_tick_auto_unlock(&ubus, &status, 104U));
+        TEST_ASSERT_INT_EQ(2, (int)unlock.calls);
         TEST_ASSERT_INT_EQ(0, memcmp(station_address, unlock.destination, 6));
         access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
         TEST_ASSERT_INT_EQ(DF_OK,
@@ -485,8 +502,8 @@ void test_runtime_auto_unlock_uses_calling_station_once(void) {
             hangup.request.type);
         TEST_ASSERT_INT_EQ(1, (int)hangup.request.session_generation);
         TEST_ASSERT_INT_EQ(DF_OK,
-            df_runtime_ubus_tick_auto_unlock(&ubus, &status, 104U));
-        TEST_ASSERT_INT_EQ(1, (int)unlock.calls);
+            df_runtime_ubus_tick_auto_unlock(&ubus, &status, 106U));
+        TEST_ASSERT_INT_EQ(2, (int)unlock.calls);
     }
     df_runtime_ubus_stop(&ubus);
 }

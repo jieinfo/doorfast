@@ -138,6 +138,13 @@ struct df_runtime_ubus {
     char auto_unlock_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     int auto_unlock_delay_seconds;
     bool station_access_active;
+    bool manual_unlock_pending;
+    bool manual_unlock_inflight;
+    bool manual_unlock_owns_preview;
+    uint64_t manual_unlock_deadline_ms;
+    uint64_t manual_unlock_media_generation;
+    uint64_t manual_unlock_access_generation;
+    char manual_unlock_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     struct df_gvs_elevator_control *elevator;
     struct df_gvs_audio_buffer *audio;
     struct df_gvs_audio_tx *audio_tx;
@@ -203,6 +210,7 @@ int df_runtime_ubus_handle_auto_unlock_result(struct df_runtime_ubus *,
     uint64_t);
 int df_runtime_ubus_unlock_station(struct df_runtime_ubus *,
     const char *, uint64_t);
+int df_runtime_ubus_tick_manual_unlock(struct df_runtime_ubus *, uint64_t);
 int df_runtime_ubus_bind_elevator(struct df_runtime_ubus *,
     struct df_gvs_elevator_control *, const uint8_t [6]);
 int df_runtime_ubus_call_elevator(struct df_runtime_ubus *,

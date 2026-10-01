@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <jpeglib.h>
 
 #include "doorfast.h"
@@ -92,12 +93,59 @@ void test_media_reconnect_frame_dimensions_and_bounds(void)
     }
 }
 
+void test_media_reconnect_frame_freezes_complex_jpeg_within_bounds(void) {
+    struct jpeg_compress_struct compressor;
+    struct jpeg_error_mgr error;
+    struct df_media_reconnect_frame frozen = {0};
+    unsigned char row[1920U * 3U], *jpeg = NULL;
+    unsigned long length = 0U;
+    uint32_t noise = 7U;
+    compressor.err = jpeg_std_error(&error);
+    jpeg_create_compress(&compressor);
+    jpeg_mem_dest(&compressor, &jpeg, &length);
+    compressor.image_width = 1920U;
+    compressor.image_height = 1080U;
+    compressor.input_components = 3;
+    compressor.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&compressor);
+    jpeg_set_quality(&compressor, 40, TRUE);
+    jpeg_start_compress(&compressor, TRUE);
+    while (compressor.next_scanline < 1080U) {
+        JSAMPROW scanline = row;
+        for (size_t i = 0U; i < sizeof(row); i++) {
+            noise = noise * 1664525U + 1013904223U;
+            row[i] = (uint8_t)(noise >> 24U);
+        }
+        jpeg_write_scanlines(&compressor, &scanline, 1U);
+    }
+    jpeg_finish_compress(&compressor);
+    jpeg_destroy_compress(&compressor);
+    TEST_ASSERT_INT_EQ(1, length > 0U && length < DF_GVS_VIDEO_MAX_FRAME);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_reconnect_frame_freeze(jpeg, length,
+        1920U, 1080U, &frozen));
+    TEST_ASSERT_INT_EQ(1, frozen.length > 0U &&
+        frozen.length <= DF_GVS_VIDEO_MAX_FRAME);
+    if (frozen.data != NULL) {
+        TEST_ASSERT_INT_EQ(0, df_gvs_jpeg_validate(frozen.data, frozen.length));
+        df_media_reconnect_frame_destroy(&frozen);
+    }
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_media_reconnect_frame_freeze(jpeg, length,
+        640U, 480U, &frozen));
+    TEST_ASSERT_INT_EQ(0, frozen.data != NULL);
+    const uint8_t invalid[] = {0xff, 0xd8, 0xff, 0xd9};
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_media_reconnect_frame_freeze(invalid,
+        sizeof(invalid), 640U, 480U, &frozen));
+    TEST_ASSERT_INT_EQ(0, frozen.data != NULL);
+    free(jpeg);
+}
+
 #ifdef DF_MEDIA_RECONNECT_FRAME_TEST_MAIN
 int df_test_failure_count = 0;
 
 int main(void)
 {
     test_media_reconnect_frame_dimensions_and_bounds();
+    test_media_reconnect_frame_freezes_complex_jpeg_within_bounds();
     return df_test_failure_count == 0 ? 0 : 1;
 }
 #endif

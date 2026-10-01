@@ -99,6 +99,8 @@ struct df_media_session_key {
 struct df_media_session_status_v3 {
     char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     char stream_name[DF_MEDIA_MODULE_STREAM_MAX];
+    /* Uses the existing alignment gap before generation, preserving v3. */
+    bool source_live;
     uint64_t generation;
     enum df_media_session_purpose purpose;
     enum df_media_session_state_v3 state;

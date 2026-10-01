@@ -1235,6 +1235,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         (void)df_gvs_access_result_tick(&access.result,
             ubus.station_access_active ? &station_access_session : &session,
             identity, now_ms);
+        if (wait_context.ubus_started &&
+            df_runtime_ubus_tick_manual_unlock(&ubus, now_ms) != DF_OK)
+            (void)df_runtime_ubus_log_event(&ubus, now_ms,
+                "event=manual_unlock_tick_failed");
         if (df_gvs_elevator_control_tick(&elevator, identity, now_ms) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
