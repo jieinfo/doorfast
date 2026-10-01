@@ -147,7 +147,8 @@ void test_gvs_monitor_persistent_preview_keeps_retrying(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_set_persistent(&monitor, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(
         &monitor, local, station, 0x01020304U, now_ms));
-    for (attempt = 0U; attempt < DF_GVS_MONITOR_BUSY_RETRY_LIMIT; attempt++) {
+    for (attempt = 0U; attempt < DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT;
+         attempt++) {
         TEST_ASSERT_INT_EQ(DF_OK,
             df_gvs_monitor_step(&monitor, now_ms, &action));
         TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);
@@ -246,7 +247,8 @@ void test_gvs_monitor_busy_response_retries_beyond_three_requests(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_set_persistent(&monitor, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(
         &monitor, local, station, 0x01020304U, now_ms));
-    for (attempt = 0U; attempt < 3U; attempt++) {
+    for (attempt = 0U; attempt < DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT;
+         attempt++) {
         TEST_ASSERT_INT_EQ(DF_OK,
             df_gvs_monitor_step(&monitor, now_ms, &action));
         TEST_ASSERT_INT_EQ(1, action.send ? 1 : 0);

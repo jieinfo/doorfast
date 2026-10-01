@@ -703,7 +703,8 @@ void test_media_session_manager_cleans_busy_preview_after_three_rejections(void)
     frame.opcode = 0x50U;
     frame.payload = NULL;
     frame.payload_length = 0U;
-    for (attempt = 0U; attempt < DF_GVS_MONITOR_BUSY_RETRY_LIMIT; attempt++) {
+    for (attempt = 0U; attempt < DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT;
+         attempt++) {
         TEST_ASSERT_INT_EQ(DF_OK,
             df_media_session_manager_tick(&manager, now_ms));
         TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
