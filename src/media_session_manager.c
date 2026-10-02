@@ -106,6 +106,17 @@ static void df_media_session_manager_advance_revisions(
     if (session != NULL) session->status_initialized = false;
 }
 
+static void df_media_phase_log(const struct df_media_session *session,
+    const char *phase, uint64_t now_ms) {
+    if (session == NULL || phase == NULL) return;
+    (void)fprintf(stderr,
+        "doorfast: event=media_phase station_id=%s phase=%s elapsed_ms=%llu "
+        "requests=%u busy=%u generation=%llu\n", session->station_id, phase,
+        (unsigned long long)(now_ms >= session->started_ms ?
+            now_ms - session->started_ms : 0U), session->control_requests,
+        session->busy_replies, (unsigned long long)session->generation);
+}
+
 static int df_media_session_resource_start_default(
     struct df_media_session *session, uint64_t proposed_generation,
     void *context) {
@@ -665,6 +676,9 @@ int df_media_session_manager_receive_control(
         if (df_gvs_monitor_receive(&session->monitor, frame, source_ipv4,
                 now_ms, &result) != DF_OK)
             return DF_ERR_INVALID;
+        if (frame->family == 0x03U && frame->opcode == 0x50U &&
+            session->busy_replies != UINT_MAX)
+            session->busy_replies++;
         if (result.keepalive_reply && manager->callbacks.emit_control(
                 session->station, session->station_ipv4,
                 manager->config.local, 0x03U, 0x52U, NULL, 0U,
@@ -681,6 +695,8 @@ int df_media_session_manager_receive_control(
             return DF_ERR_IO;
         }
         if (result.confirmed) {
+            session->confirmed_ms = now_ms;
+            df_media_phase_log(session, "confirmed", now_ms);
             if (df_media_session_reset_attempt(session,
                     session->monitor.generation) != DF_OK)
                 return DF_ERR_IO;
@@ -1041,6 +1057,15 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
             result = df_media_session_push_jpeg(session, &manager->config,
                 &manager->credentials, jpeg, length, width, height,
                 timestamp_ms);
+            if (result == DF_OK && session->publication_ms == 0U &&
+                session->publication_generation != 0U) {
+                session->publication_ms = timestamp_ms;
+                df_media_phase_log(session, "publisher_started", timestamp_ms);
+            }
+            if (result == DF_OK && session->first_frame_ms == 0U) {
+                session->first_frame_ms = timestamp_ms;
+                df_media_phase_log(session, "first_jpeg", timestamp_ms);
+            }
             df_media_source_transition_log(session, previous_source, timestamp_ms);
 
             if (session->state == DF_MEDIA_SESSION_FAILED) {
@@ -1172,6 +1197,9 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
                             session) != DF_OK)
                         overall = DF_ERR_IO;
                 }
+            } else if (action.send && action.opcode == 0x04U) {
+                if (session->control_requests != UINT_MAX)
+                    session->control_requests++;
             }
         }
         if (session->purpose == DF_MEDIA_SESSION_PREVIEW &&
