@@ -37,6 +37,11 @@ struct df_media_session {
     uint64_t started_ms;
     uint64_t frames_received;
     uint64_t last_frame_ms;
+    unsigned control_requests;
+    unsigned busy_replies;
+    uint64_t confirmed_ms;
+    uint64_t first_frame_ms;
+    uint64_t publication_ms;
     uint64_t status_fingerprint;
     uint64_t status_revision;
     bool status_initialized;

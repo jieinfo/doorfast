@@ -17,6 +17,11 @@ static void df_media_session_clear_publication(struct df_media_session *session)
     df_media_reconnect_frame_destroy(&session->reconnect_frame);
     df_media_reconnect_frame_destroy(&session->last_real_frame);
     session->publication_generation = 0U;
+    session->control_requests = 0U;
+    session->busy_replies = 0U;
+    session->confirmed_ms = 0U;
+    session->first_frame_ms = 0U;
+    session->publication_ms = 0U;
     session->next_reconnect_frame_ms = 0U;
     session->source_state = DF_MEDIA_SOURCE_WAITING;
 }
