@@ -94,6 +94,15 @@ function unsignedText(value, name) {
     return String(value);
 }
 
+function phaseElapsedText(timestamp, started) {
+    if (timestamp === 0)
+        return 'Not yet';
+    if (!Number.isSafeInteger(timestamp) ||
+        !Number.isSafeInteger(started) || started < 0 || timestamp < started)
+        return 'Unavailable';
+    return String(timestamp - started) + ' ms';
+}
+
 function formatMediaStatus(payload) {
     var media = requireObject(payload, 'media');
     var stateValue = media.state;
@@ -164,12 +173,12 @@ function formatMediaStatus(payload) {
                     'control requests') +
                 ', busy=' + unsignedText(session.busy_replies,
                     'busy replies') +
-                ', confirmed=' + unsignedText(session.confirmed_ms,
-                    'confirmed ms') + ' ms' +
-                ', first=' + unsignedText(session.first_frame_ms,
-                    'first frame ms') + ' ms' +
-                ', publish=' + unsignedText(session.publication_ms,
-                    'publication ms') + ' ms']);
+                ', confirmed=' + phaseElapsedText(session.confirmed_ms,
+                    session.started_ms) +
+                ', first=' + phaseElapsedText(session.first_frame_ms,
+                    session.started_ms) +
+                ', publish=' + phaseElapsedText(session.publication_ms,
+                    session.started_ms)]);
         });
     }
     return rows;
@@ -190,7 +199,9 @@ function localizedMediaStatus(payload) {
 
     return formatMediaStatus(payload).map(function(row) {
         if (row[0].indexOf('Startup: ') === 0)
-            return ['启动：' + row[0].slice(9), row[1]];
+            return ['启动：' + row[0].slice(9), row[1]
+                .replace(/Not yet/g, '尚未发生')
+                .replace(/Unavailable/g, '不可用')];
         return [labels[row[0]], Object.prototype.hasOwnProperty.call(
             states, row[1]) ? states[row[1]] : row[1]];
     });
