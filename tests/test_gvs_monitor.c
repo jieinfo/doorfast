@@ -172,6 +172,41 @@ void test_gvs_monitor_persistent_preview_keeps_retrying(void) {
     TEST_ASSERT_INT_EQ(0, monitor.failure);
 }
 
+void test_gvs_monitor_recovery_busy_uses_established_limit(void) {
+    const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
+    const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
+    const uint8_t confirmed[] = {0x1eU, 0U, 1U};
+    struct df_gvs_monitor monitor;
+    struct df_gvs_monitor_action action;
+    struct df_gvs_monitor_result result;
+    unsigned attempt;
+
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_set_persistent(&monitor, true));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(
+        &monitor, local, station, 0x01020304U, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 100U, &action));
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local,
+        0x84U, confirmed, sizeof(confirmed), 0x01020304U, 101U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor, station,
+        local, 0x01020304U, monitor.generation, 102U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_request_retry(&monitor, 200U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 200U, &action));
+    TEST_ASSERT_INT_EQ(0x02, action.opcode);
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local,
+        0x82U, NULL, 0U, 0x01020304U, 201U, &result));
+    TEST_ASSERT_INT_EQ(1, result.retry_ready);
+    /* This retry must retain recovery history even after stop ACK. */
+    for (attempt = 0U; attempt < 3U; attempt++) {
+        uint64_t now_ms = 201U + 1000U * attempt;
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, now_ms, &action));
+        TEST_ASSERT_INT_EQ(0x04, action.opcode);
+        TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local,
+            0x50U, NULL, 0U, 0x01020304U, now_ms + 1U, &result));
+    }
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, monitor.state);
+}
+
 void test_gvs_monitor_persistent_preview_retries_after_first_frame_timeout(void) {
     const uint8_t local[6] = {0x61U, 2U, 1U, 1U, 1U, 1U};
     const uint8_t station[6] = {0x32U, 2U, 1U, 0U, 2U, 0U};
