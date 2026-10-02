@@ -1404,6 +1404,11 @@ static uint64_t df_media_session_status_fingerprint(
     fingerprint = df_media_status_mix(fingerprint, session->started_ms);
     fingerprint = df_media_status_mix(fingerprint,
         session->queue.dropped_oldest);
+    fingerprint = df_media_status_mix(fingerprint, session->control_requests);
+    fingerprint = df_media_status_mix(fingerprint, session->busy_replies);
+    fingerprint = df_media_status_mix(fingerprint, session->confirmed_ms);
+    fingerprint = df_media_status_mix(fingerprint, session->first_frame_ms);
+    fingerprint = df_media_status_mix(fingerprint, session->publication_ms);
     return fingerprint;
 }
 
@@ -1498,6 +1503,41 @@ static int df_media_module_api_status_v3(const void *instance,
     return DF_OK;
 }
 
+static int df_media_module_diagnostics_status_v1(
+    const void *instance, struct df_media_session_diagnostics_v1 *entries,
+    size_t *count, size_t *required_count) {
+    const struct df_media_session_manager *manager = instance;
+    size_t capacity;
+    size_t copied = 0U;
+    size_t required = 0U;
+    size_t index;
+
+    if (manager == NULL || !manager->initialized || count == NULL ||
+        required_count == NULL) return DF_ERR_INVALID;
+    capacity = *count;
+    for (index = 0U; index < manager->capacity; index++) {
+        const struct df_media_session *session = &manager->sessions[index];
+        struct df_media_session_diagnostics_v1 *entry;
+
+        if (!session->active) continue;
+        required++;
+        if (entries == NULL || copied >= capacity) continue;
+        entry = &entries[copied++];
+        memset(entry, 0, sizeof(*entry));
+        (void)snprintf(entry->station_id, sizeof(entry->station_id), "%s",
+            session->station_id);
+        entry->generation = session->generation;
+        entry->control_requests = session->control_requests;
+        entry->busy_replies = session->busy_replies;
+        entry->confirmed_ms = session->confirmed_ms;
+        entry->first_frame_ms = session->first_frame_ms;
+        entry->publication_ms = session->publication_ms;
+    }
+    *count = copied;
+    *required_count = required;
+    return DF_OK;
+}
+
 const struct df_media_module_api_v3 df_media_module_api_v3 = {
     .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
     .struct_size = sizeof(struct df_media_module_api_v3),
@@ -1510,4 +1550,11 @@ const struct df_media_module_api_v3 df_media_module_api_v3 = {
     .push_video = df_media_module_api_push_video_v3,
     .tick = df_media_module_api_tick_v3,
     .status = df_media_module_api_status_v3,
+};
+
+const struct df_media_module_diagnostics_api_v1
+    df_media_module_diagnostics_api_v1 = {
+    .abi_version = DF_MEDIA_MODULE_DIAGNOSTICS_ABI_VERSION,
+    .struct_size = sizeof(struct df_media_module_diagnostics_api_v1),
+    .status = df_media_module_diagnostics_status_v1,
 };

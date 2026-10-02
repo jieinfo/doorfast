@@ -358,6 +358,8 @@ static void df_ubus_add_media_status(struct blob_buf *buffer,
     for (index = 0U; index < status->session_count; index++) {
         const struct df_media_session_status_v3 *session =
             &status->sessions[index];
+        const struct df_media_session_diagnostics_v1 *diagnostic = NULL;
+        size_t diagnostic_index;
         const char *purpose = session->purpose == DF_MEDIA_SESSION_CALL ?
             "call" : "preview";
         const char *state = "failed";
@@ -385,6 +387,27 @@ static void df_ubus_add_media_status(struct blob_buf *buffer,
         blobmsg_add_string(buffer, "stream_name", session->stream_name);
         blobmsg_add_u8(buffer, "encoder_running", session->encoder_running);
         blobmsg_add_u32(buffer, "queue_drops", session->queue_drops);
+        for (diagnostic_index = 0U;
+             diagnostic_index < status->diagnostics_count;
+             diagnostic_index++) {
+            const struct df_media_session_diagnostics_v1 *candidate =
+                &status->diagnostics[diagnostic_index];
+            if (candidate->generation == session->generation &&
+                strcmp(candidate->station_id, session->station_id) == 0) {
+                diagnostic = candidate;
+                break;
+            }
+        }
+        if (diagnostic != NULL) {
+            blobmsg_add_u32(buffer, "control_requests",
+                diagnostic->control_requests);
+            blobmsg_add_u32(buffer, "busy_replies", diagnostic->busy_replies);
+            blobmsg_add_u64(buffer, "confirmed_ms", diagnostic->confirmed_ms);
+            blobmsg_add_u64(buffer, "first_frame_ms",
+                diagnostic->first_frame_ms);
+            blobmsg_add_u64(buffer, "publication_ms",
+                diagnostic->publication_ms);
+        }
         if (session->last_error != DF_MEDIA_ERROR_NONE)
             blobmsg_add_u32(buffer, "last_error",
                 (uint32_t)session->last_error);
@@ -1714,6 +1737,15 @@ int df_runtime_ubus_bind_media(struct df_runtime_ubus *service,
             service->media = NULL;
             return DF_ERR_IO;
         }
+        service->media_diagnostics_entries = calloc(
+            media->session_snapshot_capacity,
+            sizeof(*service->media_diagnostics_entries));
+        if (service->media_diagnostics_entries == NULL) {
+            free(service->media_session_entries);
+            service->media_session_entries = NULL;
+            service->media = NULL;
+            return DF_ERR_IO;
+        }
         service->media_session_capacity = media->session_snapshot_capacity;
     }
     memcpy(service->media_credentials_path, credentials_path, length + 1U);
@@ -1875,6 +1907,16 @@ int df_runtime_ubus_read_media_status(struct df_runtime_ubus *service,
         next.preempted_generation = module_status.preempted_generation;
         next.sessions = service->media_session_entries;
         next.session_count = module_status.session_count;
+        if (service->media_diagnostics_entries != NULL) {
+            size_t diagnostic_count = 0U;
+            if (df_runtime_media_module_diagnostics(service->media,
+                    service->media_diagnostics_entries,
+                    service->media_session_capacity,
+                    &diagnostic_count) == DF_OK) {
+                next.diagnostics = service->media_diagnostics_entries;
+                next.diagnostics_count = diagnostic_count;
+            }
+        }
     }
     if (df_runtime_ubus_read_credential_status(
             service->media_credentials_path, &credentials_status) != DF_OK)
@@ -1966,6 +2008,7 @@ void df_runtime_ubus_stop(struct df_runtime_ubus *service) {
     free(service->station_snapshot_entries);
     free(service->station_route_entries);
     free(service->media_session_entries);
+    free(service->media_diagnostics_entries);
     memset(service, 0, sizeof(*service));
 }
 

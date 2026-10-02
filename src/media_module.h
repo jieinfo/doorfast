@@ -135,6 +135,28 @@ struct df_media_module_status_v3 {
     enum df_media_error_v3 failed_error;
 };
 
+/* Optional diagnostics are separate so the v3 status ABI stays compatible. */
+#define DF_MEDIA_MODULE_DIAGNOSTICS_ABI_VERSION 1U
+struct df_media_session_diagnostics_v1 {
+    char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t generation;
+    unsigned control_requests;
+    unsigned busy_replies;
+    uint64_t confirmed_ms;
+    uint64_t first_frame_ms;
+    uint64_t publication_ms;
+};
+
+struct df_media_module_diagnostics_api_v1 {
+    uint32_t abi_version;
+    size_t struct_size;
+    int (*status)(const void *, struct df_media_session_diagnostics_v1 *,
+                  size_t *count, size_t *required_count);
+};
+
+extern const struct df_media_module_diagnostics_api_v1
+    df_media_module_diagnostics_api_v1;
+
 struct df_media_module_config_v2 {
     bool enabled;
     uint8_t local[6];

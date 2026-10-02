@@ -13,6 +13,7 @@
 struct df_runtime_media_module {
     void *handle;
     const struct df_media_module_api_v3 *api;
+    const struct df_media_module_diagnostics_api_v1 *diagnostics_api;
     void *instance;
     struct df_media_session_status_v3 *session_snapshot;
     size_t session_snapshot_capacity;
@@ -55,6 +56,9 @@ int df_runtime_media_module_tick(struct df_runtime_media_module *,
     uint64_t now_ms);
 int df_runtime_media_module_status(const struct df_runtime_media_module *,
     struct df_media_module_status_v3 *);
+int df_runtime_media_module_diagnostics(
+    const struct df_runtime_media_module *,
+    struct df_media_session_diagnostics_v1 *, size_t, size_t *);
 void df_runtime_media_module_stop(struct df_runtime_media_module *);
 
 #endif
