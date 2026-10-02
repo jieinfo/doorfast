@@ -16,6 +16,19 @@ int df_runtime_media_module_validate_api_v3(
     return DF_OK;
 }
 
+static const struct df_media_module_diagnostics_api_v1 *
+df_runtime_media_module_resolve_diagnostics(void *handle) {
+    const struct df_media_module_diagnostics_api_v1 *api = NULL;
+
+    if (handle == NULL) return NULL;
+    *(void **)(&api) = dlsym(handle, "df_media_module_diagnostics_api_v1");
+    if (api == NULL || api->abi_version !=
+            DF_MEDIA_MODULE_DIAGNOSTICS_ABI_VERSION ||
+        api->struct_size != sizeof(*api) || api->status == NULL)
+        return NULL;
+    return api;
+}
+
 int df_runtime_media_module_start_with_api(struct df_runtime_media_module *module,
     const struct df_media_module_api_v3 *api,
     const struct df_media_module_config_v3 *config,
@@ -71,6 +84,9 @@ int df_runtime_media_module_start(struct df_runtime_media_module *module,
     if (result != DF_OK) {
         module->handle = NULL;
         (void)dlclose(handle);
+    } else {
+        module->diagnostics_api =
+            df_runtime_media_module_resolve_diagnostics(handle);
     }
     return result;
 }
@@ -222,6 +238,25 @@ int df_runtime_media_module_status(const struct df_runtime_media_module *module,
     struct df_media_module_status_v3 *status) {
     if (df_runtime_media_module_available(module) != DF_OK) return DF_ERR_INVALID;
     return module->api->status(module->instance, status);
+}
+
+int df_runtime_media_module_diagnostics(
+    const struct df_runtime_media_module *module,
+    struct df_media_session_diagnostics_v1 *entries, size_t capacity,
+    size_t *count) {
+    size_t required = 0U;
+    size_t copied = capacity;
+
+    if (count == NULL) return DF_ERR_INVALID;
+    *count = 0U;
+    if (df_runtime_media_module_available(module) != DF_OK ||
+        module->diagnostics_api == NULL) return DF_ERR_INVALID;
+    if (entries == NULL) copied = 0U;
+    if (module->diagnostics_api->status(module->instance, entries, &copied,
+            &required) != DF_OK) return DF_ERR_IO;
+    if (required > capacity) return DF_ERR_IO;
+    *count = copied;
+    return DF_OK;
 }
 
 void df_runtime_media_module_stop(struct df_runtime_media_module *module) {

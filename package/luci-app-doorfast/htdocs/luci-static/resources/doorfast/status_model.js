@@ -140,7 +140,7 @@ function formatMediaStatus(payload) {
     if (typeof failure !== 'string' || !/^[a-z_]*$/.test(failure))
         throw new TypeError('invalid media failure');
 
-    return [
+    var rows = [
         ['State', state],
         ['Generation', unsignedText(generation, 'media generation')],
         ['Effective capacity', unsignedText(media.effective_capacity,
@@ -150,6 +150,29 @@ function formatMediaStatus(payload) {
         ['Encoder', encoderRunning ? 'Running' : 'Stopped'],
         ['Failure', failure === '' ? 'None' : failure]
     ];
+    if (Array.isArray(media.sessions)) {
+        media.sessions.forEach(function(session) {
+            if (!session || typeof session.station_id !== 'string' ||
+                !Number.isInteger(session.control_requests) ||
+                !Number.isInteger(session.busy_replies) ||
+                !Number.isInteger(session.confirmed_ms) ||
+                !Number.isInteger(session.first_frame_ms) ||
+                !Number.isInteger(session.publication_ms))
+                return;
+            rows.push(['Startup: ' + session.station_id,
+                'requests=' + unsignedText(session.control_requests,
+                    'control requests') +
+                ', busy=' + unsignedText(session.busy_replies,
+                    'busy replies') +
+                ', confirmed=' + unsignedText(session.confirmed_ms,
+                    'confirmed ms') + ' ms' +
+                ', first=' + unsignedText(session.first_frame_ms,
+                    'first frame ms') + ' ms' +
+                ', publish=' + unsignedText(session.publication_ms,
+                    'publication ms') + ' ms']);
+        });
+    }
+    return rows;
 }
 
 function localizedMediaStatus(payload) {
@@ -166,6 +189,8 @@ function localizedMediaStatus(payload) {
     };
 
     return formatMediaStatus(payload).map(function(row) {
+        if (row[0].indexOf('Startup: ') === 0)
+            return ['启动：' + row[0].slice(9), row[1]];
         return [labels[row[0]], Object.prototype.hasOwnProperty.call(
             states, row[1]) ? states[row[1]] : row[1]];
     });

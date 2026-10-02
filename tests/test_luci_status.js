@@ -170,6 +170,14 @@ assert.deepEqual(model.formatStatus(aggregateMediaPayload).at(-1), {
         ['RTSP 密码', '已设置'], ['编码器', '已停止'], ['失败原因', '无']
     ]
 });
+aggregateMediaPayload.media.sessions = [{
+    station_id: 'doorfast_1_unit', control_requests: 3, busy_replies: 2,
+    confirmed_ms: 1300, first_frame_ms: 1700, publication_ms: 1700
+}];
+assert.equal(model.formatStatus(aggregateMediaPayload).at(-1).rows.at(-1)[0],
+             '启动：doorfast_1_unit');
+assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
+             /requests=3, busy=2/);
 const deployment = {schema_version: 1, configured: true, preflight_safe: false,
     passive_only: true, upstream: {name: 'up', present: true, carrier: true},
     downstream: {name: 'down', present: true},
