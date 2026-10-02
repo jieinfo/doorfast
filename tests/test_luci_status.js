@@ -178,6 +178,25 @@ assert.equal(model.formatStatus(aggregateMediaPayload).at(-1).rows.at(-1)[0],
              '启动：doorfast_1_unit');
 assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
              /requests=3, busy=2/);
+const phaseSession = aggregateMediaPayload.media.sessions[0];
+phaseSession.started_ms = 1000;
+assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
+             /confirmed=300 ms, first=700 ms, publish=700 ms/);
+phaseSession.confirmed_ms = 0;
+assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
+             /confirmed=Not yet/);
+phaseSession.first_frame_ms = 900;
+assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
+             /first=Unavailable/);
+assert.match(model.formatStatus(aggregateMediaPayload).at(-1).rows.at(-1)[1],
+             /confirmed=尚未发生/);
+delete phaseSession.started_ms;
+assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
+             /publish=Unavailable/);
+phaseSession.started_ms = 0;
+phaseSession.first_frame_ms = 500;
+assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
+             /first=500 ms/);
 const deployment = {schema_version: 1, configured: true, preflight_safe: false,
     passive_only: true, upstream: {name: 'up', present: true, carrier: true},
     downstream: {name: 'down', present: true},

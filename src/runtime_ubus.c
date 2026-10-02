@@ -378,6 +378,7 @@ static void df_ubus_add_media_status(struct blob_buf *buffer,
         entry = blobmsg_open_table(buffer, NULL);
         blobmsg_add_string(buffer, "station_id", session->station_id);
         blobmsg_add_u64(buffer, "generation", session->generation);
+        blobmsg_add_u64(buffer, "started_ms", session->started_ms);
         blobmsg_add_u64(buffer, "status_revision", session->status_revision);
         blobmsg_add_string(buffer, "purpose", purpose);
         blobmsg_add_string(buffer, "state", state);
