@@ -88,6 +88,7 @@ struct df_gvs_monitor {
     unsigned busy_rejections;
     unsigned keepalive_misses;
     bool media_ready;
+    bool media_established;
     bool persistent;
     bool status_retry_pending;
     bool retry_after_stop;
