@@ -261,7 +261,7 @@ void test_gvs_monitor_retries_captured_request_and_accepts_confirmation(void);
 void test_gvs_monitor_retries_after_unconfirmed_response(void);
 void test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit(void);
 void test_gvs_monitor_persistent_preview_keeps_retrying(void);
-void test_gvs_monitor_recovery_busy_uses_established_limit(void);
+void test_gvs_monitor_recovery_busy_uses_startup_limit(void);
 void test_gvs_monitor_persistent_preview_retries_after_first_frame_timeout(void);
 void test_gvs_monitor_persistent_preview_sends_keepalive_and_accepts_reply(void);
 void test_gvs_monitor_busy_response_retries_beyond_three_requests(void);
@@ -693,7 +693,7 @@ int main(int argc, char **argv) {
     test_gvs_monitor_retries_after_unconfirmed_response();
     test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit();
     test_gvs_monitor_persistent_preview_keeps_retrying();
-    test_gvs_monitor_recovery_busy_uses_established_limit();
+    test_gvs_monitor_recovery_busy_uses_startup_limit();
     test_gvs_monitor_persistent_preview_retries_after_first_frame_timeout();
     test_gvs_monitor_persistent_preview_sends_keepalive_and_accepts_reply();
     test_gvs_monitor_busy_response_retries_beyond_three_requests();
