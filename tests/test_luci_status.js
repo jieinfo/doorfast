@@ -130,6 +130,11 @@ assert.equal(model.roleLabel('down'), '离线');
 assert.equal(model.callSessionLabel('talking'), '通话中');
 assert.equal(model.callDispatchLabel('failed'), '发送失败');
 assert.equal(model.callConfirmationLabel('expired'), '确认超时');
+const outgoingPayload = JSON.parse(JSON.stringify(payload));
+outgoingPayload.mode = 'active_host';
+outgoingPayload.call.command = 'call';
+assert.equal(model.formatStatus(outgoingPayload)[0].rows[0][1], '运行中');
+assert.equal(model.formatStatus(outgoingPayload)[2].rows[2][1], '呼叫室外机');
 assert.equal(model.unavailableLabel, 'Doorfast 服务未运行或状态接口不可用');
 assert.equal(model.staleLabel, '陈旧');
 const elevatorPayload = JSON.parse(JSON.stringify(payload));
@@ -243,3 +248,18 @@ const statusPage = {...statusPageDefinition};
 statusPage.render(payload);
 statusPage.render(payload);
 assert.equal(statusPollQueue.length, 1);
+
+let renderedStatus;
+const diagnosticPage = new Function('dom', 'poll', 'rpc', 'view',
+    'statusModel', 'E', statusViewSource)(
+    {content: (_node, content) => { renderedStatus = content; }},
+    statusPoll, statusRpc, statusView, model,
+    (tag, attrs, children) => ({tag, attrs, children}));
+diagnosticPage.renderCurrent(outgoingPayload, false);
+assert.match(JSON.stringify(renderedStatus), /运行中/);
+assert.doesNotMatch(JSON.stringify(renderedStatus), /服务未运行/);
+diagnosticPage.renderCurrent({running: true}, false);
+assert.match(JSON.stringify(renderedStatus), /状态数据解析失败/);
+assert.doesNotMatch(JSON.stringify(renderedStatus), /服务未运行/);
+diagnosticPage.renderCurrent(null, false);
+assert.match(JSON.stringify(renderedStatus), /状态接口不可用/);
