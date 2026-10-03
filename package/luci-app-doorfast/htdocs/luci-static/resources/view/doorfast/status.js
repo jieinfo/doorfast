@@ -48,7 +48,7 @@ return view.extend({
             } catch (error) {
                 content = [
                     E('div', { 'class': 'alert-message warning' }, [
-                        statusModel.unavailableLabel
+                        statusModel.invalidLabel
                     ])
                 ];
             }

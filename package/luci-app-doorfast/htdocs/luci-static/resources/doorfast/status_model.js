@@ -60,6 +60,7 @@ function callSessionLabel(state) {
 function callCommandLabel(command) {
     return enumLabel(command, {
         none: '无',
+        call: '呼叫室外机',
         answer: '接听',
         hangup: '挂断'
     }, 'call command');
@@ -335,6 +336,7 @@ var statusModel = {
     callDispatchLabel: callDispatchLabel,
     callConfirmationLabel: callConfirmationLabel,
     unavailableLabel: 'Doorfast 服务未运行或状态接口不可用',
+    invalidLabel: 'Doorfast 状态数据解析失败，请检查主程序与 LuCI 版本是否匹配',
     staleLabel: '陈旧'
 };
 
