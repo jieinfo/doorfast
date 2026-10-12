@@ -164,6 +164,17 @@ int df_gvs_audio_jitter_push(struct df_gvs_audio_jitter *jitter,
         if (distance < concealed) return reject_late_packet(jitter);
     }
     if (free_slot == DF_GVS_AUDIO_JITTER_SLOTS) {
+        if (distance == 0U) {
+            /* Repair the gap directly without allocating a fifth waiting slot.
+             * On failure the caller still owns this input and may push it again.
+             */
+            int result = emit(jitter, samples, count, sequence, now_ms, false, false);
+            if (result != 0) return result;
+            jitter->expected_sequence = (uint16_t)(sequence + 1U);
+            jitter->last_real_samples = count;
+            jitter->gap_deadline_ms = 0;
+            return drain(jitter, now_ms, false);
+        }
         int result = drain(jitter, now_ms, true);
         if (result != 0) return result;
         distance = (uint16_t)(sequence - jitter->expected_sequence);

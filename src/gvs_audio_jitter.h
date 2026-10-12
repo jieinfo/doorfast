@@ -50,10 +50,15 @@ struct df_gvs_audio_jitter {
 };
 
 /* 0: success, 1: nonfatal rejection, negative: invalid input or callback error.
- * A callback error retains pending audio; tick retries it. A full-window push
- * that fails to free a slot has not accepted the new packet. Reset is the only
- * way to change a bound generation and preserves the callback/context. init
- * allows first-packet binding; reset(0) closes until an explicit nonzero reset.
+ * A callback error retains queued audio; tick retries it. A full-window push
+ * that fails to free a slot has not accepted the new packet. Expected input at
+ * a full window emits directly: if its callback fails, it remains caller-owned
+ * and must be pushed again (tick retries only the original four queued packets).
+ * If that direct callback succeeds but a queued callback fails, the input has
+ * already been emitted and only queued audio needs a tick retry; expected_sequence
+ * reflects this progress. Reset changes a bound generation and preserves the
+ * callback/context. init allows first-packet binding; reset(0) closes until an
+ * explicit nonzero reset.
  */
 int df_gvs_audio_jitter_init(struct df_gvs_audio_jitter *,
     df_gvs_audio_jitter_emit_fn, void *);

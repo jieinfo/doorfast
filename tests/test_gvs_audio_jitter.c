@@ -17,6 +17,8 @@ struct trace {
     bool synthetic_discontinuity;
     int fail_real;
     int fail_synthetic;
+    bool fail_specific_real;
+    uint16_t fail_sequence;
     int failure;
 };
 
@@ -25,7 +27,9 @@ static int record_emission(const struct df_gvs_audio_emission *emission,
 {
     struct trace *trace = context;
     if ((emission->synthetic && trace->fail_synthetic) ||
-        (!emission->synthetic && trace->fail_real)) return trace->failure;
+        (!emission->synthetic && (trace->fail_real ||
+         (trace->fail_specific_real && emission->sequence == trace->fail_sequence))))
+        return trace->failure;
     if (emission->synthetic) {
         for (size_t i = 0; i < emission->count; i++)
             TEST_ASSERT_INT_EQ(0xd5, emission->samples[i]);
@@ -111,6 +115,22 @@ void test_gvs_audio_jitter_reorders_and_bounds_gaps(void)
     TEST_ASSERT_INT_EQ(1, trace.synthetic_discontinuity);
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_tick(&jitter, 10000));
     TEST_ASSERT_INT_EQ(576, trace.synthetic_samples);
+
+    /* A timely expected packet repairs a full window without any concealment. */
+    start(&jitter, &trace);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 10, 7, 100));
+    for (uint16_t seq = 12; seq <= 15; seq++)
+        TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(
+            &jitter, samples, 160, seq, 7, 101U + seq - 12U));
+    TEST_ASSERT_INT_EQ(1, trace.real_count);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 192, 11, 7, 105));
+    TEST_ASSERT_INT_EQ(6, trace.real_count);
+    for (int i = 0; i < 6; i++) TEST_ASSERT_INT_EQ(10 + i, trace.sequences[i]);
+    TEST_ASSERT_INT_EQ(192, (int)trace.real_samples[1]);
+    TEST_ASSERT_INT_EQ(105, (int)trace.timestamps[1]);
+    TEST_ASSERT_INT_EQ(105, (int)trace.timestamps[5]);
+    TEST_ASSERT_INT_EQ(0, trace.synthetic_samples);
+    TEST_ASSERT_INT_EQ(0, (int)jitter.late_packets);
 
     /* Fifth waiting packet forces the nearest queued successor, not slot order. */
     start(&jitter, &trace);
@@ -282,6 +302,58 @@ void test_gvs_audio_jitter_preserves_partial_callback_progress(void)
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_tick(&jitter, 161));
     TEST_ASSERT_INT_EQ(2, trace.real_count);
     TEST_ASSERT_INT_EQ(160, trace.synthetic_samples);
+
+    /* Failed direct expected input is not retained in a fifth waiting slot. */
+    start(&jitter, &trace);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 10, 7, 100));
+    for (uint16_t seq = 12; seq <= 15; seq++)
+        TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(
+            &jitter, samples, 160, seq, 7, 101U + seq - 12U));
+    trace.fail_real = 1;
+    TEST_ASSERT_INT_EQ(-9, df_gvs_audio_jitter_push(&jitter, samples, 160, 11, 7, 105));
+    TEST_ASSERT_INT_EQ(1, trace.real_count);
+    TEST_ASSERT_INT_EQ(0, trace.synthetic_samples);
+    TEST_ASSERT_INT_EQ(11, jitter.expected_sequence);
+    int occupied = 0;
+    for (size_t i = 0; i < DF_GVS_AUDIO_JITTER_SLOTS; i++)
+        occupied += jitter.slots[i].occupied;
+    TEST_ASSERT_INT_EQ(4, occupied);
+    trace.fail_real = 0;
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_tick(&jitter, 106));
+    TEST_ASSERT_INT_EQ(1, trace.real_count);
+    TEST_ASSERT_INT_EQ(0, trace.synthetic_samples);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 11, 7, 107));
+    TEST_ASSERT_INT_EQ(6, trace.real_count);
+    for (int i = 0; i < 6; i++) TEST_ASSERT_INT_EQ(10 + i, trace.sequences[i]);
+    TEST_ASSERT_INT_EQ(107, (int)trace.timestamps[1]);
+    TEST_ASSERT_INT_EQ(0, trace.synthetic_samples);
+
+    /* If input succeeded but a queued real failed, only queued audio retries. */
+    start(&jitter, &trace);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 10, 7, 100));
+    for (uint16_t seq = 12; seq <= 15; seq++)
+        TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(
+            &jitter, samples, 160, seq, 7, 101U + seq - 12U));
+    trace.fail_specific_real = true;
+    trace.fail_sequence = 12;
+    TEST_ASSERT_INT_EQ(-9, df_gvs_audio_jitter_push(&jitter, samples, 160, 11, 7, 105));
+    TEST_ASSERT_INT_EQ(2, trace.real_count);
+    TEST_ASSERT_INT_EQ(11, trace.sequences[1]);
+    TEST_ASSERT_INT_EQ(12, jitter.expected_sequence);
+    TEST_ASSERT_INT_EQ(0, trace.synthetic_samples);
+    occupied = 0;
+    for (size_t i = 0; i < DF_GVS_AUDIO_JITTER_SLOTS; i++)
+        occupied += jitter.slots[i].occupied;
+    TEST_ASSERT_INT_EQ(4, occupied);
+    trace.fail_specific_real = false;
+    TEST_ASSERT_INT_EQ(1, df_gvs_audio_jitter_push(&jitter, samples, 160, 11, 7, 106));
+    TEST_ASSERT_INT_EQ(2, trace.real_count);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_tick(&jitter, 107));
+    TEST_ASSERT_INT_EQ(6, trace.real_count);
+    for (int i = 0; i < 6; i++) TEST_ASSERT_INT_EQ(10 + i, trace.sequences[i]);
+    TEST_ASSERT_INT_EQ(105, (int)trace.timestamps[1]);
+    TEST_ASSERT_INT_EQ(107, (int)trace.timestamps[2]);
+    TEST_ASSERT_INT_EQ(0, trace.synthetic_samples);
 
     /* Failed full-window advancement retains four packets for a later retry. */
     start(&jitter, &trace);
