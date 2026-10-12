@@ -203,6 +203,8 @@ int df_runtime_ubus_bind_access(struct df_runtime_ubus *,
     const uint8_t [6]);
 int df_runtime_ubus_bind_station_access(struct df_runtime_ubus *,
     struct df_gvs_session *, const struct df_station_registry *);
+/* Target of the latest protocol transaction, not the current call/preview. */
+const char *df_runtime_ubus_access_station_id(const struct df_runtime_ubus *);
 void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *, bool);
 void df_runtime_ubus_set_auto_unlock_delay(struct df_runtime_ubus *, int);
 int df_runtime_ubus_schedule_auto_unlock(struct df_runtime_ubus *,

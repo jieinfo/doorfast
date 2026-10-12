@@ -738,6 +738,7 @@ void test_runtime_ubus_unlock_targets_requested_station(void) {
     struct df_gvs_session session = {0};
     struct station_access_trace trace = {0};
     unsigned status_calls = 0;
+    const char *target;
     struct media_binding_test media = {
         .status = {.required_session_count = 2U},
         .sessions = {
@@ -765,21 +766,46 @@ void test_runtime_ubus_unlock_targets_requested_station(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_media(&service,
         &module, "/tmp/doorfast-unused-manual-credentials"));
 
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_access_station_id(NULL) == NULL);
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_access_station_id(&service) == NULL);
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_unlock_station(&service, "gate_side", 10));
     TEST_ASSERT_INT_EQ(1, (int)trace.calls);
     TEST_ASSERT_INT_EQ(0, memcmp(side_address, trace.destination, 6));
     TEST_ASSERT_INT_EQ(0, memcmp(session.peer, side_address, 6));
+    target = df_runtime_ubus_access_station_id(&service);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_side", target == NULL ? "" : target));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_ubus_unlock_station(&service, "gate_main", 11));
     TEST_ASSERT_INT_EQ(1, (int)trace.calls);
     access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 11));
+    /* Session cleanup must not erase attribution of a received reply. */
+    memcpy(session.peer, main_address, 6);
+    target = df_runtime_ubus_access_station_id(&service);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_side", target == NULL ? "" : target));
+    media.sessions[0].source_live = false;
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_unlock_station(&service, "gate_main", 11));
+    TEST_ASSERT_INT_EQ(1, (int)trace.calls);
+    /* Preparing another target is not a new protocol transaction. */
+    target = df_runtime_ubus_access_station_id(&service);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_side", target == NULL ? "" : target));
+    media.sessions[0].source_live = true;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 12));
     TEST_ASSERT_INT_EQ(2, (int)trace.calls);
     TEST_ASSERT_INT_EQ(0, memcmp(main_address, trace.destination, 6));
     TEST_ASSERT_INT_EQ(0, memcmp(session.peer, main_address, 6));
+    target = df_runtime_ubus_access_station_id(&service);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main", target == NULL ? "" : target));
+    /* Removed, disabled or ambiguous targets cannot be guessed. */
+    stations[0].enabled = false;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_access_station_id(&service) == NULL);
+    stations[0].enabled = true;
+    memcpy(stations[1].logical_address, main_address, 6);
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_access_station_id(&service) == NULL);
+    access.result.destination[0] = 0x13;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_access_station_id(&service) == NULL);
     df_runtime_ubus_stop(&service);
 }
 
