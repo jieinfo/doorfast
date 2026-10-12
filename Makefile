@@ -63,6 +63,7 @@ TEST_SOURCES += tests/test_gvs_video_snapshot.c src/gvs_video_snapshot.c
 TEST_SOURCES += tests/test_gvs_audio_buffer.c src/gvs_audio_buffer.c
 TEST_SOURCES += tests/test_gvs_audio_jitter.c src/gvs_audio_jitter.c
 TEST_SOURCES += tests/test_gvs_audio_playout.c src/gvs_audio_playout.c
+TEST_SOURCES += tests/test_audio_receive_pipeline.c
 TEST_SOURCES += tests/test_gvs_audio_tx.c src/gvs_audio_tx.c
 TEST_SOURCES += tests/test_gvs_pcm_ingress.c src/gvs_pcm_ingress.c
 TEST_SOURCES += src/gvs_pcm_pump.c
