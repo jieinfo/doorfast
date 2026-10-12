@@ -611,12 +611,16 @@ static int df_runtime_ubus_status_handler(
     blobmsg_close_table(&platform->response, elevator_table);
     if (platform->owner->access != NULL) {
         const struct df_gvs_access_control *access = platform->owner->access;
+        const char *station_id =
+            df_runtime_ubus_access_station_id(platform->owner);
         void *table = blobmsg_open_table(&platform->response, "access");
         blobmsg_add_u8(&platform->response, "configured", access->configured);
         blobmsg_add_string(&platform->response, "state",
             df_gvs_access_state_name(access->result.state));
         blobmsg_add_u64(&platform->response, "generation",
             access->result.session_generation);
+        if (station_id != NULL)
+            blobmsg_add_string(&platform->response, "station_id", station_id);
         if (access->result.state == DF_GVS_ACCESS_PROTOCOL_COMPLETED ||
             access->result.state == DF_GVS_ACCESS_PROTOCOL_REJECTED)
             blobmsg_add_u32(&platform->response, "raw_status", access->result.raw_status);
@@ -2044,6 +2048,27 @@ void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *service, bool enabl
             service->auto_unlock_station_id[0] = '\0';
         }
     }
+}
+
+const char *df_runtime_ubus_access_station_id(const struct df_runtime_ubus *service) {
+    const struct df_station_registry *registry;
+    const char *station_id = NULL;
+
+    if (service == NULL || !service->started || service->access == NULL ||
+        service->access->result.state == DF_GVS_ACCESS_PROTOCOL_EMPTY ||
+        service->access_station_registry == NULL)
+        return NULL;
+    registry = service->access_station_registry;
+    if (registry->items == NULL) return NULL;
+    for (size_t i = 0U; i < registry->count; i++) {
+        const struct df_station *station = &registry->items[i];
+        if (!station->enabled || memcmp(station->logical_address,
+                service->access->result.destination, 6U) != 0)
+            continue;
+        if (station_id != NULL) return NULL; /* Ambiguous configuration. */
+        station_id = station->id;
+    }
+    return station_id;
 }
 
 void df_runtime_ubus_set_auto_unlock_delay(struct df_runtime_ubus *service,

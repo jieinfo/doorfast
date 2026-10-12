@@ -249,6 +249,8 @@ ubus call doorfast hangup \
 
 来电自动化位于 LuCI 的“来电自动化”页，配置保存在 `/etc/config/doorfast-automation`。默认关闭；“来电自动向上召梯”按每个来电 generation 最多提交一次，“来电自动解锁”按来电来源的逻辑地址只提交对应室外机的开锁事务，不会解锁其他站点。
 
+`status.access.station_id` 是最近一次**协议解锁事务**的目标：通过事务保存的目的逻辑地址匹配当前启用站点，而非通过当前来电或当前预览推测。目标已移除、被禁用或匹配不唯一时省略该字段；会话结束后仍可保留最近回复的归属。`manual_state=waiting_media|waiting_reply` 和 `manual_station_id` 另行表示正在处理的手动解锁；等待媒体时，原 `access.state/generation/raw_status` 可能仍属于上次事务，不能当成本次结果。无活动会话的手动解锁最多等待真实源在线 30 秒，随后才发解锁报文；准备取消或超时且没有发送时，不产生新的协议回复。`protocol_completed` 只表示门口机协议确认，仍不证明门已经打开。
+
 ## HTTP 接口
 
 CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端调用约定；PCM 与 monitor 路由会校验 `REQUEST_METHOD`，普通 status、控制及音视频快照路由当前只按路径分派，不能把表中的方法写法当作安全边界。
@@ -350,6 +352,8 @@ python3 -B tests/run_doorfast_vm_multi_media.py \
 ## Home Assistant 集成
 
 配套集成位于 [jieinfo/doorfastforha](https://github.com/jieinfo/doorfastforha)。HA 负责展示、交互和下发指令；ImmortalWrt 负责门禁协议、媒体接收、编码和转发。
+
+配套 HA 的站点状态展示读取各 `media.sessions[].station_id`：`ready` 表示发布链路可用，`source_live` 才表示真实视频源在线；冻结帧继续发布期间应显示重连而非实时画面。`started_ms/first_frame_ms` 是同一次尝试的单调时钟毫秒值，不是墙上时间；两者有效时可计算该次尝试的首帧延迟，不能当成从用户点击起的总等待时间。状态实体不启动预览、不改变冷却或重试频率。
 
 ### 呼叫事件 relay
 
@@ -494,6 +498,8 @@ doorfast-pcm-submit GENERATION [SOCKET]
 - 厂商 APK 静态路径把 `03/50` 命名为 `sendBusy`；当前只能把它作为该路径的控制响应处理，不能用它证明会话已经建立。
 
 复核路径：先校验原始文件哈希，再按控制、音频和视频端口读取时间线，最后把观察结果与当前解析器测试及现场实体结果分别记录。
+
+2026-10-12 交接包的字段勘误与时序复核见 [portable-package 协议基线](docs/gvs-portable-package-baseline.md)。其中的源／目的地址标签、JPEG 补头选择偏移和 assets 名称不能直接照抄报告；本轮不替换已经通过抓包交叉验证的收发协议。
 
 ```sh
 export MT8157_DATASET=/absolute/path/to/mt8157

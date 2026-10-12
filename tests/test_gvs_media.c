@@ -42,12 +42,18 @@ void test_gvs_media(void)
                                                &audio_packet));
 
     header(video);
+    memcpy(video + 10, destination, sizeof(destination));
+    memcpy(video + 16, source, sizeof(source));
     video[0x1a] = 3;
     video[0x1e] = 1;
     video[0x20] = 1;
     video[0x22] = 3;
     TEST_ASSERT_INT_EQ(0, df_gvs_parse_video(video, sizeof(video),
                                               &video_packet));
+    TEST_ASSERT_INT_EQ(0, memcmp(video_packet.destination, destination, 6));
+    TEST_ASSERT_INT_EQ(0, memcmp(video_packet.source, source, 6));
+    TEST_ASSERT_INT_EQ(38,
+        (int)(video_packet.payload - video));
     TEST_ASSERT_INT_EQ(-1, df_gvs_parse_video(video, sizeof(video) - 1U,
                                                &video_packet));
     video[0x20] = 2;
@@ -72,6 +78,10 @@ void test_gvs_media(void)
                                  payload, sizeof(payload)));
     TEST_ASSERT_INT_EQ(0, df_gvs_parse_audio(serialized, serialized_length,
                                               &audio_packet));
+    TEST_ASSERT_INT_EQ(0, memcmp(audio_packet.destination, destination, 6));
+    TEST_ASSERT_INT_EQ(0, memcmp(audio_packet.source, source, 6));
+    TEST_ASSERT_INT_EQ(42,
+        (int)(audio_packet.payload - serialized));
     TEST_ASSERT_INT_EQ(0x1234, audio_packet.sequence);
     TEST_ASSERT_INT_EQ(3, (int)audio_packet.field_c);
     TEST_ASSERT_INT_EQ(1, audio_packet.field_d);
