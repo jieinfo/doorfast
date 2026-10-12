@@ -30,6 +30,7 @@ void test_gvs_audio_playout_silence_and_reset(void);
 void test_gvs_audio_playout_preflight_limits(void);
 void test_audio_receive_pipeline_sequence_and_reset(void);
 void test_audio_receive_pipeline_tail_and_retry(void);
+void test_audio_receive_pipeline_large_gap_successor(void);
 void test_gvs_audio_jitter_reorders_and_bounds_gaps(void);
 void test_gvs_audio_jitter_preserves_partial_callback_progress(void);
 void test_gvs_audio_tx_binds_pcm_to_talking_generation_and_pacing(void);
@@ -416,6 +417,7 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "--audio-receive-pipeline") == 0) {
         test_audio_receive_pipeline_sequence_and_reset();
         test_audio_receive_pipeline_tail_and_retry();
+        test_audio_receive_pipeline_large_gap_successor();
         if (test_failures() != 0) return 1;
         puts("audio receive pipeline tests passed");
         return 0;
@@ -573,6 +575,7 @@ int main(int argc, char **argv) {
     test_gvs_audio_playout_preflight_limits();
     test_audio_receive_pipeline_sequence_and_reset();
     test_audio_receive_pipeline_tail_and_retry();
+    test_audio_receive_pipeline_large_gap_successor();
     test_gvs_audio_jitter_reorders_and_bounds_gaps();
     test_gvs_audio_jitter_preserves_partial_callback_progress();
     test_gvs_audio_tx_binds_pcm_to_talking_generation_and_pacing();

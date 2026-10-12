@@ -248,3 +248,59 @@ void test_audio_receive_pipeline_tail_and_retry(void) {
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&playout, 400));
     TEST_ASSERT_INT_EQ(2, published.attempts);
 }
+
+/* A jitter-admitted 32767-gap successor must survive the downstream buffer's
+ * half-range check after bounded concealment. The expected payload and
+ * metadata are checked independently of the transport fixtures. */
+void test_audio_receive_pipeline_large_gap_successor(void) {
+    struct df_gvs_audio_buffer buffer;
+    struct df_gvs_audio_jitter jitter;
+    struct df_gvs_audio_playout playout;
+    struct df_gvs_audio_buffer direct;
+    struct publications published = {0};
+    const struct expected_span expected[] = {
+        {160, 0x55, -8}, {320, 0xd5, 8}, {160, 0x80, 5504},
+    };
+
+    start(&buffer, &jitter, &playout, &published);
+    published.expected = expected;
+    published.span_count = sizeof(expected) / sizeof(expected[0]);
+    published.expected_ms = 200;
+    TEST_ASSERT_INT_EQ(0, receive(&jitter, 160, 0x55, 65535, 7, 100));
+    TEST_ASSERT_INT_EQ(0, receive(&jitter, 160, 0x80, 32767, 7, 120));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_tick(&jitter, 159));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&playout, 159));
+    TEST_ASSERT_INT_EQ(0, published.attempts);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_tick(&jitter, 160));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&playout, 199));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&playout, 200));
+
+    TEST_ASSERT_INT_EQ(1, published.count);
+    TEST_ASSERT_INT_EQ(1, published.attempts);
+    TEST_ASSERT_INT_EQ(7, (int)published.last.generation);
+    TEST_ASSERT_INT_EQ(0, (int)published.last.previous_revision);
+    TEST_ASSERT_INT_EQ(2, (int)published.last.revision);
+    TEST_ASSERT_INT_EQ(200, (int)published.last.timestamp_ms);
+    TEST_ASSERT_INT_EQ(640, (int)published.last.sample_count);
+    TEST_ASSERT_INT_EQ(0, (int)published.last.dropped_samples);
+    TEST_ASSERT_INT_EQ(1, published.last.discontinuity);
+    TEST_ASSERT_INT_EQ(2, (int)buffer.packet_count);
+    TEST_ASSERT_INT_EQ(320, (int)buffer.byte_count);
+    TEST_ASSERT_INT_EQ(640, (int)buffer.sample_count);
+    TEST_ASSERT_INT_EQ(320, (int)buffer.concealed_samples);
+    TEST_ASSERT_INT_EQ(1, (int)buffer.sequence_gaps);
+    TEST_ASSERT_INT_EQ(32767, (int)buffer.missing_packets);
+    TEST_ASSERT_INT_EQ(640, (int)buffer.snapshot_source_samples);
+    TEST_ASSERT_INT_EQ(320, (int)buffer.snapshot_source_bytes);
+    TEST_ASSERT_INT_EQ(1, (int)jitter.reordered_packets);
+    TEST_ASSERT_INT_EQ(0, (int)jitter.late_packets);
+
+    /* The legacy direct-buffer path still rejects the same half-range-old
+     * sequence; only the composed jitter successor uses the narrow bypass. */
+    df_gvs_audio_buffer_init(&direct);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_buffer_push(
+        &direct, (const uint8_t *)"x", 1, 65535, 7, 0));
+    TEST_ASSERT_INT_EQ(DF_GVS_AUDIO_BUFFER_LATE,
+        df_gvs_audio_buffer_push(&direct, (const uint8_t *)"y", 1,
+                                 32767, 7, 1));
+}

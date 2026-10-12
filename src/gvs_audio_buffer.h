@@ -74,6 +74,11 @@ void df_gvs_audio_buffer_init(struct df_gvs_audio_buffer *);
 void df_gvs_audio_buffer_reset(struct df_gvs_audio_buffer *, uint64_t);
 int df_gvs_audio_buffer_push(struct df_gvs_audio_buffer *, const uint8_t *,
     size_t, uint16_t, uint64_t, uint64_t);
+/* Used only for a real successor already admitted by jitter after a bounded
+ * concealed gap. It preserves direct-buffer half-range stale rejection and
+ * permits only the exact 32768 distance produced by that composition. */
+int df_gvs_audio_buffer_push_after_jitter(struct df_gvs_audio_buffer *,
+    const uint8_t *, size_t, uint16_t, uint64_t, uint64_t);
 int df_gvs_audio_buffer_push_silence(struct df_gvs_audio_buffer *, size_t,
     uint64_t);
 int df_gvs_audio_buffer_read(struct df_gvs_audio_buffer *, uint8_t *, size_t,

@@ -26,6 +26,7 @@ struct df_gvs_audio_playout {
     uint64_t next_retry_ms;
     bool has_pending;
     bool discontinuity;
+    bool concealed_gap_pending; /* synthetic emission awaits its real successor */
     bool auto_bind_allowed;
 };
 

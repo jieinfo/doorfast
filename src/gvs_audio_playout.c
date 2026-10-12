@@ -24,6 +24,7 @@ void df_gvs_audio_playout_reset(struct df_gvs_audio_playout *p,
     p->next_retry_ms = 0;
     p->has_pending = false;
     p->discontinuity = false;
+    p->concealed_gap_pending = false;
     p->auto_bind_allowed = false;
     df_gvs_audio_buffer_reset(p->buffer, generation);
 }
@@ -44,6 +45,10 @@ int df_gvs_audio_playout_push(struct df_gvs_audio_playout *p,
     if (emission->synthetic)
         result = df_gvs_audio_buffer_push_silence(p->buffer, emission->count,
                                                 emission->generation);
+    else if (p->concealed_gap_pending && emission->discontinuity)
+        result = df_gvs_audio_buffer_push_after_jitter(p->buffer,
+            emission->samples, emission->count, emission->sequence,
+            emission->generation, emission->timestamp_ms);
     else
         result = df_gvs_audio_buffer_push(p->buffer, emission->samples,
             emission->count, emission->sequence, emission->generation,
@@ -53,7 +58,9 @@ int df_gvs_audio_playout_push(struct df_gvs_audio_playout *p,
         p->oldest_pending_ms = emission->timestamp_ms;
         p->has_pending = true;
     }
+    if (emission->synthetic) p->concealed_gap_pending = true;
     p->discontinuity = p->discontinuity || emission->discontinuity;
+    if (!emission->synthetic) p->concealed_gap_pending = false;
     return 0;
 }
 

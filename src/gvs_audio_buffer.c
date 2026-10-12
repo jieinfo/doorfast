@@ -36,8 +36,9 @@ static void append_samples(struct df_gvs_audio_buffer *b, const uint8_t *data,
     b->sample_count += count;
 }
 
-int df_gvs_audio_buffer_push(struct df_gvs_audio_buffer *b, const uint8_t *data,
-    size_t length, uint16_t sequence, uint64_t generation, uint64_t timestamp_ms) {
+static int push_internal(struct df_gvs_audio_buffer *b, const uint8_t *data,
+    size_t length, uint16_t sequence, uint64_t generation,
+    uint64_t timestamp_ms, bool after_jitter) {
     uint16_t distance = 1;
     int result;
     if (b == NULL || data == NULL || length == 0U || generation == 0U ||
@@ -51,7 +52,8 @@ int df_gvs_audio_buffer_push(struct df_gvs_audio_buffer *b, const uint8_t *data,
             b->duplicate_packets++;
             return DF_GVS_AUDIO_BUFFER_DUPLICATE;
         }
-        if (distance > UINT16_MAX / 2U) {
+        if (distance > UINT16_MAX / 2U &&
+            !(after_jitter && distance == UINT16_MAX / 2U + 1U)) {
             if (b->late_packets == UINT64_MAX) return -1;
             b->late_packets++;
             return DF_GVS_AUDIO_BUFFER_LATE;
@@ -72,6 +74,19 @@ int df_gvs_audio_buffer_push(struct df_gvs_audio_buffer *b, const uint8_t *data,
     b->byte_count += length;
     b->last_timestamp_ms = timestamp_ms;
     return DF_GVS_AUDIO_BUFFER_ACCEPTED;
+}
+
+int df_gvs_audio_buffer_push(struct df_gvs_audio_buffer *b, const uint8_t *data,
+    size_t length, uint16_t sequence, uint64_t generation, uint64_t timestamp_ms) {
+    return push_internal(b, data, length, sequence, generation, timestamp_ms,
+                         false);
+}
+
+int df_gvs_audio_buffer_push_after_jitter(struct df_gvs_audio_buffer *b,
+    const uint8_t *data, size_t length, uint16_t sequence,
+    uint64_t generation, uint64_t timestamp_ms) {
+    return push_internal(b, data, length, sequence, generation, timestamp_ms,
+                         true);
 }
 
 int df_gvs_audio_buffer_push_silence(struct df_gvs_audio_buffer *b, size_t count,
