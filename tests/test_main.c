@@ -21,6 +21,8 @@ void test_gvs_jpeg_extracts_dimensions_from_sof(void);
 void test_gvs_video_frame_cache(void);
 void test_gvs_video_snapshot(void);
 void test_gvs_audio_buffer(void);
+void test_gvs_audio_jitter_reorders_and_bounds_gaps(void);
+void test_gvs_audio_jitter_preserves_partial_callback_progress(void);
 void test_gvs_audio_tx_binds_pcm_to_talking_generation_and_pacing(void);
 void test_gvs_audio_tx_preserves_sequence_across_sessions_and_failures(void);
 void test_gvs_audio_tx_syncs_to_call_lifecycle(void);
@@ -524,6 +526,8 @@ int main(int argc, char **argv) {
     test_gvs_video_frame_cache();
     test_gvs_video_snapshot();
     test_gvs_audio_buffer();
+    test_gvs_audio_jitter_reorders_and_bounds_gaps();
+    test_gvs_audio_jitter_preserves_partial_callback_progress();
     test_gvs_audio_tx_binds_pcm_to_talking_generation_and_pacing();
     test_gvs_audio_tx_preserves_sequence_across_sessions_and_failures();
     test_gvs_audio_tx_syncs_to_call_lifecycle();
