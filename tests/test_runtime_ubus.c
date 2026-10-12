@@ -6,6 +6,7 @@
 
 #include "runtime_id.h"
 #include "runtime_ubus.h"
+#include "gvs_audio_playout.h"
 #include "test.h"
 
 static int provide_runtime_status(
@@ -21,6 +22,82 @@ static int provide_runtime_status(
     status->sync_version = 23;
     (*calls)++;
     return DF_OK;
+}
+
+static int ubus_audio_emit(const struct df_gvs_audio_emission *emission,
+    void *context) {
+    return df_gvs_audio_playout_push(context, emission);
+}
+
+static int ubus_audio_publish(const uint8_t *samples,
+    const struct df_gvs_audio_chunk *chunk, void *context) {
+    (void)samples;
+    (void)chunk;
+    (void)context;
+    return 0;
+}
+
+/* Catches synthetic samples inflating real counters, jitter rejections being
+ * omitted or counted again on each status read, and stale generation stats. */
+void test_runtime_ubus_audio_status_merges_jitter_without_double_counting(void) {
+    struct df_runtime_ubus service = {0};
+    struct df_gvs_audio_buffer buffer;
+    struct df_gvs_audio_playout playout;
+    struct df_gvs_audio_jitter jitter;
+    struct df_gvs_audio_status status;
+    unsigned sync_calls = 0;
+    uint8_t samples[160];
+    memset(samples, 0x55, sizeof(samples));
+    df_gvs_audio_buffer_init(&buffer);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_init(&playout, &buffer,
+        ubus_audio_publish, NULL));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_init(&jitter, ubus_audio_emit,
+        &playout));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_bind_audio_jitter(&service, &jitter));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_start(&service,
+        provide_runtime_status, &sync_calls, 10));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_bind_audio_jitter(&service, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_audio(&service, &buffer));
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_ubus_bind_audio_jitter(&service, &jitter));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_bind_audio_jitter(&service, &jitter));
+    df_gvs_audio_jitter_reset(&jitter, 7);
+    df_gvs_audio_playout_reset(&playout, 7);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 10, 7, 0));
+    TEST_ASSERT_INT_EQ(1, df_gvs_audio_jitter_push(&jitter, samples, 160, 10, 7, 1));
+    TEST_ASSERT_INT_EQ(1, df_gvs_audio_jitter_push(&jitter, samples, 160, 8, 7, 2));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 12, 7, 20));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 11, 7, 30));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples, 160, 14, 7, 40));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_tick(&jitter, 80));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&playout, 100));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_read_audio_status(&service, &status));
+    TEST_ASSERT_INT_EQ(1, status.pcm_stream_version);
+    TEST_ASSERT_INT_EQ(4, (int)status.packet_count);
+    TEST_ASSERT_INT_EQ(640, (int)status.byte_count);
+    TEST_ASSERT_INT_EQ(800, (int)status.sample_count);
+    TEST_ASSERT_INT_EQ(160, (int)status.concealed_samples);
+    TEST_ASSERT_INT_EQ(1, (int)status.duplicate_packets);
+    TEST_ASSERT_INT_EQ(1, (int)status.late_packets);
+    TEST_ASSERT_INT_EQ(2, (int)status.reordered_packets);
+    TEST_ASSERT_INT_EQ(80, (int)status.last_timestamp_ms);
+    TEST_ASSERT_INT_EQ(100, (int)status.snapshot_timestamp_ms);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_read_audio_status(&service, &status));
+    TEST_ASSERT_INT_EQ(1, (int)status.duplicate_packets);
+    TEST_ASSERT_INT_EQ(1, (int)status.late_packets);
+    df_gvs_audio_jitter_reset(&jitter, 8);
+    df_gvs_audio_playout_reset(&playout, 8);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_read_audio_status(&service, &status));
+    TEST_ASSERT_INT_EQ(8, (int)status.generation);
+    TEST_ASSERT_INT_EQ(0, (int)status.duplicate_packets);
+    TEST_ASSERT_INT_EQ(0, (int)status.late_packets);
+    TEST_ASSERT_INT_EQ(0, (int)status.reordered_packets);
+    TEST_ASSERT_INT_EQ(0, (int)status.concealed_samples);
+    TEST_ASSERT_INT_EQ(0, status.snapshot_discontinuity);
+    df_runtime_ubus_stop(&service);
 }
 
 struct call_binding_test {

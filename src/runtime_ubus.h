@@ -12,6 +12,7 @@
 #include "gvs_runtime_sync.h"
 #include "gvs_call_control.h"
 #include "gvs_audio_buffer.h"
+#include "gvs_audio_jitter.h"
 #include "gvs_audio_tx.h"
 #include "gvs_station_discovery.h"
 #include "gvs_video_frame_cache.h"
@@ -149,6 +150,7 @@ struct df_runtime_ubus {
     char manual_unlock_station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
     struct df_gvs_elevator_control *elevator;
     struct df_gvs_audio_buffer *audio;
+    struct df_gvs_audio_jitter *audio_jitter;
     struct df_gvs_audio_tx *audio_tx;
     struct df_gvs_video_frame_cache *video;
     struct df_runtime_media_module *media;
@@ -225,6 +227,8 @@ int df_runtime_ubus_update_elevator_status(struct df_runtime_ubus *,
 int df_runtime_ubus_read_elevator_status(struct df_runtime_ubus *,
     struct df_runtime_elevator_status *);
 int df_runtime_ubus_bind_audio(struct df_runtime_ubus *, struct df_gvs_audio_buffer *);
+int df_runtime_ubus_bind_audio_jitter(struct df_runtime_ubus *,
+    struct df_gvs_audio_jitter *);
 int df_runtime_ubus_read_audio_status(struct df_runtime_ubus *, struct df_gvs_audio_status *);
 int df_runtime_ubus_bind_audio_tx(struct df_runtime_ubus *,
     struct df_gvs_audio_tx *);

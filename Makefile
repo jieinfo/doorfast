@@ -78,6 +78,7 @@ DAEMON_SOURCES += src/gvs_video_frame_cache.c
 DAEMON_SOURCES += src/gvs_media_admission.c
 DAEMON_SOURCES += src/gvs_media_lifecycle.c
 DAEMON_SOURCES += src/gvs_audio_buffer.c
+DAEMON_SOURCES += src/gvs_audio_jitter.c src/gvs_audio_playout.c
 DAEMON_SOURCES += src/gvs_audio_tx.c
 DAEMON_SOURCES += src/gvs_pcm_ingress.c
 DAEMON_SOURCES += src/gvs_pcm_pump.c
@@ -124,7 +125,7 @@ build/doorfast-tests build/doorfast: src/gvs_call_runtime.h
 build/doorfast-tests build/doorfast: src/gvs_call_control.h src/deployment_config.h
 build/doorfast-tests build/doorfast: src/gvs_audio_tx.h
 build/doorfast-tests build/doorfast: src/gvs_audio_jitter.h
-build/doorfast-tests: src/gvs_audio_playout.h src/gvs_audio_buffer.h
+build/doorfast-tests build/doorfast: src/gvs_audio_playout.h src/gvs_audio_buffer.h
 build/doorfast-tests build/doorfast: src/gvs_media_admission.h
 build/doorfast-tests build/doorfast: src/gvs_media_lifecycle.h
 build/doorfast-tests build/doorfast: src/gvs_video_frame_cache.h

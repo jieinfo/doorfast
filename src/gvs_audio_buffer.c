@@ -165,6 +165,7 @@ int df_gvs_audio_buffer_mark_snapshot(struct df_gvs_audio_buffer *b,
 int df_gvs_audio_buffer_status(const struct df_gvs_audio_buffer *b,
                              struct df_gvs_audio_status *s) {
     if (b == NULL || s == NULL) return -1;
+    s->pcm_stream_version = 1U;
     s->generation = b->generation;
     s->packet_count = b->packet_count;
     s->byte_count = b->byte_count;
@@ -174,6 +175,7 @@ int df_gvs_audio_buffer_status(const struct df_gvs_audio_buffer *b,
     s->missing_packets = b->missing_packets;
     s->duplicate_packets = b->duplicate_packets;
     s->late_packets = b->late_packets;
+    s->reordered_packets = 0;
     s->last_timestamp_ms = b->last_timestamp_ms;
     s->snapshot_packet_count = b->snapshot_packet_count;
     s->snapshot_previous_packet_count = b->snapshot_previous_packet_count;
@@ -185,5 +187,6 @@ int df_gvs_audio_buffer_status(const struct df_gvs_audio_buffer *b,
     s->snapshot_bytes = b->snapshot_bytes;
     s->ready = b->length > 0;
     s->snapshot_ready = b->snapshot_ready;
+    s->snapshot_discontinuity = b->snapshot_discontinuity;
     return 0;
 }

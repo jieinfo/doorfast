@@ -103,6 +103,7 @@ int df_gvs_audio_playout_tick(struct df_gvs_audio_playout *p, uint64_t now_ms) {
     }
     result = df_gvs_audio_buffer_mark_snapshot(b, p->generation, count, now_ms);
     if (result != 0) return result;
+    b->snapshot_discontinuity = chunk.discontinuity;
     p->has_pending = false;
     p->oldest_pending_ms = 0;
     p->next_retry_ms = 0;

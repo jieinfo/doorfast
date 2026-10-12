@@ -39,10 +39,12 @@ struct df_gvs_audio_buffer {
     uint16_t last_sequence;
     bool has_sequence;
     bool snapshot_ready;
+    bool snapshot_discontinuity;
     bool auto_bind_allowed;
 };
 
 struct df_gvs_audio_status {
+    unsigned pcm_stream_version;
     uint64_t generation;
     uint64_t packet_count;
     uint64_t byte_count;
@@ -52,6 +54,7 @@ struct df_gvs_audio_status {
     uint64_t missing_packets;
     uint64_t duplicate_packets;
     uint64_t late_packets;
+    uint64_t reordered_packets;
     uint64_t last_timestamp_ms;
     uint64_t snapshot_packet_count;
     uint64_t snapshot_previous_packet_count;
@@ -63,6 +66,7 @@ struct df_gvs_audio_status {
     size_t snapshot_bytes;
     bool ready;
     bool snapshot_ready;
+    bool snapshot_discontinuity;
 };
 /* init permits first-packet binding. reset(0) clears and closes; only an
  * explicit nonzero reset reopens a closed buffer. */

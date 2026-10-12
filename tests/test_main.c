@@ -309,6 +309,10 @@ void test_runtime_ubus_manual_unlock_cleanup_and_adoption(void);
 void test_runtime_ubus_elevator_requires_active_host_and_owns_ids(void);
 void test_runtime_ubus_elevator_status_is_bounded_and_aged(void);
 void test_runtime_ubus_audio_status_tracks_buffer(void);
+void test_runtime_audio_service_advances_deadlines_and_retries(void);
+void test_runtime_audio_receive_preserves_admission_and_reordering(void);
+void test_runtime_audio_lifecycle_clears_tail_and_preserves_call_video(void);
+void test_runtime_ubus_audio_status_merges_jitter_without_double_counting(void);
 void test_runtime_ubus_keeps_bounded_redacted_event_log(void);
 void test_gvs_access_failed_send_and_late_reply(void);
 void test_gvs_access_control_sends_once_and_requires_material(void);
@@ -406,6 +410,21 @@ static int capture_media_encoder_arguments(int argc, char **argv)
 int main(int argc, char **argv) {
     int capture_result = capture_media_encoder_arguments(argc, argv);
     if (capture_result >= 0) return capture_result;
+    if (argc == 2 && strcmp(argv[1], "--runtime-audio") == 0) {
+        test_runtime_audio_service_advances_deadlines_and_retries();
+        test_runtime_audio_receive_preserves_admission_and_reordering();
+        test_runtime_audio_lifecycle_clears_tail_and_preserves_call_video();
+        test_runtime_ubus_audio_status_merges_jitter_without_double_counting();
+        test_runtime_ubus_audio_status_tracks_buffer();
+        test_gvs_audio_playout_tail_and_retry();
+        if (test_failures() != 0) return 1;
+        puts("runtime audio tests passed");
+        return 0;
+    }
+    test_runtime_audio_service_advances_deadlines_and_retries();
+    test_runtime_audio_receive_preserves_admission_and_reordering();
+    test_runtime_audio_lifecycle_clears_tail_and_preserves_call_video();
+    test_runtime_ubus_audio_status_merges_jitter_without_double_counting();
     test_pcm_http_validates_session_requests();
     test_pcm_http_requires_authoritative_talking_transmitter();
     test_pcm_http_opens_and_releases_producer_lease();

@@ -1,6 +1,7 @@
 #include "runtime_service.h"
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,38 +51,103 @@
 #define DF_RUNTIME_VIDEO_SNAPSHOT "/tmp/doorfast-latest.jpg"
 
 static volatile sig_atomic_t df_runtime_stopping = 0;
-static uint8_t df_runtime_audio_export[DF_GVS_AUDIO_BUFFER_CAPACITY];
+static const struct df_runtime_media_paths df_runtime_media_paths = {
+    DF_RUNTIME_AUDIO_SNAPSHOT, DF_RUNTIME_AUDIO_CHUNKS,
+    DF_RUNTIME_VIDEO_SNAPSHOT,
+};
 
 #define DF_RUNTIME_PREVIEW_ROUTE_MAX_AGE_MS 60000U
 
+static void df_runtime_audio_clear(struct df_gvs_audio_jitter *jitter,
+    struct df_gvs_audio_playout *playout, uint64_t generation,
+    const struct df_runtime_media_paths *paths)
+{
+    bool cleared;
+    static unsigned diagnostic_logs;
+
+    /* Close first: a failed cleanup must not permit new revisions to share
+     * their generation with stale chunk files. The next sync retries cleanup. */
+    df_gvs_audio_jitter_reset(jitter, 0);
+    df_gvs_audio_playout_reset(playout, 0);
+    cleared = remove(paths->audio_snapshot) == 0 || errno == ENOENT;
+    if (df_gvs_audio_chunk_store_clear(paths->audio_chunks) != 0) cleared = false;
+    if (cleared) {
+        df_gvs_audio_jitter_reset(jitter, generation);
+        df_gvs_audio_playout_reset(playout, generation);
+    } else if (diagnostic_logs < 16U) {
+        diagnostic_logs++;
+        (void)fputs("doorfast: event=audio_cleanup_failed\n", stderr);
+    }
+}
+
 static void df_runtime_media_clear(struct df_gvs_video_reassembly *video,
-                                   struct df_gvs_video_frame_cache *video_cache,
-                                   struct df_gvs_audio_buffer *audio,
-                                   uint64_t generation)
+    struct df_gvs_video_frame_cache *video_cache,
+    struct df_gvs_audio_jitter *jitter, struct df_gvs_audio_playout *playout,
+    uint64_t generation, const struct df_runtime_media_paths *paths)
 {
     df_gvs_video_reassembly_reset(video);
     df_gvs_video_frame_cache_reset(video_cache);
-    df_gvs_audio_buffer_reset(audio, generation);
-    (void)remove(DF_RUNTIME_AUDIO_SNAPSHOT);
-    (void)df_gvs_audio_chunk_store_clear(DF_RUNTIME_AUDIO_CHUNKS);
-    (void)remove(DF_RUNTIME_VIDEO_SNAPSHOT);
+    df_runtime_audio_clear(jitter, playout, generation, paths);
+    (void)remove(paths->video_snapshot);
 }
 
-static int df_runtime_media_sync(
+int df_runtime_media_sync(
     struct df_gvs_media_lifecycle *lifecycle,
     const struct df_gvs_session *session,
     struct df_gvs_video_reassembly *video,
     struct df_gvs_video_frame_cache *video_cache,
-    struct df_gvs_audio_buffer *audio)
+    struct df_gvs_audio_jitter *jitter,
+    struct df_gvs_audio_playout *playout,
+    enum df_gvs_session_state *previous_state,
+    const struct df_runtime_media_paths *paths)
 {
     struct df_gvs_media_lifecycle_result result;
+    bool talking_started;
 
+    if (jitter == NULL || playout == NULL || playout->buffer == NULL ||
+        previous_state == NULL || paths == NULL ||
+        paths->audio_snapshot == NULL || paths->audio_chunks == NULL ||
+        paths->video_snapshot == NULL || video == NULL || video_cache == NULL)
+        return DF_ERR_INVALID;
     if (df_gvs_media_lifecycle_sync(lifecycle, session, &result) != DF_OK) {
         return DF_ERR_INVALID;
     }
+    talking_started = session->state == DF_GVS_TALKING &&
+        (*previous_state == DF_GVS_PREVIEW || *previous_state == DF_GVS_RINGING);
     if (result.clear) {
-        df_runtime_media_clear(video, video_cache, audio, result.generation);
+        df_runtime_media_clear(video, video_cache, jitter, playout,
+            result.generation, paths);
+    } else if (talking_started ||
+        (result.active && (playout->generation != result.generation ||
+                           jitter->generation != result.generation))) {
+        df_runtime_audio_clear(jitter, playout, result.generation, paths);
     }
+    *previous_state = session->state;
+    return DF_OK;
+}
+
+int df_runtime_audio_service(struct df_gvs_audio_jitter *jitter,
+    struct df_gvs_audio_playout *playout, uint64_t now_ms) {
+    int result = df_gvs_audio_jitter_tick(jitter, now_ms);
+    if (result != 0) return result;
+    return df_gvs_audio_playout_tick(playout, now_ms);
+}
+
+static int df_runtime_audio_emit(const struct df_gvs_audio_emission *emission,
+    void *context) {
+    return df_gvs_audio_playout_push(context, emission);
+}
+
+static int df_runtime_audio_publish(const uint8_t *samples,
+    const struct df_gvs_audio_chunk *chunk, void *context) {
+    const struct df_runtime_media_paths *paths = context;
+    if (df_g711_alaw_write_wav(paths->audio_snapshot, samples,
+            chunk->sample_count) != 0 ||
+        df_gvs_audio_chunk_store_publish_v1(paths->audio_chunks,
+            paths->audio_snapshot, chunk->generation, chunk->previous_revision,
+            chunk->revision, 44U + chunk->sample_count * 2U,
+            chunk->dropped_samples, chunk->timestamp_ms,
+            chunk->discontinuity) != 0) return DF_ERR_IO;
     return DF_OK;
 }
 
@@ -734,50 +800,27 @@ static int df_runtime_media_available_memory(uint64_t *available_kib,
     return DF_ERR_IO;
 }
 
-static void df_runtime_receive_audio_payload(
+int df_runtime_receive_audio_payload(
     const uint8_t *payload, size_t payload_length,
-    struct df_gvs_session *session, const uint8_t identity[6],
-    struct df_gvs_audio_buffer *audio, uint64_t now_ms,
-    uint64_t *last_audio_export_ms) {
+    const struct df_gvs_session *session, const uint8_t identity[6],
+    struct df_gvs_audio_jitter *jitter, uint64_t now_ms) {
     struct df_gvs_audio_packet audio_packet;
+    int result;
 
     if (payload == NULL || session == NULL || identity == NULL ||
-        audio == NULL || last_audio_export_ms == NULL ||
-        session->state == DF_GVS_IDLE || session->state == DF_GVS_ENDED ||
-        df_gvs_parse_audio(payload, payload_length, &audio_packet) != 0 ||
+        jitter == NULL) return DF_ERR_INVALID;
+    if (df_gvs_parse_audio(payload, payload_length, &audio_packet) != 0 ||
         df_gvs_media_admit(session, identity, audio_packet.destination,
-            audio_packet.source) != DF_GVS_MEDIA_ACCEPTED ||
-        df_gvs_audio_buffer_push(audio, audio_packet.payload,
-            audio_packet.payload_length, audio_packet.sequence,
-            session->generation, now_ms) != 0) return;
+            audio_packet.source) != DF_GVS_MEDIA_ACCEPTED) return 1;
+    result = df_gvs_audio_jitter_push(jitter, audio_packet.payload,
+        audio_packet.payload_length, audio_packet.sequence,
+        session->generation, now_ms);
+    if (result != 0) return result;
     (void)printf(
         "doorfast: event=audio_frame generation=%llu bytes=%zu sequence=%u\n",
         (unsigned long long)session->generation, audio_packet.payload_length,
         (unsigned)audio_packet.sequence);
-    if (audio->length >= 8000U &&
-        now_ms >= *last_audio_export_ms + 1000U) {
-        size_t export_length = 0U;
-        uint64_t previous_revision = audio->snapshot_packet_count;
-        uint64_t revision = audio->packet_count;
-        uint64_t pending = audio->byte_count - audio->snapshot_source_bytes;
-
-        if (df_gvs_audio_buffer_copy_pending(audio, df_runtime_audio_export,
-                sizeof(df_runtime_audio_export), &export_length) == 0 &&
-            export_length > 0U) {
-            uint64_t dropped = pending > export_length ?
-                pending - export_length : 0U;
-
-            if (df_g711_alaw_write_wav(DF_RUNTIME_AUDIO_SNAPSHOT,
-                    df_runtime_audio_export, export_length) == 0 &&
-                df_gvs_audio_chunk_store_publish(DF_RUNTIME_AUDIO_CHUNKS,
-                    DF_RUNTIME_AUDIO_SNAPSHOT, session->generation,
-                    previous_revision, revision, 44U + export_length * 2U,
-                    dropped) == 0 &&
-                df_gvs_audio_buffer_mark_snapshot(audio, session->generation,
-                    export_length, now_ms) == 0)
-                *last_audio_export_ms = now_ms;
-        }
-    }
+    return 0;
 }
 
 static void df_runtime_receive_video_datagram(
@@ -907,6 +950,10 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_video_frame_cache video_cache = {0};
     struct df_gvs_media_lifecycle media_lifecycle = {0};
     struct df_gvs_audio_buffer audio = {0};
+    struct df_gvs_audio_jitter audio_jitter = {0};
+    struct df_gvs_audio_playout audio_playout = {0};
+    enum df_gvs_session_state previous_media_state = DF_GVS_IDLE;
+    struct df_runtime_media_paths media_paths = df_runtime_media_paths;
     struct df_gvs_audio_tx audio_tx = {0};
     struct df_gvs_pcm_ingress pcm_ingress = {.fd = -1};
     struct df_runtime_ubus ubus = {0};
@@ -934,7 +981,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     uint64_t started_ms;
     uint64_t logged_frame_generation = 0;
     uint64_t auto_elevator_generation = 0;
-    uint64_t last_audio_export_ms = 0;
+    unsigned audio_service_errors_logged = 0U;
     df_gvs_send_attempt_fn reply_send_attempt = df_gvs_memory_send_attempt;
     void *reply_send_context = &memory_sender;
     const char *reply_send_mode = "simulated";
@@ -983,9 +1030,14 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     df_gvs_video_frame_cache_init(&video_cache);
     df_gvs_media_lifecycle_init(&media_lifecycle);
     df_gvs_audio_buffer_init(&audio);
+    if (df_gvs_audio_playout_init(&audio_playout, &audio,
+            df_runtime_audio_publish, &media_paths) != 0 ||
+        df_gvs_audio_jitter_init(&audio_jitter, df_runtime_audio_emit,
+            &audio_playout) != 0) return DF_ERR_INVALID;
     if (df_runtime_media_sync(
             &media_lifecycle, &session, &video, &video_cache,
-            &audio) != DF_OK) {
+            &audio_jitter, &audio_playout, &previous_media_state,
+            &media_paths) != DF_OK) {
         return DF_ERR_INVALID;
     }
     if (df_gvs_audio_tx_init(&audio_tx, (uint16_t)started_ms,
@@ -1126,6 +1178,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             &runtime->stations) == DF_OK &&
         df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK &&
         df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK &&
+        df_runtime_ubus_bind_audio_jitter(&ubus, &audio_jitter) == DF_OK &&
         df_runtime_ubus_bind_audio_tx(&ubus, &audio_tx) == DF_OK &&
         df_runtime_ubus_bind_video(&ubus, &video_cache) == DF_OK &&
         df_runtime_ubus_bind_media(&ubus, &media_module,
@@ -1328,7 +1381,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (df_runtime_media_sync(
                 &media_lifecycle, &session, &video, &video_cache,
-                &audio) != DF_OK) {
+                &audio_jitter, &audio_playout, &previous_media_state,
+                &media_paths) != DF_OK) {
             status = DF_ERR_IO;
             goto done;
         }
@@ -1386,7 +1440,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
             }
             if (df_runtime_media_sync(
                     &media_lifecycle, &session, &video, &video_cache,
-                    &audio) != DF_OK) {
+                    &audio_jitter, &audio_playout, &previous_media_state,
+                    &media_paths) != DF_OK) {
                 status = DF_ERR_IO;
                 goto done;
             }
@@ -1447,7 +1502,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 df_runtime_receive_audio_payload(
                     packet + media_prefix.payload_offset,
                     media_prefix.declared_payload_length, &session, identity,
-                    &audio, now_ms, &last_audio_export_ms);
+                    &audio_jitter, now_ms);
                 goto iteration_end;
             }
             if (media_status == 1 && media_prefix.payload_complete &&
@@ -1719,7 +1774,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 }
                 if (df_runtime_media_sync(
                         &media_lifecycle, &session, &video, &video_cache,
-                        &audio) != DF_OK) {
+                        &audio_jitter, &audio_playout, &previous_media_state,
+                        &media_paths) != DF_OK) {
                     status = DF_ERR_IO;
                     goto done;
                 }
@@ -1747,8 +1803,8 @@ iteration_end:
                 if (media_result == DF_GVS_MEDIA_RECEIVER_DROPPED) continue;
                 if (datagram.channel == DF_GVS_MEDIA_AUDIO) {
                     df_runtime_receive_audio_payload(media_datagram_buffer,
-                        datagram.length, &session, identity, &audio, now_ms,
-                        &last_audio_export_ms);
+                        datagram.length, &session, identity, &audio_jitter,
+                        now_ms);
                 } else {
                     df_runtime_receive_video_payload(media_datagram_buffer,
                         datagram.length, datagram.source_ipv4, &media_module,
@@ -1756,6 +1812,11 @@ iteration_end:
                         &video_cache, now_ms);
                 }
             }
+        }
+        if (df_runtime_audio_service(&audio_jitter, &audio_playout,
+                df_monotonic_ms()) != 0 && audio_service_errors_logged < 16U) {
+            audio_service_errors_logged++;
+            (void)fputs("doorfast: event=audio_service_failed\n", stderr);
         }
         continue;
     }
@@ -1770,7 +1831,8 @@ done:
         (unsigned long long)media_receiver.truncated,
         (unsigned long long)media_receiver.receive_errors);
     df_runtime_media_module_stop(&media_module);
-    df_runtime_media_clear(&video, &video_cache, &audio, 0);
+    df_runtime_media_clear(&video, &video_cache, &audio_jitter,
+        &audio_playout, 0, &media_paths);
     df_gvs_pcm_ingress_close(&pcm_ingress);
     df_gvs_multicast_close(&multicast);
     df_gvs_media_receiver_close(&media_receiver);

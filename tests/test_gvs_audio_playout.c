@@ -100,6 +100,7 @@ void test_gvs_audio_playout_tail_and_retry(void) {
     TEST_ASSERT_INT_EQ(1, publication.chunk.discontinuity);
     TEST_ASSERT_INT_EQ(0, (int)b.snapshot_packet_count);
     TEST_ASSERT_INT_EQ(0, (int)b.snapshot_source_samples);
+    TEST_ASSERT_INT_EQ(0, b.snapshot_discontinuity);
     publication.failure = 0;
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&p, 210));
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&p, 299));
@@ -110,12 +111,23 @@ void test_gvs_audio_playout_tail_and_retry(void) {
     TEST_ASSERT_INT_EQ(3200, (int)b.snapshot_source_samples);
     TEST_ASSERT_INT_EQ(1600, (int)b.snapshot_dropped_bytes);
     TEST_ASSERT_INT_EQ(3244, (int)b.snapshot_bytes);
+    TEST_ASSERT_INT_EQ(1, b.snapshot_discontinuity);
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&p, 400));
     TEST_ASSERT_INT_EQ(2, publication.attempts);
     TEST_ASSERT_INT_EQ(0, push_real(&p, 128, 20, 7, 500, 0x55, false));
     TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&p, 600));
     TEST_ASSERT_INT_EQ(0, publication.chunk.discontinuity);
     TEST_ASSERT_INT_EQ(0, (int)publication.chunk.dropped_samples);
+    TEST_ASSERT_INT_EQ(0, b.snapshot_discontinuity);
+    TEST_ASSERT_INT_EQ(0, push_real(&p, 128, 21, 7, 700, 0x55, true));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_tick(&p, 800));
+    TEST_ASSERT_INT_EQ(1, b.snapshot_discontinuity);
+    TEST_ASSERT_INT_EQ(0, push_real(&p, 128, 22, 7, 900, 0x55, false));
+    publication.failure = -5;
+    TEST_ASSERT_INT_EQ(-5, df_gvs_audio_playout_tick(&p, 1000));
+    TEST_ASSERT_INT_EQ(1, b.snapshot_discontinuity);
+    df_gvs_audio_playout_reset(&p, 8);
+    TEST_ASSERT_INT_EQ(0, b.snapshot_discontinuity);
 }
 
 /* Catches silence inventing a real revision, reset retaining failure deadlines,

@@ -512,10 +512,15 @@ static int df_runtime_ubus_status_handler(
     blobmsg_close_table(&platform->response, call_table);
     if (df_runtime_ubus_read_audio_status(platform->owner, &audio_status) == DF_OK) {
         void *audio_table = blobmsg_open_table(&platform->response, "audio");
+        blobmsg_add_u32(&platform->response, "pcm_stream_version",
+                       audio_status.pcm_stream_version);
         blobmsg_add_u8(&platform->response, "ready", audio_status.ready);
         blobmsg_add_u64(&platform->response, "generation", audio_status.generation);
         blobmsg_add_u64(&platform->response, "packets", audio_status.packet_count);
         blobmsg_add_u64(&platform->response, "bytes", audio_status.byte_count);
+        blobmsg_add_u64(&platform->response, "sample_count", audio_status.sample_count);
+        blobmsg_add_u64(&platform->response, "concealed_samples", audio_status.concealed_samples);
+        blobmsg_add_u64(&platform->response, "reordered_packets", audio_status.reordered_packets);
         blobmsg_add_u64(&platform->response, "sequence_gaps", audio_status.sequence_gaps);
         blobmsg_add_u64(&platform->response, "missing_packets", audio_status.missing_packets);
         blobmsg_add_u64(&platform->response, "duplicate_packets", audio_status.duplicate_packets);
@@ -524,6 +529,8 @@ static int df_runtime_ubus_status_handler(
         blobmsg_add_u64(&platform->response, "last_timestamp_ms", audio_status.last_timestamp_ms);
         blobmsg_add_u8(&platform->response, "snapshot_ready",
                        audio_status.snapshot_ready);
+        blobmsg_add_u8(&platform->response, "snapshot_discontinuity",
+                       audio_status.snapshot_discontinuity);
         blobmsg_add_u64(&platform->response, "snapshot_packet_count",
                         audio_status.snapshot_packet_count);
         blobmsg_add_u64(&platform->response,
@@ -531,6 +538,8 @@ static int df_runtime_ubus_status_handler(
                         audio_status.snapshot_previous_packet_count);
         blobmsg_add_u64(&platform->response, "snapshot_source_bytes",
                         audio_status.snapshot_source_bytes);
+        blobmsg_add_u64(&platform->response, "snapshot_source_samples",
+                        audio_status.snapshot_source_samples);
         blobmsg_add_u64(&platform->response, "snapshot_dropped_bytes",
                         audio_status.snapshot_dropped_bytes);
         blobmsg_add_u64(&platform->response, "snapshot_bytes",
@@ -1686,7 +1695,22 @@ int df_runtime_ubus_bind_audio(struct df_runtime_ubus *service,
 int df_runtime_ubus_read_audio_status(struct df_runtime_ubus *service,
     struct df_gvs_audio_status *status) {
     if (service == NULL || !service->started || service->audio == NULL || status == NULL) return DF_ERR_INVALID;
-    return df_gvs_audio_buffer_status(service->audio, status);
+    int result = df_gvs_audio_buffer_status(service->audio, status);
+    if (result == 0 && service->audio_jitter != NULL &&
+        service->audio_jitter->generation == status->generation) {
+        status->duplicate_packets += service->audio_jitter->duplicate_packets;
+        status->late_packets += service->audio_jitter->late_packets;
+        status->reordered_packets = service->audio_jitter->reordered_packets;
+    }
+    return result;
+}
+
+int df_runtime_ubus_bind_audio_jitter(struct df_runtime_ubus *service,
+    struct df_gvs_audio_jitter *jitter) {
+    if (service == NULL || !service->started || jitter == NULL ||
+        service->audio_jitter != NULL) return DF_ERR_INVALID;
+    service->audio_jitter = jitter;
+    return DF_OK;
 }
 
 int df_runtime_ubus_bind_audio_tx(struct df_runtime_ubus *service,

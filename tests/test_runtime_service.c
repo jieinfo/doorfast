@@ -2,13 +2,311 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/socket.h>
 
 #include "capture.h"
 #include "gvs_memory_sender.h"
 #include "gvs_serialize.h"
+#include "gvs_audio_playout.h"
+#include "gvs_audio_chunk_store.h"
+#include "gvs_media.h"
+#include "gvs_packet.h"
+#include "gvs_media_receiver.h"
+#include "g711_alaw.h"
 #include "runtime_service.h"
 #include "runtime_ubus.h"
 #include "test.h"
+
+struct runtime_audio_sink {
+    struct df_gvs_audio_chunk chunk;
+    uint8_t samples[1600];
+    unsigned attempts;
+    int failure;
+};
+
+static int runtime_audio_publish(const uint8_t *samples,
+    const struct df_gvs_audio_chunk *chunk, void *context) {
+    struct runtime_audio_sink *sink = context;
+    sink->attempts++;
+    sink->chunk = *chunk;
+    if (chunk->sample_count > sizeof(sink->samples)) return -1;
+    memcpy(sink->samples, samples, chunk->sample_count);
+    return sink->failure;
+}
+
+static int runtime_audio_emit(const struct df_gvs_audio_emission *emission,
+    void *context) {
+    return df_gvs_audio_playout_push(context, emission);
+}
+
+static void runtime_audio_init(struct df_gvs_audio_buffer *buffer,
+    struct df_gvs_audio_playout *playout, struct df_gvs_audio_jitter *jitter,
+    struct runtime_audio_sink *sink) {
+    df_gvs_audio_buffer_init(buffer);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_playout_init(playout, buffer,
+        runtime_audio_publish, sink));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_init(jitter,
+        runtime_audio_emit, playout));
+}
+
+/* Catches a missing idle tick, reversed tick ordering and retries that consume
+ * the cursor or run before the publisher's retry deadline. */
+void test_runtime_audio_service_advances_deadlines_and_retries(void) {
+    struct df_gvs_audio_buffer buffer;
+    struct df_gvs_audio_playout playout;
+    struct df_gvs_audio_jitter jitter;
+    struct runtime_audio_sink sink = {0};
+    uint8_t samples[160];
+    memset(samples, 0x55, sizeof(samples));
+    runtime_audio_init(&buffer, &playout, &jitter, &sink);
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 200));
+    TEST_ASSERT_INT_EQ(0, sink.attempts);
+    df_gvs_audio_jitter_reset(&jitter, 7);
+    df_gvs_audio_playout_reset(&playout, 7);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 10, 7, 300));
+    memset(samples, 0x66, sizeof(samples));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 12, 7, 320));
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 359));
+    TEST_ASSERT_INT_EQ(1, (int)buffer.packet_count);
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 400));
+    TEST_ASSERT_INT_EQ(1, sink.attempts);
+    TEST_ASSERT_INT_EQ(480, (int)sink.chunk.sample_count);
+    TEST_ASSERT_INT_EQ(2, (int)sink.chunk.revision);
+    TEST_ASSERT_INT_EQ(0x55, sink.samples[0]);
+    TEST_ASSERT_INT_EQ(0xd5, sink.samples[160]);
+    TEST_ASSERT_INT_EQ(0x66, sink.samples[320]);
+    TEST_ASSERT_INT_EQ(320, (int)buffer.byte_count);
+    TEST_ASSERT_INT_EQ(480, (int)buffer.sample_count);
+    TEST_ASSERT_INT_EQ(160, (int)buffer.concealed_samples);
+    TEST_ASSERT_INT_EQ(400, (int)buffer.last_timestamp_ms);
+    TEST_ASSERT_INT_EQ(400, (int)buffer.snapshot_timestamp_ms);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 13, 7, 500));
+    sink.failure = -5;
+    TEST_ASSERT_INT_EQ(-5, df_runtime_audio_service(&jitter, &playout, 600));
+    TEST_ASSERT_INT_EQ(2, (int)buffer.snapshot_packet_count);
+    sink.failure = 0;
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 699));
+    TEST_ASSERT_INT_EQ(2, sink.attempts);
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 700));
+    TEST_ASSERT_INT_EQ(3, sink.attempts);
+    TEST_ASSERT_INT_EQ(160, (int)sink.chunk.sample_count);
+    TEST_ASSERT_INT_EQ(2, (int)sink.chunk.previous_revision);
+    TEST_ASSERT_INT_EQ(3, (int)buffer.snapshot_packet_count);
+}
+
+/* Catches any admission relaxation or bypass of jitter by either transport's
+ * shared payload receiver, including duplicates observed on both transports. */
+void test_runtime_audio_receive_preserves_admission_and_reordering(void) {
+    const uint8_t identity[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t peer[6] = {0x61, 2, 2, 1, 1, 1};
+    struct df_gvs_session session = {.state = DF_GVS_PREVIEW, .generation = 7};
+    struct df_gvs_audio_buffer buffer;
+    struct df_gvs_audio_playout playout;
+    struct df_gvs_audio_jitter jitter;
+    struct runtime_audio_sink sink = {0};
+    uint8_t samples[160], payload[DF_GVS_AUDIO_HEADER_LEN + 160];
+    uint8_t captured[42 + sizeof(payload)] = {0};
+    struct df_udp_prefix prefix;
+    struct df_gvs_media_receiver receiver = {.audio_fd = -1, .video_fd = -1};
+    struct df_gvs_media_datagram datagram;
+    struct sockaddr_in destination = {0};
+    uint8_t datagram_bytes[sizeof(payload)];
+    size_t length = 0;
+    memcpy(session.peer, peer, 6);
+    memset(samples, 0x55, sizeof(samples));
+    runtime_audio_init(&buffer, &playout, &jitter, &sink);
+    df_gvs_audio_jitter_reset(&jitter, 7);
+    df_gvs_audio_playout_reset(&playout, 7);
+    TEST_ASSERT_INT_EQ(0, df_gvs_serialize_audio(identity, peer, 10,
+        samples, sizeof(samples), payload, sizeof(payload), &length));
+    /* Ethernet/IPv4/UDP capture path, with the original 8302 filter. */
+    captured[12] = 8; captured[14] = 0x45; captured[23] = 17;
+    captured[16] = (uint8_t)((28U + length) >> 8);
+    captured[17] = (uint8_t)(28U + length);
+    captured[34] = 0x20; captured[35] = 0x6e;
+    captured[36] = 0x20; captured[37] = 0x6e;
+    captured[38] = (uint8_t)((8U + length) >> 8);
+    captured[39] = (uint8_t)(8U + length);
+    memcpy(captured + 42, payload, length);
+    TEST_ASSERT_INT_EQ(1, df_gvs_inspect_udp_prefix(captured,
+        sizeof(captured), &prefix));
+    TEST_ASSERT_INT_EQ(8302, prefix.destination_port);
+    TEST_ASSERT_INT_EQ(1, prefix.payload_complete);
+    TEST_ASSERT_INT_EQ(0, df_runtime_receive_audio_payload(
+        captured + prefix.payload_offset, prefix.declared_payload_length,
+        &session, identity, &jitter, 0));
+    /* The bound socket path supplies the same complete GVS payload. */
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_media_receiver_open(&receiver,
+        "127.0.0.1", 0, 0));
+    destination.sin_family = AF_INET;
+    destination.sin_port = htons(receiver.audio_port);
+    destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    TEST_ASSERT_INT_EQ((int)length, (int)sendto(receiver.video_fd, payload,
+        length, 0, (const struct sockaddr *)&destination, sizeof(destination)));
+    int received = DF_GVS_MEDIA_RECEIVER_EMPTY;
+    for (unsigned i = 0; i < 1000 && received == DF_GVS_MEDIA_RECEIVER_EMPTY; i++)
+        received = df_gvs_media_receiver_next(&receiver, datagram_bytes,
+            sizeof(datagram_bytes), &datagram);
+    TEST_ASSERT_INT_EQ(DF_GVS_MEDIA_RECEIVER_DATAGRAM, received);
+    TEST_ASSERT_INT_EQ(DF_GVS_MEDIA_AUDIO, datagram.channel);
+    TEST_ASSERT_INT_EQ(1, df_runtime_receive_audio_payload(datagram_bytes,
+        datagram.length, &session, identity, &jitter, 1));
+    TEST_ASSERT_INT_EQ(0, df_gvs_serialize_audio(identity, peer, 12,
+        samples, sizeof(samples), payload, sizeof(payload), &length));
+    TEST_ASSERT_INT_EQ((int)length, (int)sendto(receiver.video_fd, payload,
+        length, 0, (const struct sockaddr *)&destination, sizeof(destination)));
+    received = DF_GVS_MEDIA_RECEIVER_EMPTY;
+    for (unsigned i = 0; i < 1000 && received == DF_GVS_MEDIA_RECEIVER_EMPTY; i++)
+        received = df_gvs_media_receiver_next(&receiver, datagram_bytes,
+            sizeof(datagram_bytes), &datagram);
+    TEST_ASSERT_INT_EQ(DF_GVS_MEDIA_RECEIVER_DATAGRAM, received);
+    TEST_ASSERT_INT_EQ(0, df_runtime_receive_audio_payload(datagram_bytes,
+        datagram.length, &session, identity, &jitter, 20));
+    TEST_ASSERT_INT_EQ(1, (int)buffer.packet_count);
+    TEST_ASSERT_INT_EQ(0, df_gvs_serialize_audio(identity, peer, 11,
+        samples, sizeof(samples), payload, sizeof(payload), &length));
+    memcpy(captured + 42, payload, length);
+    TEST_ASSERT_INT_EQ(0, df_runtime_receive_audio_payload(
+        captured + prefix.payload_offset, prefix.declared_payload_length,
+        &session, identity, &jitter, 30));
+    TEST_ASSERT_INT_EQ(3, (int)buffer.packet_count);
+    TEST_ASSERT_INT_EQ(1, (int)jitter.reordered_packets);
+    payload[10] ^= 1;
+    TEST_ASSERT_INT_EQ(1, df_runtime_receive_audio_payload(payload, length,
+        &session, identity, &jitter, 31));
+    payload[10] ^= 1; payload[16] ^= 1;
+    TEST_ASSERT_INT_EQ(1, df_runtime_receive_audio_payload(payload, length,
+        &session, identity, &jitter, 32));
+    payload[16] ^= 1;
+    session.state = DF_GVS_ENDED;
+    TEST_ASSERT_INT_EQ(1, df_runtime_receive_audio_payload(payload, length,
+        &session, identity, &jitter, 33));
+    TEST_ASSERT_INT_EQ(3, (int)buffer.packet_count);
+    TEST_ASSERT_INT_EQ(1, (int)jitter.duplicate_packets);
+    df_gvs_media_receiver_close(&receiver);
+}
+
+/* Catches inherited pre-call audio on TALKING, leaking queued tail on hangup
+ * or preemption, and resetting video during a same-generation call pickup. */
+void test_runtime_audio_lifecycle_clears_tail_and_preserves_call_video(void) {
+    struct df_gvs_session session = {.state = DF_GVS_PREVIEW, .generation = 7};
+    struct df_gvs_media_lifecycle lifecycle;
+    struct df_gvs_audio_buffer buffer;
+    struct df_gvs_audio_playout playout;
+    struct df_gvs_audio_jitter jitter;
+    struct df_gvs_video_reassembly video;
+    struct df_gvs_video_frame_cache cache;
+    struct runtime_audio_sink sink = {0};
+    enum df_gvs_session_state previous_state = DF_GVS_IDLE;
+    const uint8_t samples[160] = {0x55};
+    const uint8_t jpeg[4] = {0xff, 0xd8, 0xff, 0xd9};
+    char directory[] = "/tmp/doorfast-runtime-audio-XXXXXX";
+    char audio_path[256], video_path[256], chunk_path[256], metadata_path[256];
+    char parked_chunks[256];
+    struct df_runtime_media_paths paths = {audio_path, chunk_path, video_path};
+    FILE *file;
+    TEST_ASSERT_INT_EQ(1, mkdtemp(directory) != NULL);
+    (void)snprintf(audio_path, sizeof(audio_path), "%s/audio.wav", directory);
+    (void)snprintf(video_path, sizeof(video_path), "%s/video.jpg", directory);
+    (void)snprintf(chunk_path, sizeof(chunk_path), "%s/chunks", directory);
+    (void)snprintf(parked_chunks, sizeof(parked_chunks), "%s/parked", directory);
+    (void)snprintf(metadata_path, sizeof(metadata_path),
+        "%s/chunks/chunk-7-0-1-364-0-20-0.wav", directory);
+    runtime_audio_init(&buffer, &playout, &jitter, &sink);
+    df_gvs_video_reassembly_init(&video);
+    df_gvs_video_frame_cache_init(&cache);
+    df_gvs_media_lifecycle_init(&lifecycle);
+    TEST_ASSERT_INT_EQ(0, df_runtime_media_sync(&lifecycle, &session, &video,
+        &cache, &jitter, &playout, &previous_state, &paths));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 10, 7, 0));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 12, 7, 20));
+    TEST_ASSERT_INT_EQ(0, df_gvs_video_frame_cache_store(&cache, jpeg,
+        sizeof(jpeg), 7, 1, 20));
+    TEST_ASSERT_INT_EQ(0, df_g711_alaw_write_wav(audio_path, samples,
+        sizeof(samples)));
+    file = fopen(video_path, "wb");
+    TEST_ASSERT_INT_EQ(1, file != NULL);
+    if (file != NULL) { (void)fwrite(jpeg, 1, sizeof(jpeg), file); (void)fclose(file); }
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_chunk_store_publish_v1(chunk_path,
+        audio_path, 7, 0, 1, 364, 0, 20, false));
+    TEST_ASSERT_INT_EQ(0, access(metadata_path, F_OK));
+    session.state = DF_GVS_TALKING;
+    /* A storage fault must close audio until cleanup is actually successful. */
+    TEST_ASSERT_INT_EQ(0, rename(chunk_path, parked_chunks));
+    file = fopen(chunk_path, "wb");
+    TEST_ASSERT_INT_EQ(1, file != NULL);
+    if (file != NULL) (void)fclose(file);
+    TEST_ASSERT_INT_EQ(0, df_runtime_media_sync(&lifecycle, &session, &video,
+        &cache, &jitter, &playout, &previous_state, &paths));
+    TEST_ASSERT_INT_EQ(0, (int)jitter.generation);
+    TEST_ASSERT_INT_EQ(0, (int)playout.generation);
+    TEST_ASSERT_INT_EQ(0, (int)buffer.generation);
+    TEST_ASSERT_INT_EQ(1, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 1, 7, 100));
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 200));
+    TEST_ASSERT_INT_EQ(0, sink.attempts);
+    TEST_ASSERT_INT_EQ(4, (int)cache.length);
+    TEST_ASSERT_INT_EQ(0, remove(chunk_path));
+    TEST_ASSERT_INT_EQ(0, rename(parked_chunks, chunk_path));
+    TEST_ASSERT_INT_EQ(0, df_runtime_media_sync(&lifecycle, &session, &video,
+        &cache, &jitter, &playout, &previous_state, &paths));
+    TEST_ASSERT_INT_EQ(7, (int)playout.generation);
+    TEST_ASSERT_INT_EQ(0, (int)buffer.length);
+    TEST_ASSERT_INT_EQ(0, jitter.has_sequence);
+    TEST_ASSERT_INT_EQ(0, playout.has_pending);
+    TEST_ASSERT_INT_EQ(4, (int)cache.length);
+    TEST_ASSERT_INT_EQ(-1, access(audio_path, F_OK));
+    TEST_ASSERT_INT_EQ(-1, access(metadata_path, F_OK));
+    TEST_ASSERT_INT_EQ(0, access(video_path, F_OK));
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 200));
+    TEST_ASSERT_INT_EQ(0, sink.attempts);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 1, 7, 300));
+    session.generation = 8;
+    TEST_ASSERT_INT_EQ(0, df_runtime_media_sync(&lifecycle, &session, &video,
+        &cache, &jitter, &playout, &previous_state, &paths));
+    TEST_ASSERT_INT_EQ(8, (int)jitter.generation);
+    TEST_ASSERT_INT_EQ(0, (int)cache.length);
+    TEST_ASSERT_INT_EQ(-1, access(video_path, F_OK));
+    TEST_ASSERT_INT_EQ(1, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 2, 7, 310));
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 1, 8, 320));
+    /* A caller preemption increments generation while still RINGING. */
+    session.state = DF_GVS_RINGING; session.generation = 9;
+    TEST_ASSERT_INT_EQ(0, df_runtime_media_sync(&lifecycle, &session, &video,
+        &cache, &jitter, &playout, &previous_state, &paths));
+    TEST_ASSERT_INT_EQ(9, (int)playout.generation);
+    TEST_ASSERT_INT_EQ(0, (int)buffer.packet_count);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 1, 9, 400));
+    session.state = DF_GVS_TALKING;
+    TEST_ASSERT_INT_EQ(0, df_runtime_media_sync(&lifecycle, &session, &video,
+        &cache, &jitter, &playout, &previous_state, &paths));
+    TEST_ASSERT_INT_EQ(9, (int)playout.generation);
+    TEST_ASSERT_INT_EQ(0, (int)buffer.packet_count);
+    TEST_ASSERT_INT_EQ(0, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 1, 9, 405));
+    session.state = DF_GVS_ENDED;
+    TEST_ASSERT_INT_EQ(0, df_runtime_media_sync(&lifecycle, &session, &video,
+        &cache, &jitter, &playout, &previous_state, &paths));
+    TEST_ASSERT_INT_EQ(0, (int)jitter.generation);
+    TEST_ASSERT_INT_EQ(0, (int)playout.generation);
+    TEST_ASSERT_INT_EQ(1, df_gvs_audio_jitter_push(&jitter, samples,
+        sizeof(samples), 2, 9, 410));
+    TEST_ASSERT_INT_EQ(0, df_runtime_audio_service(&jitter, &playout, 600));
+    TEST_ASSERT_INT_EQ(0, sink.attempts);
+    (void)df_gvs_audio_chunk_store_clear(chunk_path);
+    (void)rmdir(chunk_path);
+    TEST_ASSERT_INT_EQ(0, rmdir(directory));
+}
 
 struct delay_trace {
     unsigned values[20];

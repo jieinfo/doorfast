@@ -8,9 +8,30 @@
 #include "gvs_station_discovery.h"
 #include "runtime_media_module.h"
 #include "runtime_config.h"
+#include "gvs_audio_playout.h"
+#include "gvs_media_lifecycle.h"
+#include "gvs_video_reassembly.h"
+#include "gvs_video_frame_cache.h"
 
 struct df_runtime_ubus;
 struct df_event_stream;
+
+struct df_runtime_media_paths {
+    const char *audio_snapshot;
+    const char *audio_chunks;
+    const char *video_snapshot;
+};
+
+int df_runtime_audio_service(struct df_gvs_audio_jitter *,
+    struct df_gvs_audio_playout *, uint64_t now_ms);
+int df_runtime_receive_audio_payload(const uint8_t *, size_t,
+    const struct df_gvs_session *, const uint8_t identity[6],
+    struct df_gvs_audio_jitter *, uint64_t now_ms);
+int df_runtime_media_sync(struct df_gvs_media_lifecycle *,
+    const struct df_gvs_session *, struct df_gvs_video_reassembly *,
+    struct df_gvs_video_frame_cache *, struct df_gvs_audio_jitter *,
+    struct df_gvs_audio_playout *, enum df_gvs_session_state *previous_state,
+    const struct df_runtime_media_paths *);
 
 typedef int (*df_runtime_delay_slice_fn)(unsigned delay_ms, void *context);
 typedef int (*df_runtime_station_scan_emit_fn)(
