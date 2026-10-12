@@ -236,6 +236,180 @@ read_audio_status() {
   [ "$AUDIO_GENERATION" = "$CALL_GENERATION" ]
 }
 
+audio_uint64() {
+  [ "$1" = 0 ] || uint64_nonzero "$1"
+}
+
+# Compare decimal uint64 strings without signed arithmetic or floating point.
+audio_uint64_ge() {
+  local left="$1" right="$2" left_digit right_digit
+  [ "${#left}" -gt "${#right}" ] && return 0
+  [ "${#left}" -lt "${#right}" ] && return 1
+  while [ -n "$left" ]; do
+    left_digit="${left%"${left#?}"}"
+    right_digit="${right%"${right#?}"}"
+    [ "$left_digit" -gt "$right_digit" ] && return 0
+    [ "$left_digit" -lt "$right_digit" ] && return 1
+    left="${left#?}"
+    right="${right#?}"
+  done
+  return 0
+}
+
+audio_query() {
+  local rest="${QUERY_STRING:-}" item key value seen_runtime=0 seen_station=0 seen_generation=0 seen_after=0 invalid=0
+  AUDIO_IDENTITY_REQUEST=0
+  REQUESTED_RUNTIME='' REQUESTED_STATION='' REQUESTED_GENERATION='' REQUESTED_AFTER=''
+  while [ -n "$rest" ]; do
+    item="${rest%%&*}"
+    case "$rest" in *'&'*) rest="${rest#*&}" ;; *) rest='' ;; esac
+    key="${item%%=*}" value="${item#*=}"
+    case "$key" in
+      runtime|station_id|generation|after)
+        case "$item" in *=*) ;; *) invalid=1 ;; esac ;;
+    esac
+    case "$key" in
+      runtime)
+        AUDIO_IDENTITY_REQUEST=1
+        [ "$seen_runtime" = 0 ] || invalid=1
+        seen_runtime=1 REQUESTED_RUNTIME="$value" ;;
+      station_id)
+        AUDIO_IDENTITY_REQUEST=1
+        [ "$seen_station" = 0 ] || invalid=1
+        seen_station=1 REQUESTED_STATION="$value" ;;
+      generation)
+        [ "$seen_generation" = 0 ] || invalid=1
+        seen_generation=1 REQUESTED_GENERATION="$value" ;;
+      after)
+        [ "$seen_after" = 0 ] || invalid=1
+        seen_after=1 REQUESTED_AFTER="$value" ;;
+    esac
+  done
+  [ "$AUDIO_IDENTITY_REQUEST" = 1 ] || return 0
+  [ "$invalid" = 0 ] && [ "$seen_runtime$seen_station$seen_generation" = 111 ] || return 1
+  [ "${#REQUESTED_RUNTIME}" = 16 ] || return 1
+  case "$REQUESTED_RUNTIME" in *[!0123456789abcdef]*) return 1 ;; esac
+  [ "${#REQUESTED_STATION}" -le 32 ] || return 1
+  case "$REQUESTED_STATION" in ''|[!abcdefghijklmnopqrstuvwxyz]*|*[!abcdefghijklmnopqrstuvwxyz0123456789_]*) return 1 ;; esac
+  uint64_nonzero "$REQUESTED_GENERATION" || return 1
+  [ "$seen_after" = 0 ] || audio_uint64 "$REQUESTED_AFTER"
+}
+
+audio_v1_headers() {
+  printf 'X-Doorfast-Runtime-Id: %s\r\nX-Doorfast-Station-Id: %s\r\nX-Doorfast-Generation: %s\r\n' \
+    "$REQUESTED_RUNTIME" "$REQUESTED_STATION" "$REQUESTED_GENERATION"
+}
+
+audio_v1_error() {
+  local status="$1" code="$2" message
+  case "$code" in
+    invalid_request) message='invalid audio request' ;;
+    audio_identity_mismatch) message='audio identity mismatch' ;;
+    audio_cursor_expired) message='audio cursor unavailable' ;;
+    audio_unavailable) message='audio unavailable' ;;
+    audio_temporarily_unavailable) message='audio temporarily unavailable' ;;
+  esac
+  printf 'Status: %s\r\n' "$status"
+  [ "${AUDIO_IDENTITY_PROVEN:-0}" = 0 ] || audio_v1_headers
+  printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+  printf '{"error":"%s","code":"%s"}\n' "$message" "$code"
+}
+
+audio_v1_status() {
+  local status
+  AUDIO_IDENTITY_PROVEN=0
+  status="$(ubus call doorfast status 2>/dev/null)" &&
+    jsonfilter -s "$status" -e '@' >/dev/null 2>&1 || {
+    audio_v1_error '503 Service Unavailable' audio_temporarily_unavailable
+    return 1
+  }
+  STATUS_RUNTIME="$(json_field "$status" '@.runtime_id')"
+  CALL_STATION="$(json_field "$status" '@.call.station_id')"
+  CALL_SESSION="$(json_field "$status" '@.call.session')"
+  CALL_GENERATION="$(json_field "$status" '@.call.generation')"
+  if [ "$CALL_SESSION" != talking ] ||
+     [ "$STATUS_RUNTIME" != "$REQUESTED_RUNTIME" ] ||
+     [ "$CALL_STATION" != "$REQUESTED_STATION" ] ||
+     [ "$CALL_GENERATION" != "$REQUESTED_GENERATION" ]; then
+    audio_v1_error '409 Conflict' audio_identity_mismatch
+    return 1
+  fi
+  AUDIO_IDENTITY_PROVEN=1
+  AUDIO_READY="$(json_field "$status" '@.audio.snapshot_ready')"
+  AUDIO_GENERATION="$(json_field "$status" '@.audio.generation')"
+  AUDIO_REVISION="$(json_field "$status" '@.audio.snapshot_packet_count')"
+  AUDIO_PREVIOUS_REVISION="$(json_field "$status" '@.audio.snapshot_previous_packet_count')"
+  AUDIO_LATEST_TIMESTAMP="$(json_field "$status" '@.audio.snapshot_timestamp_ms')"
+  AUDIO_VERSION="$(json_field "$status" '@.audio.pcm_stream_version')"
+  return 0
+}
+
+audio_v1_ready() {
+  case "$AUDIO_READY" in true|1) ;; *) return 1 ;; esac
+  [ "$AUDIO_VERSION" = 1 ] && [ "$AUDIO_GENERATION" = "$REQUESTED_GENERATION" ] &&
+    uint64_nonzero "$AUDIO_REVISION" && audio_uint64 "$AUDIO_PREVIOUS_REVISION" &&
+    audio_uint64 "$AUDIO_LATEST_TIMESTAMP"
+}
+
+audio_v1_not_modified() {
+  printf 'Status: 304 Not Modified\r\nETag: %s\r\nCache-Control: no-cache\r\n' "$etag"
+  audio_v1_headers
+  printf '\r\n'
+}
+
+audio_v1_read() {
+  local copy_ok=1 actual_bytes
+  audio_v1_status || return
+  audio_v1_ready || {
+    audio_v1_error '404 Not Found' audio_unavailable
+    return
+  }
+  if [ "$REQUESTED_AFTER" = "$AUDIO_REVISION" ]; then
+    etag="\"df-audio-$AUDIO_GENERATION-$AUDIO_REVISION\""
+    audio_v1_not_modified
+    return
+  fi
+  SELECT_AFTER="${REQUESTED_AFTER:-$AUDIO_PREVIOUS_REVISION}"
+  select_audio_chunk || {
+    if [ -n "$REQUESTED_AFTER" ] && [ "$REQUESTED_AFTER" != "$AUDIO_PREVIOUS_REVISION" ]; then
+      audio_v1_error '409 Conflict' audio_cursor_expired
+    else
+      audio_v1_error '503 Service Unavailable' audio_temporarily_unavailable
+    fi
+    return
+  }
+  audio_uint64_ge "$AUDIO_LATEST_TIMESTAMP" "$SELECTED_TIMESTAMP" || {
+    audio_v1_error '503 Service Unavailable' audio_temporarily_unavailable
+    return
+  }
+  etag="\"df-audio-$AUDIO_GENERATION-$SELECTED_REVISION\""
+  if [ "${HTTP_IF_NONE_MATCH:-}" = "$etag" ]; then
+    audio_v1_not_modified
+    return
+  fi
+  temporary="$(mktemp "${TMPDIR:-/tmp}/doorfast-audio.XXXXXX" 2>/dev/null)" || {
+    audio_v1_error '503 Service Unavailable' audio_temporarily_unavailable
+    return
+  }
+  trap 'rm -f "$temporary"' EXIT HUP INT TERM
+  cp "$SELECTED_AUDIO" "$temporary" 2>/dev/null || copy_ok=0
+  audio_v1_status || return
+  actual_bytes="$(wc -c <"$temporary" | tr -d '[:space:]')"
+  if [ "$copy_ok" = 0 ] || ! audio_v1_ready ||
+     [ "$actual_bytes" != "$SELECTED_BYTES" ] ||
+     [ "$actual_bytes" -gt 3244 ] ||
+     ! audio_uint64_ge "$AUDIO_LATEST_TIMESTAMP" "$SELECTED_TIMESTAMP"; then
+    audio_v1_error '503 Service Unavailable' audio_temporarily_unavailable
+    return
+  fi
+  printf 'Content-Type: audio/wav\r\nContent-Length: %s\r\nCache-Control: no-cache\r\nETag: %s\r\n' "$actual_bytes" "$etag"
+  audio_v1_headers
+  printf 'X-Doorfast-Audio-Previous-Revision: %s\r\nX-Doorfast-Audio-Revision: %s\r\nX-Doorfast-Audio-Dropped-Bytes: %s\r\nX-Doorfast-Audio-Discontinuity: %s\r\nX-Doorfast-Audio-Timestamp-Ms: %s\r\nX-Doorfast-Audio-Latest-Timestamp-Ms: %s\r\nX-Doorfast-Audio-Format: s16le\r\nX-Doorfast-Audio-Sample-Rate: 8000\r\nX-Doorfast-Audio-Channels: 1\r\n\r\n' \
+    "$SELECTED_PREVIOUS_REVISION" "$SELECTED_REVISION" "$SELECTED_DROPPED_BYTES" \
+    "$SELECTED_DISCONTINUITY" "$SELECTED_TIMESTAMP" "$AUDIO_LATEST_TIMESTAMP"
+  cat "$temporary"
+}
+
 select_audio_chunk() {
   local candidate filename stem old_ifs
   for candidate in "${DOORFAST_AUDIO_CHUNK_DIRECTORY:-/tmp/doorfast-audio-chunks}"/chunk-"$AUDIO_GENERATION"-"$SELECT_AFTER"-*.wav; do
@@ -246,10 +420,21 @@ select_audio_chunk() {
     IFS='-'
     set -- $stem
     IFS="$old_ifs"
-    [ "$#" -eq 6 ] && [ "$1" = chunk ] || continue
+    { [ "$#" -eq 6 ] || [ "$#" -eq 8 ]; } && [ "$1" = chunk ] || continue
     case "$2:$3:$4:$5:$6" in *[!0-9:]*|:*|*::*|*:) continue ;; esac
     [ "$2" = "$AUDIO_GENERATION" ] &&
       [ "$3" = "$SELECT_AFTER" ] || continue
+    if [ "$#" -eq 8 ]; then
+      uint64_nonzero "$2" && audio_uint64 "$3" && uint64_nonzero "$4" &&
+        uint64_nonzero "$5" && audio_uint64 "$6" && audio_uint64 "$7" || continue
+      [ "$4" != "$3" ] && audio_uint64_ge "$4" "$3" || continue
+      audio_uint64_ge 3244 "$5" && audio_uint64_ge "$5" 44 || continue
+      [ "$(( ($5 - 44) % 2 ))" = 0 ] || continue
+      case "$8" in 0|1) ;; *) continue ;; esac
+      SELECTED_TIMESTAMP="$7" SELECTED_DISCONTINUITY="$8"
+    elif [ "${AUDIO_IDENTITY_REQUEST:-0}" = 1 ]; then
+      continue
+    fi
     SELECTED_AUDIO="$candidate"
     SELECTED_PREVIOUS_REVISION="$3"
     SELECTED_REVISION="$4"
@@ -347,6 +532,19 @@ if [ "$path" = /api/v1/video/latest.jpg ]; then
   exit 0
 fi
 if [ "$path" = /api/v1/audio/latest.wav ]; then
+  AUDIO_IDENTITY_PROVEN=0
+  audio_query || {
+    audio_v1_error '400 Bad Request' invalid_request
+    exit 0
+  }
+  if [ "$AUDIO_IDENTITY_REQUEST" = 1 ]; then
+    [ "${REQUEST_METHOD:-}" = GET ] || {
+      audio_v1_error '400 Bad Request' invalid_request
+      exit 0
+    }
+    audio_v1_read
+    exit 0
+  fi
   query_generation
   case "$REQUESTED_GENERATION" in
     ''|*[!0-9]*)

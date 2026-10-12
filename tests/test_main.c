@@ -45,6 +45,7 @@ void test_gvs_call_control_bounds_failed_simulated_delivery(void);
 void test_gvs_call_control_rejects_receive_before_submission_time(void);
 void test_gvs_call_control_exposes_public_status(void);
 void test_runtime_ubus_validates_and_routes_call_requests(void);
+void test_runtime_ubus_call_station_identity_uses_current_main_call(void);
 void test_runtime_ubus_reports_handshake_transport(void);
 void test_runtime_ubus_media_controls_require_current_generation(void);
 void test_runtime_ubus_monitor_start_rejects_active_call(void);
@@ -411,6 +412,7 @@ int main(int argc, char **argv) {
     int capture_result = capture_media_encoder_arguments(argc, argv);
     if (capture_result >= 0) return capture_result;
     if (argc == 2 && strcmp(argv[1], "--runtime-audio") == 0) {
+        test_runtime_ubus_call_station_identity_uses_current_main_call();
         test_runtime_audio_service_advances_deadlines_and_retries();
         test_runtime_audio_receive_preserves_admission_and_reordering();
         test_runtime_audio_lifecycle_clears_tail_and_preserves_call_video();
@@ -421,6 +423,7 @@ int main(int argc, char **argv) {
         puts("runtime audio tests passed");
         return 0;
     }
+    test_runtime_ubus_call_station_identity_uses_current_main_call();
     test_runtime_audio_service_advances_deadlines_and_retries();
     test_runtime_audio_receive_preserves_admission_and_reordering();
     test_runtime_audio_lifecycle_clears_tail_and_preserves_call_video();

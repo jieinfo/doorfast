@@ -432,6 +432,7 @@ static int df_runtime_ubus_status_handler(
     struct df_runtime_media_status media_status;
     const char *phase_name;
     const char *role_name;
+    const char *call_station_id;
     void *sync_table;
     void *call_table;
     void *elevator_table;
@@ -494,6 +495,10 @@ static int df_runtime_ubus_status_handler(
         df_gvs_session_state_name(call_status.session_state));
     blobmsg_add_u64(&platform->response, "generation",
                     call_status.session_generation);
+    call_station_id = df_runtime_ubus_call_station_id(platform->owner,
+        &call_status);
+    blobmsg_add_string(&platform->response, "station_id",
+        call_station_id == NULL ? "" : call_station_id);
     blobmsg_add_string(&platform->response, "command",
         df_gvs_call_command_type_name(call_status.command_type));
     blobmsg_add_string(&platform->response, "dispatch",
@@ -2072,6 +2077,34 @@ void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *service, bool enabl
             service->auto_unlock_station_id[0] = '\0';
         }
     }
+}
+
+const char *df_runtime_ubus_call_station_id(const struct df_runtime_ubus *service,
+    const struct df_gvs_call_control_status *status) {
+    const struct df_gvs_session *session;
+    const struct df_station_registry *registry;
+    const char *station_id = NULL;
+
+    if (service == NULL || !service->started || status == NULL ||
+        service->access_session == NULL ||
+        service->access_station_registry == NULL)
+        return NULL;
+    session = service->access_session;
+    if ((session->state != DF_GVS_RINGING && session->state != DF_GVS_TALKING) ||
+        session->generation == 0U || session->state != status->session_state ||
+        session->generation != status->session_generation)
+        return NULL;
+    registry = service->access_station_registry;
+    if (registry->items == NULL) return NULL;
+    for (size_t i = 0U; i < registry->count; i++) {
+        const struct df_station *station = &registry->items[i];
+        if (!station->enabled ||
+            memcmp(station->logical_address, session->peer, 6U) != 0)
+            continue;
+        if (station_id != NULL) return NULL;
+        station_id = station->id;
+    }
+    return station_id;
 }
 
 const char *df_runtime_ubus_access_station_id(const struct df_runtime_ubus *service) {

@@ -26,10 +26,16 @@ if [ -n "${TEST_UBUS_ERROR_CODE:-}" ] && [ "$method" = monitor_start ]; then
   exit 0
 fi
 if [ "$*" = 'call doorfast status' ]; then
-  printf '{"call":{"generation":%s},"video":{"ready":%s,"generation":%s,"frame_no":%s,"bytes":%s},"audio":{"snapshot_ready":%s,"generation":%s,"snapshot_packet_count":%s,"snapshot_previous_packet_count":%s,"snapshot_bytes":%s,"snapshot_dropped_bytes":%s}}\n' \
-    "${TEST_CALL_GENERATION:-7}" "${TEST_VIDEO_READY:-true}" \
+  if [ -n "${TEST_AUDIO_CHANGE_FILE:-}" ] && [ -f "$TEST_AUDIO_CHANGE_FILE" ]; then
+    . "$TEST_AUDIO_CHANGE_FILE"
+  fi
+  printf '{"runtime_id":"%s","call":{"station_id":"%s","session":"%s","generation":%s},"video":{"ready":%s,"generation":%s,"frame_no":%s,"bytes":%s},"audio":{"pcm_stream_version":%s,"snapshot_timestamp_ms":%s,"last_timestamp_ms":%s,"snapshot_discontinuity":%s,"snapshot_ready":%s,"generation":%s,"snapshot_packet_count":%s,"snapshot_previous_packet_count":%s,"snapshot_bytes":%s,"snapshot_dropped_bytes":%s}}\n' \
+    "${TEST_AUDIO_RUNTIME:-0123456789abcdef}" "${TEST_AUDIO_STATION:-gate_main}" \
+    "${TEST_AUDIO_SESSION:-talking}" "${TEST_AUDIO_CALL_GENERATION:-${TEST_CALL_GENERATION:-7}}" "${TEST_VIDEO_READY:-true}" \
     "${TEST_VIDEO_GENERATION:-7}" "${TEST_VIDEO_FRAME:-12}" \
-    "${TEST_VIDEO_BYTES:-4}" "${TEST_AUDIO_READY:-true}" \
+    "${TEST_VIDEO_BYTES:-4}" "${TEST_AUDIO_VERSION:-1}" \
+    "${TEST_AUDIO_TIMESTAMP:-1200}" "${TEST_AUDIO_LAST_TIMESTAMP:-900}" \
+    "${TEST_AUDIO_DISCONTINUITY:-false}" "${TEST_AUDIO_READY:-true}" \
     "${TEST_AUDIO_GENERATION:-7}" "${TEST_AUDIO_REVISION:-40}" \
     "${TEST_AUDIO_PREVIOUS_REVISION:-30}" "${TEST_AUDIO_BYTES:-12}" \
     "${TEST_AUDIO_DROPPED_BYTES:-0}"
@@ -59,17 +65,12 @@ while [ "$#" -gt 0 ]; do
   fi
 done
 case "$expression" in
-  '@.call.generation') printf '%s\n' "${TEST_CALL_GENERATION:-7}" ;;
-  '@.video.ready') printf '%s\n' "${TEST_VIDEO_READY:-true}" ;;
-  '@.video.generation') printf '%s\n' "${TEST_VIDEO_GENERATION:-7}" ;;
-  '@.video.frame_no') printf '%s\n' "${TEST_VIDEO_FRAME:-12}" ;;
-  '@.video.bytes') printf '%s\n' "${TEST_VIDEO_BYTES:-4}" ;;
-  '@.audio.snapshot_ready') printf '%s\n' "${TEST_AUDIO_READY:-true}" ;;
-  '@.audio.generation') printf '%s\n' "${TEST_AUDIO_GENERATION:-7}" ;;
-  '@.audio.snapshot_packet_count') printf '%s\n' "${TEST_AUDIO_REVISION:-40}" ;;
-  '@.audio.snapshot_previous_packet_count') printf '%s\n' "${TEST_AUDIO_PREVIOUS_REVISION:-30}" ;;
-  '@.audio.snapshot_bytes') printf '%s\n' "${TEST_AUDIO_BYTES:-12}" ;;
-  '@.audio.snapshot_dropped_bytes') printf '%s\n' "${TEST_AUDIO_DROPPED_BYTES:-0}" ;;
+  '@.call.'*|'@.video.'*|'@.audio.'*)
+    python3 -c 'import json,sys
+value=json.loads(sys.argv[1])
+for key in sys.argv[2][2:].split("."): value=value[key]
+print(str(value).lower() if isinstance(value,bool) else value)' "$source" "$expression"
+    ;;
   '@.generation')
     printf '%s' "${source:-}" |
       sed -n 's/.*"generation"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'
@@ -225,6 +226,7 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   >"$workspace/stations-query"
 grep -aFq 'Status: 400 Bad Request' "$workspace/stations-query"
 test "$(wc -l <"$trace" | tr -d ' ')" -eq "$trace_lines"
+
 run_method /api/v1/monitor/stop \
   '{"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7,"ignored":"secret-stop"}' POST \
   >"$workspace/monitor-extra"
@@ -440,6 +442,7 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   PATH_INFO=/api/v1/audio/latest.wav \
   sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-unavailable"
 grep -aFq 'Status: 404 Not Found' "$workspace/audio-unavailable"
+! grep -aFq '"code":' "$workspace/audio-unavailable"
 grep -Fxq 'call doorfast status' "$trace"
 grep -Fxq 'call doorfast unlock {"station_id":"gate_main"}' "$trace"
 grep -Fxq 'call doorfast answer {"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}' "$trace"
@@ -451,3 +454,234 @@ PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
   >"$workspace/unknown"
 grep -aFq 'Status: 404 Not Found' "$workspace/unknown"
 test "$(wc -l <"$trace" | tr -d ' ')" -eq "$trace_lines"
+# Exercise the real CGI response: omitting identity checks/metadata, accepting
+# overflowing integers, or serving a replaced call must fail these assertions.
+cat >"$fakebin/cp" <<'EOF'
+#!/bin/sh
+[ "${TEST_AUDIO_COPY_FAIL:-0}" != 1 ] || exit 1
+/bin/cp "$@" || exit 1
+if [ -n "${TEST_AUDIO_COPY_CHANGE:-}" ]; then
+  printf '%s\n' "$TEST_AUDIO_COPY_CHANGE" >"$TEST_AUDIO_CHANGE_FILE"
+fi
+EOF
+chmod +x "$fakebin/cp"
+cat >"$fakebin/mktemp" <<'EOF'
+#!/bin/sh
+[ "${TEST_AUDIO_TEMP_FAIL:-0}" != 1 ] || exit 1
+temporary=$(/usr/bin/mktemp "$@") || exit 1
+[ -z "${TEST_AUDIO_TEMP_PATH:-}" ] || printf '%s\n' "$temporary" >"$TEST_AUDIO_TEMP_PATH"
+printf '%s\n' "$temporary"
+EOF
+chmod +x "$fakebin/mktemp"
+mkdir "$workspace/audio-v1-chunks"
+python3 - <<'PY' >"$workspace/audio-v1-chunks/chunk-7-30-40-46-5-1100-1.wav"
+import sys, wave
+with wave.open(sys.stdout.buffer, 'wb') as output:
+    output.setnchannels(1)
+    output.setsampwidth(2)
+    output.setframerate(8000)
+    output.writeframes(b'\x01\x00')
+PY
+audio_identity='runtime=0123456789abcdef&station_id=gate_main&generation=7'
+audio_v1() {
+  PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+    DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-v1-chunks" \
+    TEST_AUDIO_CHANGE_FILE="$workspace/audio-change" \
+    TEST_AUDIO_TEMP_PATH="$workspace/audio-temporary" \
+    TEST_AUDIO_BYTES="${TEST_AUDIO_BYTES:-46}" REQUEST_METHOD="${TEST_AUDIO_METHOD:-GET}" \
+    PATH_INFO=/api/v1/audio/latest.wav QUERY_STRING="$1" \
+    sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-v1"
+}
+audio_has() {
+  if ! grep -aFq "$1" "$workspace/audio-v1"; then
+    printf 'FAIL audio CGI: expected %s\n' "$1" >&2
+    sed -n '1,/^\r$/p' "$workspace/audio-v1" >&2
+    exit 1
+  fi
+}
+audio_lacks() {
+  if grep -aFq "$1" "$workspace/audio-v1"; then
+    printf 'FAIL audio CGI: unexpected %s\n' "$1" >&2
+    exit 1
+  fi
+}
+audio_error() {
+  audio_has "Status: $1"
+  audio_has "\"code\":\"$2\""
+  audio_has '"error":"'
+  audio_lacks 'Content-Type: audio/wav'
+}
+audio_headers() {
+  audio_has 'X-Doorfast-Runtime-Id: 0123456789abcdef'
+  audio_has 'X-Doorfast-Station-Id: gate_main'
+  audio_has 'X-Doorfast-Generation: 7'
+}
+audio_v1 "$audio_identity&after=30"
+audio_has 'Content-Type: audio/wav'
+audio_headers
+audio_has 'Content-Length: 46'
+audio_has 'ETag: "df-audio-7-40"'
+audio_has 'X-Doorfast-Audio-Previous-Revision: 30'
+audio_has 'X-Doorfast-Audio-Revision: 40'
+audio_has 'X-Doorfast-Audio-Dropped-Bytes: 5'
+audio_has 'X-Doorfast-Audio-Discontinuity: 1'
+audio_has 'X-Doorfast-Audio-Timestamp-Ms: 1100'
+audio_has 'X-Doorfast-Audio-Latest-Timestamp-Ms: 1200'
+audio_has 'X-Doorfast-Audio-Format: s16le'
+audio_has 'X-Doorfast-Audio-Sample-Rate: 8000'
+audio_has 'X-Doorfast-Audio-Channels: 1'
+tail -c 46 "$workspace/audio-v1" | cmp - "$workspace/audio-v1-chunks/chunk-7-30-40-46-5-1100-1.wav"
+if [ -e "$(sed -n '1p' "$workspace/audio-temporary")" ]; then
+  printf '%s\n' 'FAIL audio CGI: copied temporary WAV was not removed' >&2
+  exit 1
+fi
+/bin/cp "$workspace/audio-v1-chunks/chunk-7-30-40-46-5-1100-1.wav" \
+  "$workspace/audio-v1-chunks/chunk-7-20-30-46-0-1000-0.wav"
+(HTTP_IF_NONE_MATCH='"df-audio-7-40"' audio_v1 "$audio_identity&after=20")
+audio_has 'Content-Type: audio/wav'
+audio_has 'ETag: "df-audio-7-30"'
+audio_has 'X-Doorfast-Audio-Previous-Revision: 20'
+audio_has 'X-Doorfast-Audio-Revision: 30'
+audio_has 'X-Doorfast-Audio-Timestamp-Ms: 1000'
+audio_has 'X-Doorfast-Audio-Latest-Timestamp-Ms: 1200'
+audio_has 'X-Doorfast-Audio-Discontinuity: 0'
+for station in a aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; do
+  (TEST_AUDIO_STATION="$station" audio_v1 "runtime=0123456789abcdef&station_id=$station&generation=7")
+  audio_has 'Content-Type: audio/wav'
+  audio_has "X-Doorfast-Station-Id: $station"
+done
+for query in \
+  'runtime=0123456789abcdef&generation=7' \
+  'station_id=gate_main&generation=7' \
+  'runtime=0123456789abcdef&station_id=gate_main' \
+  'runtime=0123456789abcdef&station_id&generation=7' \
+  "$audio_identity&runtime=0123456789abcdef" \
+  "$audio_identity&station_id=gate_main" "$audio_identity&generation=7" \
+  "$audio_identity&after=30&after=30" "$audio_identity&after=" \
+  'runtime=&station_id=gate_main&generation=7' \
+  'runtime=0123456789abcdeF&station_id=gate_main&generation=7' \
+  'runtime=0123456789abcdef0&station_id=gate_main&generation=7' \
+  'runtime=0123456789abcdef&station_id=&generation=7' \
+  'runtime=0123456789abcdef&station_id=gate-main&generation=7' \
+  'runtime=0123456789abcdef&station_id=1gate&generation=7' \
+  'runtime=0123456789abcdef&station_id=Gate&generation=7' \
+  'runtime=0123456789abcdef&station_id=門&generation=7' \
+  'runtime=0123456789abcdef&station_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&generation=7' \
+  'runtime=0123456789abcdef&station_id=gate_main%0d%0aInjected:yes&generation=7' \
+  'runtime=0123456789abcdef&station_id=gate_main&generation=' \
+  'runtime=0123456789abcdef&station_id=gate_main&generation=0' \
+  'runtime=0123456789abcdef&station_id=gate_main&generation=07' \
+  'runtime=0123456789abcdef&station_id=gate_main&generation=18446744073709551616' \
+  'runtime=0123456789abcdef&station_id=gate_main&generation=184467440737095516150' \
+  "$audio_identity&after=18446744073709551616" \
+  "$audio_identity&after=184467440737095516150" "$audio_identity&after=01" \
+  "$audio_identity&after=../30" "$audio_identity&after=30%0d%0a"; do
+  audio_v1 "$query"
+  audio_error '400 Bad Request' invalid_request
+  audio_lacks 'X-Doorfast-Runtime-Id:'
+done
+(TEST_AUDIO_METHOD=POST audio_v1 "$audio_identity")
+audio_error '400 Bad Request' invalid_request
+for query in "$audio_identity&after=40" "$audio_identity"; do
+  (HTTP_IF_NONE_MATCH='"df-audio-7-40"' audio_v1 "$query")
+  audio_has 'Status: 304 Not Modified'
+  audio_headers
+  audio_lacks 'Content-Type: audio/wav'
+done
+for change in 'TEST_AUDIO_RUNTIME=fedcba9876543210' \
+  'TEST_AUDIO_STATION=gate_side' 'TEST_AUDIO_SESSION=ended' \
+  'TEST_AUDIO_CALL_GENERATION=8'; do
+  printf '%s\n' "$change" >"$workspace/audio-change"
+  (TEST_AUDIO_READY=false HTTP_IF_NONE_MATCH='"df-audio-7-40"' audio_v1 "$audio_identity&after=40")
+  audio_error '409 Conflict' audio_identity_mismatch
+  audio_lacks 'X-Doorfast-Runtime-Id:'
+  rm "$workspace/audio-change"
+  (TEST_AUDIO_COPY_CHANGE="$change" audio_v1 "$audio_identity")
+  audio_error '409 Conflict' audio_identity_mismatch
+  audio_lacks 'X-Doorfast-Runtime-Id:'
+  rm "$workspace/audio-change"
+done
+(TEST_AUDIO_READY=false audio_v1 "$audio_identity")
+audio_error '404 Not Found' audio_unavailable
+audio_headers
+(TEST_UBUS_FAIL_METHOD=status audio_v1 "$audio_identity")
+audio_error '503 Service Unavailable' audio_temporarily_unavailable
+audio_lacks 'X-Doorfast-Runtime-Id:'
+audio_v1 "$audio_identity&after=10"
+audio_error '409 Conflict' audio_cursor_expired
+(TEST_AUDIO_COPY_FAIL=1 audio_v1 "$audio_identity")
+audio_error '503 Service Unavailable' audio_temporarily_unavailable
+(TEST_AUDIO_TEMP_FAIL=1 audio_v1 "$audio_identity")
+audio_error '503 Service Unavailable' audio_temporarily_unavailable
+(TEST_AUDIO_TIMESTAMP=1099 audio_v1 "$audio_identity")
+audio_error '503 Service Unavailable' audio_temporarily_unavailable
+for change in 'TEST_AUDIO_READY=false' 'TEST_AUDIO_TIMESTAMP=1099'; do
+  (TEST_AUDIO_COPY_CHANGE="$change" audio_v1 "$audio_identity")
+  audio_error '503 Service Unavailable' audio_temporarily_unavailable
+  rm "$workspace/audio-change"
+done
+
+# Legacy readers must accept new eight-field files without requiring identity.
+PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-v1-chunks" \
+  TEST_AUDIO_BYTES=46 PATH_INFO=/api/v1/audio/latest.wav \
+  QUERY_STRING='generation=7&after=30' \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-v1"
+audio_has 'Content-Type: audio/wav'
+audio_has 'X-Doorfast-Audio-Revision: 40'
+audio_lacks '"code":'
+
+# Existing six-field files have no publication metadata for identity readers.
+DOORFAST_AUDIO_CHUNK_DIRECTORY="$workspace/audio-chunks" \
+  PATH="$fakebin:$PATH" DOORFAST_HTTP_TRACE="$trace" \
+  PATH_INFO=/api/v1/audio/latest.wav REQUEST_METHOD=GET QUERY_STRING="$audio_identity" \
+  sh package/doorfast/files/doorfast-http.sh >"$workspace/audio-v1"
+audio_error '503 Service Unavailable' audio_temporarily_unavailable
+
+# Exact uint64 arithmetic: latest can differ by one above signed/float precision.
+/bin/cp "$workspace/audio-v1-chunks/chunk-7-30-40-46-5-1100-1.wav" \
+  "$workspace/audio-v1-chunks/chunk-18446744073709551615-0-18446744073709551615-46-18446744073709551615-18446744073709551614-0.wav"
+(TEST_AUDIO_CALL_GENERATION=18446744073709551615 \
+  TEST_AUDIO_GENERATION=18446744073709551615 TEST_AUDIO_REVISION=18446744073709551615 \
+  TEST_AUDIO_PREVIOUS_REVISION=0 TEST_AUDIO_TIMESTAMP=18446744073709551615 \
+  audio_v1 'runtime=0123456789abcdef&station_id=gate_main&generation=18446744073709551615&after=0')
+audio_has 'Content-Type: audio/wav'
+audio_has 'X-Doorfast-Audio-Revision: 18446744073709551615'
+audio_has 'X-Doorfast-Audio-Dropped-Bytes: 18446744073709551615'
+audio_has 'X-Doorfast-Audio-Timestamp-Ms: 18446744073709551614'
+audio_has 'X-Doorfast-Audio-Latest-Timestamp-Ms: 18446744073709551615'
+(TEST_AUDIO_CALL_GENERATION=18446744073709551615 \
+  TEST_AUDIO_GENERATION=18446744073709551615 TEST_AUDIO_REVISION=18446744073709551615 \
+  TEST_AUDIO_PREVIOUS_REVISION=0 TEST_AUDIO_TIMESTAMP=18446744073709551613 \
+  audio_v1 'runtime=0123456789abcdef&station_id=gate_main&generation=18446744073709551615&after=0')
+audio_error '503 Service Unavailable' audio_temporarily_unavailable
+(TEST_AUDIO_REVISION=18446744073709551615 audio_v1 "$audio_identity&after=18446744073709551615")
+audio_has 'Status: 304 Not Modified'
+audio_headers
+
+# Filename metadata cannot replace measuring the actual copied WAV size.
+rm "$workspace/audio-v1-chunks/chunk-7-30-40-46-5-1100-1.wav"
+for spec in '3244 3244 valid' '3246 3246 invalid' '46 3246 invalid' \
+  '44 43 invalid' '45 45 invalid' '46 46 invalidflag' \
+  '46 46 overflowdrop' '46 46 overflowtime' '46 46 overflowrevision'; do
+  set -- $spec
+  bytes="$1" actual="$2" kind="$3" drop=0 timestamp=1100 flag=0 revision=40
+  case "$kind" in
+    invalidflag) flag=2 ;;
+    overflowdrop) drop=18446744073709551616 ;;
+    overflowtime) timestamp=18446744073709551616 ;;
+    overflowrevision) revision=18446744073709551616 ;;
+  esac
+  fixture="$workspace/audio-v1-chunks/chunk-7-30-$revision-$bytes-$drop-$timestamp-$flag.wav"
+  dd if=/dev/zero bs=1 count="$actual" 2>/dev/null >"$fixture"
+  (TEST_AUDIO_BYTES="$bytes" audio_v1 "$audio_identity")
+  if [ "$kind" = valid ]; then
+    audio_has 'Content-Type: audio/wav'
+    audio_has 'Content-Length: 3244'
+    tail -c 3244 "$workspace/audio-v1" | cmp - "$fixture"
+  else
+    audio_error '503 Service Unavailable' audio_temporarily_unavailable
+  fi
+  rm "$fixture"
+done
+printf '%s\n' 'PASS: legacy/control/video and v1 audio identity, cursor, race, metadata and bounds'

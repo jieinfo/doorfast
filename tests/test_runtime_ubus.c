@@ -9,6 +9,77 @@
 #include "gvs_audio_playout.h"
 #include "test.h"
 
+/* Catches deriving call identity from a concurrent preview or an old unlock
+ * result, or emitting a station for a stale/ended/ambiguous main call. */
+void test_runtime_ubus_call_station_identity_uses_current_main_call(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_station stations[] = {
+        {.id = "gate_main", .enabled = true,
+            .logical_address = {0x32, 2, 1, 0, 1, 0}},
+        {.id = "gate_side", .enabled = true,
+            .logical_address = {0x32, 2, 1, 0, 2, 0}},
+    };
+    struct df_station_registry registry = {.items = stations, .count = 2};
+    struct df_gvs_session main_call = {.state = DF_GVS_TALKING,
+        .generation = UINT64_MAX, .peer = {0x32, 2, 1, 0, 1, 0}};
+    struct df_gvs_session preview = {.state = DF_GVS_PREVIEW,
+        .generation = UINT64_MAX, .peer = {0x32, 2, 1, 0, 2, 0}};
+    struct df_gvs_call_control_status status = {
+        .session_state = DF_GVS_TALKING, .session_generation = UINT64_MAX};
+    struct df_gvs_access_control access = {0};
+    struct df_runtime_ubus service = {.started = true};
+    const char *target;
+    access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
+    memcpy(access.result.destination, stations[1].logical_address, 6);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_access(&service,
+        &access, &main_call, local));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_bind_station_access(&service,
+        &preview, &registry));
+    target = df_runtime_ubus_call_station_id(&service, &status);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main", target == NULL ? "" : target));
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(NULL, &status) == NULL);
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, NULL) == NULL);
+    status.session_generation--;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    status.session_generation++;
+    status.session_state = DF_GVS_RINGING;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    main_call.state = DF_GVS_RINGING;
+    target = df_runtime_ubus_call_station_id(&service, &status);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main", target == NULL ? "" : target));
+    for (int state = DF_GVS_IDLE; state <= DF_GVS_ENDED; state++) {
+        if (state == DF_GVS_RINGING || state == DF_GVS_TALKING) continue;
+        status.session_state = main_call.state = (enum df_gvs_session_state)state;
+        TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    }
+    status.session_state = main_call.state = DF_GVS_TALKING;
+    stations[0].enabled = false;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    stations[0].enabled = true;
+    memcpy(stations[1].logical_address, main_call.peer, 6);
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    stations[1].enabled = false;
+    target = df_runtime_ubus_call_station_id(&service, &status);
+    TEST_ASSERT_INT_EQ(0, strcmp("gate_main", target == NULL ? "" : target));
+    main_call.peer[0] = 0x13;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    memcpy(main_call.peer, stations[0].logical_address, 6);
+    main_call.generation = status.session_generation = 0;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    main_call.generation = status.session_generation = 7;
+    service.access_session = NULL;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    service.access_session = &main_call;
+    service.access_station_registry = NULL;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    service.access_station_registry = &registry;
+    registry.items = NULL;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+    registry.items = stations;
+    service.started = false;
+    TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station_id(&service, &status) == NULL);
+}
+
 static int provide_runtime_status(
     struct df_gvs_runtime_sync_status *status, void *context) {
     unsigned *calls = context;
