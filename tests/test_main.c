@@ -43,6 +43,8 @@ void test_gvs_pcm_pump_drops_stale_frames_and_obeys_pacing(void);
 void test_g711_alaw(void);
 void test_gvs_audio_chunk_store(void);
 void test_gvs_call_control_reports_confirmation_timeout_once(void);
+void test_gvs_call_control_records_local_hangup_snapshot(void);
+void test_gvs_call_control_preserves_terminal_fault_over_late_dispatch_cancel(void);
 void test_gvs_call_control_records_terminal_timeout_snapshot(void);
 void test_gvs_call_control_records_peer_hangup_and_clears_timer(void);
 void test_gvs_call_control_runtime_reset_is_explicit(void);
@@ -820,6 +822,8 @@ int main(int argc, char **argv) {
     test_gvs_call_control_promotes_preview_after_station_ack();
     test_gvs_call_control_tracks_answer_sent_by_external_transport();
     test_gvs_call_control_reports_confirmation_timeout_once();
+    test_gvs_call_control_records_local_hangup_snapshot();
+    test_gvs_call_control_preserves_terminal_fault_over_late_dispatch_cancel();
     test_gvs_call_control_records_terminal_timeout_snapshot();
     test_gvs_call_control_records_peer_hangup_and_clears_timer();
     test_gvs_call_control_runtime_reset_is_explicit();

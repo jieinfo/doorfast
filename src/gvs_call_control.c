@@ -21,6 +21,8 @@ static void df_gvs_call_control_record_terminal(
     uint64_t generation) {
     if (control == NULL || session == NULL || station == NULL ||
         generation == 0U) return;
+    if (control->terminal.end_reason != DF_GVS_CALL_END_NONE &&
+        control->terminal.generation == generation) return;
     control->terminal.end_reason = end_reason;
     control->terminal.fault = fault;
     memcpy(control->terminal.station, station, sizeof(control->terminal.station));
@@ -39,8 +41,20 @@ static void df_gvs_call_control_classify_transition(
         return;
     /* Rejected acknowledgements include stale, malformed, and unmatched
      * frames. The receive path has no distinct explicit peer-refusal signal. */
-    if (result->runtime.acknowledgement_expired)
+    if (result->runtime.acknowledgement_expired) {
         fault = DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT;
+        control->local_hangup_pending = false;
+    }
+    if (result->handshake.disconnected &&
+        df_gvs_call_control_session_active(previous->state)) {
+        df_gvs_call_control_record_terminal(control,
+            DF_GVS_CALL_END_HEARTBEAT_TIMEOUT,
+            DF_GVS_CALL_FAULT_HEARTBEAT_TIMEOUT, previous, previous->peer,
+            previous->generation);
+        control->local_hangup_pending = false;
+        control->observed_generation = session->generation;
+        return;
+    }
     if (result->runtime.receive.preempted_session) {
         if (df_gvs_call_control_session_active(previous->state)) {
             df_gvs_call_control_record_terminal(control,
@@ -63,11 +77,16 @@ static void df_gvs_call_control_classify_transition(
         df_gvs_call_control_session_active(previous->state) &&
         session->state == DF_GVS_ENDED) {
         df_gvs_call_control_record_terminal(control,
-            result->runtime.receive.local_hangup
+            (result->runtime.receive.local_hangup ||
+             (control->local_hangup_pending &&
+              control->local_hangup_generation == previous->generation &&
+              control->dispatch.state == DF_GVS_CALL_SENT &&
+              control->dispatch.command.type == DF_GVS_CALL_COMMAND_HANGUP))
                 ? DF_GVS_CALL_END_LOCAL_HANGUP
                 : DF_GVS_CALL_END_PEER_HANGUP,
             DF_GVS_CALL_FAULT_NONE, previous, previous->peer,
             previous->generation);
+        control->local_hangup_pending = false;
         control->observed_generation = session->generation;
         return;
     }
@@ -79,7 +98,9 @@ static void df_gvs_call_control_classify_transition(
         control->observed_generation = session->generation;
         return;
     }
-    if (fault != DF_GVS_CALL_FAULT_NONE) {
+    if (fault != DF_GVS_CALL_FAULT_NONE &&
+        (control->terminal.end_reason == DF_GVS_CALL_END_NONE ||
+         control->terminal.generation != session->generation)) {
         control->fault = fault;
     } else if (!df_gvs_call_control_session_active(previous->state) &&
                df_gvs_call_control_session_active(session->state) &&
@@ -197,12 +218,18 @@ int df_gvs_call_control_submit_hangup(
     uint64_t expected_generation, const uint8_t local[6], uint8_t reason,
     uint64_t now_ms) {
     struct df_gvs_call_command command;
+    int status;
 
     if (df_gvs_call_command_prepare_hangup(
             session, expected_generation, local, reason, &command) != DF_OK) {
         return DF_ERR_INVALID;
     }
-    return df_gvs_call_control_enqueue(control, &command, now_ms);
+    status = df_gvs_call_control_enqueue(control, &command, now_ms);
+    if (status == DF_OK) {
+        control->local_hangup_pending = true;
+        control->local_hangup_generation = expected_generation;
+    }
+    return status;
 }
 
 int df_gvs_call_control_step(
@@ -283,13 +310,21 @@ int df_gvs_call_control_step(
             next.dispatch.state == DF_GVS_CALL_TIMEOUT;
         next_result.dispatch_cancelled =
             next.dispatch.state == DF_GVS_CALL_CANCELLED;
-        if (next_result.dispatch_failed)
-            next.fault = DF_GVS_CALL_FAULT_DISPATCH_FAILED;
-        else if (next_result.dispatch_timed_out)
-            next.fault = DF_GVS_CALL_FAULT_DISPATCH_TIMEOUT;
-        else if (next_result.dispatch_cancelled &&
-                 !next_result.runtime.receive.preempted_session)
-            next.fault = DF_GVS_CALL_FAULT_CANCELLED;
+        if (next_result.dispatch_failed || next_result.dispatch_timed_out ||
+            next_result.dispatch_cancelled) {
+            bool terminal_for_session =
+                next.terminal.end_reason != DF_GVS_CALL_END_NONE &&
+                next.terminal.generation == next_session.generation;
+            if (next_result.dispatch_failed && !terminal_for_session)
+                next.fault = DF_GVS_CALL_FAULT_DISPATCH_FAILED;
+            else if (next_result.dispatch_timed_out && !terminal_for_session)
+                next.fault = DF_GVS_CALL_FAULT_DISPATCH_TIMEOUT;
+            else if (next_result.dispatch_cancelled && !terminal_for_session &&
+                     !next_result.runtime.receive.preempted_session)
+                next.fault = DF_GVS_CALL_FAULT_CANCELLED;
+            if (next.local_hangup_pending)
+                next.local_hangup_pending = false;
+        }
     }
     if (previous != DF_GVS_CALL_SENT &&
         next.dispatch.state == DF_GVS_CALL_SENT) {
@@ -371,6 +406,21 @@ int df_gvs_call_control_receive(
             &next_deadline, now_ms, &next_result.runtime) != DF_OK) {
         return DF_ERR_INVALID;
     }
+    if (next_result.runtime.acknowledgement_confirmed &&
+        next.local_hangup_pending &&
+        next.local_hangup_generation == previous_session.generation &&
+        df_gvs_call_control_session_active(previous_session.state)) {
+        bool ended = false;
+
+        if (df_gvs_session_abort(&next_session, &ended) != DF_OK)
+            return DF_ERR_INVALID;
+        if (ended) {
+            df_gvs_deadline_cancel(&next_deadline);
+            next_result.runtime.receive.ended_transition = true;
+            next_result.runtime.receive.observed_hangup = true;
+            next_result.runtime.receive.local_hangup = true;
+        }
+    }
     df_gvs_call_control_classify_transition(&next, &previous_session,
         &next_session, &next_result);
     *control = next;
@@ -438,6 +488,7 @@ const char *df_gvs_call_end_reason_name(enum df_gvs_call_end_reason reason) {
     case DF_GVS_CALL_END_CONFIRMATION_TIMEOUT: return "confirmation_timeout";
     case DF_GVS_CALL_END_PREEMPTED: return "preempted";
     case DF_GVS_CALL_END_RUNTIME_RESET: return "runtime_reset";
+    case DF_GVS_CALL_END_HEARTBEAT_TIMEOUT: return "heartbeat_timeout";
     case DF_GVS_CALL_END_UNKNOWN: return "unknown";
     default: return NULL;
     }
@@ -453,6 +504,7 @@ const char *df_gvs_call_fault_name(enum df_gvs_call_fault fault) {
     case DF_GVS_CALL_FAULT_PREEMPTED: return "preempted";
     case DF_GVS_CALL_FAULT_CANCELLED: return "cancelled";
     case DF_GVS_CALL_FAULT_RUNTIME_RESET: return "runtime_reset";
+    case DF_GVS_CALL_FAULT_HEARTBEAT_TIMEOUT: return "heartbeat_timeout";
     case DF_GVS_CALL_FAULT_UNKNOWN: return "unknown";
     default: return NULL;
     }
@@ -548,5 +600,6 @@ int df_gvs_call_control_runtime_reset(struct df_gvs_call_control *control,
         return DF_ERR_INVALID;
     df_gvs_deadline_cancel(deadline);
     control->observed_generation = session->generation;
+    control->local_hangup_pending = false;
     return DF_OK;
 }
