@@ -50,7 +50,7 @@ void test_gvs_call_control_rejects_late_ack_without_overwriting_terminal(void);
 void test_gvs_call_control_status_ignores_stale_generation_deadline(void);
 void test_gvs_call_control_records_terminal_timeout_snapshot(void);
 void test_gvs_call_control_records_peer_hangup_and_clears_timer(void);
-void test_gvs_call_control_runtime_reset_is_explicit(void);
+void test_gvs_call_control_new_runtime_has_empty_diagnostics(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
 void test_gvs_call_control_bounds_failed_simulated_delivery(void);
 void test_gvs_call_control_rejects_receive_before_submission_time(void);
@@ -832,7 +832,7 @@ int main(int argc, char **argv) {
     test_gvs_call_control_status_ignores_stale_generation_deadline();
     test_gvs_call_control_records_terminal_timeout_snapshot();
     test_gvs_call_control_records_peer_hangup_and_clears_timer();
-    test_gvs_call_control_runtime_reset_is_explicit();
+    test_gvs_call_control_new_runtime_has_empty_diagnostics();
     test_gvs_call_control_rejects_busy_and_stale_submission();
     test_gvs_call_control_bounds_failed_simulated_delivery();
     test_gvs_call_control_rejects_receive_before_submission_time();

@@ -365,17 +365,17 @@ void test_gvs_call_control_preserves_terminal_fault_over_late_dispatch_cancel(vo
         &control, 0, df_gvs_placeholder_header_fields, NULL));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_submit_hangup(
         &control, &session, 14, local, 1, 0));
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_runtime_reset(
-        &control, &session, &deadline));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_deadline_arm(
+        &deadline, &session, 0, 10));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
-        &control, &session, local, &deadline, 0, &result));
-    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_RUNTIME_RESET,
+        &control, &session, local, &deadline, 10, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_SESSION_TIMEOUT,
         control.terminal.end_reason);
-    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_RUNTIME_RESET, control.fault);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_NONE, control.fault);
     TEST_ASSERT_INT_EQ(DF_GVS_CALL_CANCELLED, control.dispatch.state);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
         &control, &session, &status));
-    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_RUNTIME_RESET, status.fault);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_NONE, status.fault);
 }
 
 void test_gvs_call_control_preemption_keeps_new_generation_fault_clear(void) {
@@ -513,25 +513,36 @@ void test_gvs_call_control_records_peer_hangup_and_clears_timer(void) {
     TEST_ASSERT_INT_EQ(8, (int)status.last_generation);
 }
 
-void test_gvs_call_control_runtime_reset_is_explicit(void) {
-    struct df_gvs_session session = {.state = DF_GVS_RINGING, .generation = 11,
+void test_gvs_call_control_new_runtime_has_empty_diagnostics(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_session session = {.state = DF_GVS_TALKING, .generation = 11,
         .peer = {0x32, 2, 1, 0, 1, 0}};
     struct df_gvs_deadline deadline = {0};
     struct df_gvs_call_control control;
     struct df_gvs_call_control_status status;
+    struct df_gvs_call_control_result result;
+    uint8_t packet[64];
+    size_t length;
 
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
         &control, 0, df_gvs_placeholder_header_fields, NULL));
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_deadline_arm(&deadline, &session, 0, 100));
-    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_runtime_reset(
-        &control, &session, &deadline));
+    length = control_reply(packet, local, session.peer, 0x02,
+        (const uint8_t[]){1}, 1);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_receive(
+        &control, packet, length, local, &session, &deadline, 1, &result));
     TEST_ASSERT_INT_EQ(DF_GVS_ENDED, session.state);
-    TEST_ASSERT_INT_EQ(0, deadline.armed);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
         &control, &session, &status));
-    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_RUNTIME_RESET, status.end_reason);
-    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_RUNTIME_RESET, status.fault);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_PEER_HANGUP, status.end_reason);
     TEST_ASSERT_INT_EQ(11, (int)status.last_generation);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control, 2, df_gvs_placeholder_header_fields, NULL));
+    session.state = DF_GVS_IDLE;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
+        &control, &session, &status));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_NONE, status.end_reason);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_NONE, status.fault);
+    TEST_ASSERT_INT_EQ(0, (int)status.last_generation);
 }
 
 void test_gvs_call_control_rejects_busy_and_stale_submission(void) {

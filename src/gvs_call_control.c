@@ -562,20 +562,3 @@ int df_gvs_call_control_status(
     return df_gvs_call_control_status_with_deadline(control, session, NULL,
         status);
 }
-
-int df_gvs_call_control_runtime_reset(struct df_gvs_call_control *control,
-    struct df_gvs_session *session, struct df_gvs_deadline *deadline) {
-    bool ended;
-
-    if (control == NULL || session == NULL || deadline == NULL ||
-        !df_gvs_call_control_session_active(session->state))
-        return DF_ERR_INVALID;
-    df_gvs_call_control_record_terminal(control,
-        DF_GVS_CALL_END_RUNTIME_RESET, DF_GVS_CALL_FAULT_RUNTIME_RESET,
-        session, session->peer, session->generation);
-    if (df_gvs_session_abort(session, &ended) != DF_OK || !ended)
-        return DF_ERR_INVALID;
-    df_gvs_deadline_cancel(deadline);
-    control->observed_generation = session->generation;
-    return DF_OK;
-}

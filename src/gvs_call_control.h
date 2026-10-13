@@ -81,8 +81,6 @@ int df_gvs_call_control_status(const struct df_gvs_call_control *,
 int df_gvs_call_control_status_with_deadline(
     const struct df_gvs_call_control *, const struct df_gvs_session *,
     const struct df_gvs_deadline *, struct df_gvs_call_control_status *);
-int df_gvs_call_control_runtime_reset(struct df_gvs_call_control *,
-    struct df_gvs_session *, struct df_gvs_deadline *);
 const char *df_gvs_session_state_name(enum df_gvs_session_state);
 const char *df_gvs_call_command_type_name(enum df_gvs_call_command_type);
 const char *df_gvs_call_dispatch_state_name(enum df_gvs_call_dispatch_state);
