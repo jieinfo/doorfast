@@ -25,12 +25,13 @@
 | `local_hangup` | Doorfast/HA 主动挂断 |
 | `peer_hangup` | 门口机主动结束 |
 | `session_timeout` | 正式会话 deadline 到期 |
-| `confirmation_timeout` | 呼叫/接听控制已发送但未在确认窗口内得到回复 |
+| `confirmation_timeout` | 保留词汇；当前 ACK 超时只设置 fault，不终止仍活动的会话 |
 | `preempted` | 被更高优先级来电或正式通话抢占 |
 | `runtime_reset` | daemon runtime 变化使旧会话失效 |
+| `heartbeat_timeout` | 通话保活回复超过既有丢失门槛，仅用于 call |
 | `unknown` | 已结束但没有足够证据分类 |
 
-`confirmation_timeout` 不得被当作 `session_timeout`；控制确认和正式会话是两个计时器。
+`confirmation_timeout` 不得被当作 `session_timeout`；控制确认和正式会话是两个计时器。确认窗口到期时现有会话仍可继续，`call.fault=confirmation_timeout`，`call.end_reason=none`；收到迟到、错代次或格式不符的 ACK 不等于明确业务拒绝。
 
 ### 故障分类 `call.fault` 与 `media.failure_reason`
 
@@ -51,6 +52,7 @@
 | `preempted` | 被通话或更高优先级会话抢占 |
 | `cancelled` | 用户或生命周期取消 |
 | `runtime_reset` | runtime 变化清理旧资源 |
+| `heartbeat_timeout` | 通话保活超时，仅用于 call.fault |
 | `unknown` | 无法安全归类 |
 
 ### 计时器字段
@@ -64,7 +66,9 @@
 }
 ```
 
-`remaining_ms` 是 Doorfast 在生成该状态快照时计算的相对值，永远不输出主机 monotonic deadline；无活动计时器必须为 `timer=none`、`remaining_ms=0`。倒计时归零时先记录终止/故障原因，再清除活动计时器。
+`remaining_ms` 是 Doorfast 在生成该状态快照时计算的相对值，永远不输出主机 monotonic deadline；已知无活动计时器为 `timer=none`、`remaining_ms=0`。未知或缺少可选诊断扩展时 `timer=unknown`，省略 `remaining_ms`，不能伪造零。确认计时器到期只清除该计时器并记录 fault，正式会话可继续使用自己的计时器。
+
+持久预览的 `requesting` 只有重复请求间隔，没有总确认 deadline，因此输出 `none/0`；真实等待首帧使用 `first_frame`，现有恢复、冷却或停止重试等待使用 `reconnect`。
 
 ## Doorfast 状态契约
 
@@ -84,7 +88,17 @@
 - `end_reason`
 - `failure_reason`
 
-字段由主程序根据真实状态机和媒体模块结果生成。不得从 HA 请求、前端状态或历史事件反推。新增字段不改变现有 JSON 字段含义，不改变媒体 ABI v3；事件推送中的 `status` 使用相同字段。
+`media.sessions[]` 保持只包含当前会话。诊断记录按 `station_id` 和公开 `generation` 同时匹配；历史结果不能填充活动会话的原因或剩余时间。新增 `media.last_results[]` 独立保留每个已配置 station 最近一次真实终止结果，包含 `station_id`、`generation` 和上述四个诊断字段，终止计时器为 `none/0`。容量拒绝未获得有效 generation 时仍只保留已有数值错误，不制造终止记录。
+
+字段由主程序根据真实状态机和媒体模块结果生成。不得从 HA 请求、前端状态或历史事件反推。新增字段通过独立可选 diagnostics v2 扩展提供，不改变媒体 ABI v3 或 diagnostics v1 大小和布局；旧扩展仍可提供启动计数，新原因降级为 `unknown`。事件推送中的 `status` 使用相同字段。新 runtime 的通话和媒体历史为空，不跨进程持久化或制造 `runtime_reset` 终止结果。
+
+### 阅读当前诊断
+
+例如当前 `gate_main` generation 9 等待首帧时，`media.sessions[]` 可输出 `timer=first_frame`、`remaining_ms=900`、`end_reason=none`；同 station generation 8 的主动停止只出现在 `media.last_results[]`。LuCI 分别展示当前和最近结果，倒计时标为最近采样的相对毫秒值，未知诊断不影响已有服务状态展示。
+
+当前已实现的媒体分类包括首帧超时、源停顿、容量忙、编码器失败、抢占和取消。通用 ffmpeg 失败无法证明发布器失败，使用已有证据支持的 `encoder_failed` 或 `unknown`；`publisher_failed` 仍是保留词汇，并无已验证的独立生产者。忙和源停顿可出现在恢复中的当前会话上，不强制变为终止失败。其他保留枚举也不代表已有生产者；不充分证据保持 `unknown`。
+
+capture-error 的既有清理会结束当前通话；主程序在清理后观察这次真实转换，保留原 station 和 generation 并记录 `end_reason=unknown`。这不等于 runtime restart，也不添加新的中止或控制动作。
 
 ## HA 展示契约
 
@@ -106,9 +120,9 @@
 
 ### Doorfast
 
-- 会话：本地挂断、门口机挂断、正式会话超时、确认超时、抢占、runtime 变化、迟到回复分别得到正确 `end_reason`/`fault`。
+- 会话：本地挂断、门口机挂断、正式会话超时、保活超时、抢占得到真实终止原因；确认超时只记录 fault，迟到回复不覆盖历史，新 runtime 历史为空。
 - 计时器：确认计时器与会话计时器分别倒计时；活动时剩余值单调减少；终止后清零。
-- 媒体：首帧超时、忙、源停顿、编码失败、发布失败、停止和抢占分别映射；旧媒体错误数值保持兼容。
+- 媒体：首帧超时、忙、源停顿、编码失败、停止和抢占按证据映射；未独立证明的发布失败保持未知边界，旧媒体错误数值保持兼容。
 - JSON/CGI/LuCI 状态测试覆盖新增字段、旧字段缺失、generation 隔离和敏感字段过滤。
 
 ### HA

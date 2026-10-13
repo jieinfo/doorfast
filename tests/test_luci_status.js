@@ -108,7 +108,10 @@ assert.deepEqual(model.formatStatus(payload), [
             ['命令', '接听'],
             ['模拟发送', '已发送'],
             ['业务确认', '等待确认'],
-            ['发送次数', '1']
+            ['发送次数', '1'],
+            ['计时器', '未知'], ['剩余时间（最近采样）', '未知'],
+            ['结束原因', '未知'], ['故障分类', '未知'],
+            ['最近结果门口机', '未知'], ['最近结果代次', '未知']
         ]
     },
     {
@@ -184,6 +187,58 @@ assert.equal(model.formatStatus(aggregateMediaPayload).at(-1).rows.at(-1)[0],
 assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
              /requests=3, busy=2/);
 const phaseSession = aggregateMediaPayload.media.sessions[0];
+const malformedStartupPayload = structuredClone(aggregateMediaPayload);
+malformedStartupPayload.media.sessions[0].control_requests = -1;
+assert.doesNotThrow(() => model.formatStatus(malformedStartupPayload));
+const diagnosticPayload = structuredClone(payload);
+Object.assign(diagnosticPayload.call, {timer: 'confirmation', remaining_ms: 500,
+    end_reason: 'none', fault: 'confirmation_timeout', last_station_id: 'gate_main',
+    last_generation: 8});
+diagnosticPayload.media = {...aggregateMediaPayload.media, sessions: [{
+    station_id: 'gate_main', generation: 9, state: 'awaiting_video',
+    timer: 'first_frame', remaining_ms: 900, end_reason: 'none', failure_reason: 'none'
+}], last_results: [{station_id: 'gate_main', generation: 8, timer: 'none',
+    remaining_ms: 0, end_reason: 'local_hangup', failure_reason: 'cancelled'}]};
+const diagnosticSections = model.formatStatus(diagnosticPayload);
+assert.ok(diagnosticSections[2].rows.some(row => row[0] === '计时器' && row[1] === '确认'));
+assert.ok(diagnosticSections[2].rows.some(row => row[1] === '500 ms'));
+assert.ok(diagnosticSections.at(-1).rows.some(row => row[0] === '当前媒体：gate_main' &&
+    /代次=9.*等待首帧.*900 ms.*结束=无.*故障=无/.test(row[1])));
+assert.ok(diagnosticSections.at(-1).rows.some(row => row[0] === '最近媒体结果：gate_main' &&
+    /代次=8.*主动挂断.*已取消/.test(row[1])));
+for (const bad of [undefined, null, -1, '900', Number.MAX_SAFE_INTEGER + 1]) {
+    diagnosticPayload.call.remaining_ms = bad;
+    diagnosticPayload.call.timer = 'confirmation';
+    diagnosticPayload.call.fault = {password: 'hidden'};
+    diagnosticPayload.media.sessions[0].remaining_ms = bad;
+    diagnosticPayload.media.sessions[0].timer = 'first_frame';
+    diagnosticPayload.media.sessions.push(null);
+    diagnosticPayload.media.last_results.push({station_id: 'bad', generation: -1});
+    const formatted = model.formatStatus(diagnosticPayload);
+    assert.equal(formatted[0].title, '服务');
+    assert.ok(formatted[2].rows.some(row => row[0] === '剩余时间（最近采样）' && row[1] === '未知'));
+    assert.ok(formatted.at(-1).rows.some(row => /剩余=未知/.test(row[1])));
+    assert.doesNotMatch(JSON.stringify(formatted), /hidden|future_timer/);
+}
+diagnosticPayload.call.timer = 'future_timer';
+diagnosticPayload.call.remaining_ms = 900;
+diagnosticPayload.media.sessions[0].timer = 'future_timer';
+diagnosticPayload.media.sessions[0].remaining_ms = 900;
+const unknownDiagnostics = model.formatStatus(diagnosticPayload);
+assert.ok(unknownDiagnostics[2].rows.some(row => row[0] === '计时器' && row[1] === '未知'));
+assert.ok(unknownDiagnostics.at(-1).rows.some(row => /剩余=未知/.test(row[1])));
+delete diagnosticPayload.media.sessions[0].timer;
+delete diagnosticPayload.media.sessions[0].remaining_ms;
+assert.ok(model.formatStatus(diagnosticPayload).at(-1).rows.some(row => /剩余=未知/.test(row[1])));
+diagnosticPayload.call.timer = 'first_frame';
+diagnosticPayload.call.remaining_ms = 100;
+diagnosticPayload.call.fault = 'encoder_failed';
+diagnosticPayload.media.sessions[0].end_reason = 'heartbeat_timeout';
+diagnosticPayload.media.sessions[0].failure_reason = 'heartbeat_timeout';
+const wrongDomainDiagnostics = model.formatStatus(diagnosticPayload);
+assert.ok(wrongDomainDiagnostics[2].rows.some(row => row[0] === '计时器' && row[1] === '未知'));
+assert.ok(wrongDomainDiagnostics[2].rows.some(row => row[0] === '故障分类' && row[1] === '未知'));
+assert.ok(wrongDomainDiagnostics.at(-1).rows.some(row => /结束=未知, 故障=未知/.test(row[1])));
 phaseSession.started_ms = 1000;
 assert.match(model.formatMediaStatus(aggregateMediaPayload.media).at(-1)[1],
              /confirmed=300 ms, first=700 ms, publish=700 ms/);

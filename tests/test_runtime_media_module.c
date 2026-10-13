@@ -19,6 +19,35 @@ struct runtime_fake {
 
 static struct runtime_fake runtime_fake_instance;
 
+struct malformed_diagnostic { unsigned mutation; bool terminal; };
+static int runtime_malformed_diagnostic(const void *instance, uint64_t now_ms,
+    struct df_media_module_diagnostics_v2 *status) {
+    const struct malformed_diagnostic *malformed = instance;
+    struct df_media_session_diagnostics_v2 *entry = malformed->terminal ?
+        status->last_results : status->sessions;
+    (void)now_ms;
+    *entry = (struct df_media_session_diagnostics_v2){.station_id = "gate_main",
+        .generation = 7, .timer = DF_MEDIA_TIMER_NONE,
+        .end_reason = malformed->terminal ? DF_MEDIA_END_LOCAL_HANGUP : DF_MEDIA_END_NONE};
+    switch (malformed->mutation) {
+    case 0: entry->station_id[0] = '\0'; break;
+    case 1: memset(entry->station_id, 'x', sizeof(entry->station_id)); break;
+    case 2: entry->generation = 0; break;
+    case 3: entry->timer = (enum df_media_timer)999; break;
+    case 4: entry->end_reason = (enum df_media_end_reason)999; break;
+    case 5: entry->failure_reason = (enum df_media_failure_reason)999; break;
+    case 6: entry->remaining_ms = 1; break;
+    case 7:
+        if (malformed->terminal) entry->end_reason = DF_MEDIA_END_NONE;
+        else entry->end_reason = DF_MEDIA_END_LOCAL_HANGUP;
+        break;
+    case 8: entry->timer = DF_MEDIA_TIMER_FIRST_FRAME; entry->remaining_ms = 10; break;
+    }
+    status->session_count = status->required_session_count = malformed->terminal ? 0 : 1;
+    status->last_result_count = status->required_last_result_count = malformed->terminal ? 1 : 0;
+    return DF_OK;
+}
+
 static int runtime_invalid_diagnostics_v2(const void *instance, uint64_t now_ms,
     struct df_media_module_diagnostics_v2 *status) {
     (void)instance; (void)now_ms;
@@ -67,6 +96,23 @@ void test_runtime_media_module_diagnostics_optional_v2(void) {
         df_media_end_reason_name((enum df_media_end_reason)999)));
     TEST_ASSERT_INT_EQ(0, strcmp("unknown",
         df_media_failure_reason_name((enum df_media_failure_reason)999)));
+    invalid.status = runtime_malformed_diagnostic;
+    for (unsigned terminal = 0; terminal < 2; terminal++) {
+        for (unsigned mutation = 0; mutation < (terminal ? 9U : 8U); mutation++) {
+            struct malformed_diagnostic malformed = {mutation, terminal != 0};
+            module.instance = &malformed;
+            status = (struct df_media_module_diagnostics_v2){.sessions = current,
+                .session_count = 1, .last_results = last, .last_result_count = 1};
+            TEST_ASSERT_INT_EQ(DF_ERR_IO,
+                df_runtime_media_module_diagnostics_v2(&module, 100, &status));
+            TEST_ASSERT_INT_EQ(1, status.sessions == current);
+            TEST_ASSERT_INT_EQ(1, status.last_results == last);
+            TEST_ASSERT_INT_EQ(0, status.session_count);
+            TEST_ASSERT_INT_EQ(0, status.last_result_count);
+            TEST_ASSERT_INT_EQ(0, status.required_session_count);
+            TEST_ASSERT_INT_EQ(0, status.required_last_result_count);
+        }
+    }
 }
 
 static void *runtime_fake_create(

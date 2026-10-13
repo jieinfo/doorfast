@@ -87,6 +87,26 @@ struct df_runtime_media_status {
     bool has_credential_text;
 };
 
+/* Emits only the added diagnostic fields into the caller's current table.
+ * Inputs are validated runtime snapshots; sink callbacks must be non-NULL.
+ * open_result/close_result wrap each row in the caller's last_results array. */
+struct df_runtime_ubus;
+struct df_runtime_diagnostic_sink {
+    void *context;
+    void (*string)(void *, const char *, const char *);
+    void (*number)(void *, const char *, uint64_t);
+    void *(*open_result)(void *);
+    void (*close_result)(void *, void *);
+};
+void df_runtime_ubus_emit_call_diagnostics(const struct df_runtime_ubus *,
+    const struct df_gvs_call_control_status *,
+    const struct df_runtime_diagnostic_sink *);
+void df_runtime_ubus_emit_media_diagnostics(const struct df_runtime_media_status *,
+    const struct df_media_session_status_v3 *,
+    const struct df_runtime_diagnostic_sink *);
+void df_runtime_ubus_emit_media_last_results(const struct df_runtime_media_status *,
+    const struct df_runtime_diagnostic_sink *);
+
 struct df_station_snapshot_entry {
     char id[33];
     char name[65];

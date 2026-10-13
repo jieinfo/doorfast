@@ -102,6 +102,17 @@ static void df_gvs_call_control_classify_transition(
     control->observed_generation = session->generation;
 }
 
+void df_gvs_call_control_observe_external_end(struct df_gvs_call_control *control,
+    const struct df_gvs_session *previous, const struct df_gvs_session *current) {
+    if (control == NULL || previous == NULL || current == NULL ||
+        !df_gvs_call_control_session_active(previous->state) ||
+        current->state != DF_GVS_ENDED || previous->generation != current->generation ||
+        memcmp(previous->peer, current->peer, sizeof(previous->peer)) != 0)
+        return;
+    df_gvs_call_control_record_terminal(control, DF_GVS_CALL_END_UNKNOWN,
+        DF_GVS_CALL_FAULT_NONE, previous, previous->peer, previous->generation);
+}
+
 int df_gvs_call_control_init(struct df_gvs_call_control *control,
     uint64_t now_ms, df_gvs_header_provider_fn provide_fields,
     void *fields_context) {

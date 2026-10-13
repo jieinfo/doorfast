@@ -26,6 +26,10 @@ if [ -n "${TEST_UBUS_ERROR_CODE:-}" ] && [ "$method" = monitor_start ]; then
   exit 0
 fi
 if [ "$*" = 'call doorfast status' ]; then
+  if [ -n "${TEST_STATUS_JSON:-}" ]; then
+    printf '%s\n' "$TEST_STATUS_JSON"
+    exit 0
+  fi
   if [ -n "${TEST_AUDIO_CHANGE_FILE:-}" ] && [ -f "$TEST_AUDIO_CHANGE_FILE" ]; then
     . "$TEST_AUDIO_CHANGE_FILE"
   fi
@@ -143,6 +147,28 @@ run_method() {
     printf '%s' "$2" | sh package/doorfast/files/doorfast-http.sh)
 }
 run /api/v1/status ''
+# The bridge already passes status through unchanged. These fixtures must stay
+# GREEN without a CGI whitelist or a new interpretation of diagnostic fields.
+for status_fixture in \
+  '{"running":true,"call":{"session":"talking","generation":9,"timer":"confirmation","remaining_ms":500,"end_reason":"none","fault":"confirmation_timeout","last_station_id":"gate_side","last_generation":8},"media":{"sessions":[{"station_id":"gate_main","generation":9,"timer":"first_frame","remaining_ms":900,"end_reason":"none","failure_reason":"none"}],"last_results":[{"station_id":"gate_main","generation":8,"timer":"none","remaining_ms":0,"end_reason":"local_hangup","failure_reason":"cancelled"}]}}' \
+  '{"running":true,"call":{"session":"talking","generation":9},"media":{"sessions":[{"station_id":"gate_main","generation":9,"control_requests":3}]}}' \
+  '{"running":true,"call":{"timer":"unknown","end_reason":"unknown","fault":"unknown"},"media":{"sessions":[{"station_id":"gate_main","generation":9,"timer":"unknown","end_reason":"unknown","failure_reason":"unknown"}],"last_results":[]}}'
+do
+  (TEST_STATUS_JSON="$status_fixture" run_method /api/v1/status '' GET) >"$workspace/status-fixture"
+  TEST_STATUS_JSON="$status_fixture" python3 - "$workspace/status-fixture" <<'PY'
+import json, os, sys
+response = open(sys.argv[1]).read()
+actual = json.loads(response.split('\n\n', 1)[1])
+assert actual == json.loads(os.environ['TEST_STATUS_JSON'])
+assert not any(key in response for key in (
+    'access_material', 'password=', 'authorization', 'bearer=', 'pcm=', 'sdp', 'secretkey'))
+if 'last_results' in actual['media'] and actual['media']['last_results']:
+    current = actual['media']['sessions'][0]
+    last = actual['media']['last_results'][0]
+    assert current['generation'] == 9 and last['generation'] == 8
+    assert current['remaining_ms'] == 900 and last['remaining_ms'] == 0
+PY
+done
 run /api/v1/unlock '{"station_id":"gate_main"}'
 run /api/v1/answer '{"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}'
 run_method /api/v1/hangup \
@@ -208,7 +234,7 @@ run_method /api/v1/monitor/viewer \
   '{"active":true,"generation":7,"station_id":"gate_main","runtime_id":"0123456789abcdef"}' POST \
   >"$workspace/monitor-viewer"
 run_method /api/v1/monitor/status '' GET >"$workspace/monitor-status"
-test "$(wc -l <"$trace" | tr -d ' ')" -eq 15
+test "$(wc -l <"$trace" | tr -d ' ')" -eq 18
 grep -Fxq 'call doorfast stations' "$trace"
 grep -Fxq 'call doorfast monitor_start {"runtime_id":"0123456789abcdef","station_id":"gate_main"}' "$trace"
 grep -Fxq 'call doorfast monitor_stop {"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' "$trace"

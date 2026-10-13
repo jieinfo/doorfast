@@ -115,6 +115,7 @@ node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfas
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/relay.js
 node --check package/luci-app-doorfast/htdocs/luci-static/resources/view/doorfast/logs.js
 node tests/test_luci_settings.js
+node tests/test_luci_status.js
 node tests/test_luci_media.js
 node tests/test_luci_stations.js
 node tests/test_luci_deployment.js

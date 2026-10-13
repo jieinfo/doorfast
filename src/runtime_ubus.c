@@ -9,6 +9,64 @@
 
 #define DF_RUNTIME_STATION_ROUTE_MAX_AGE_MS 60000U
 
+void df_runtime_ubus_emit_call_diagnostics(const struct df_runtime_ubus *service,
+    const struct df_gvs_call_control_status *status,
+    const struct df_runtime_diagnostic_sink *sink) {
+    const char *timer = df_gvs_call_timer_name(status->timer);
+    const char *reason = df_gvs_call_end_reason_name(status->end_reason);
+    const char *fault = df_gvs_call_fault_name(status->fault);
+    const char *station = df_runtime_ubus_last_call_station_id(service, status);
+    sink->string(sink->context, "timer", timer == NULL ? "unknown" : timer);
+    if (timer != NULL)
+        sink->number(sink->context, "remaining_ms", status->remaining_ms);
+    sink->string(sink->context, "end_reason", reason == NULL ? "unknown" : reason);
+    sink->string(sink->context, "fault", fault == NULL ? "unknown" : fault);
+    sink->number(sink->context, "last_generation", status->last_generation);
+    sink->string(sink->context, "last_station_id", station == NULL ? "unknown" : station);
+}
+
+static void df_runtime_emit_media_fields(
+    const struct df_media_session_diagnostics_v2 *entry,
+    const struct df_runtime_diagnostic_sink *sink) {
+    const char *timer = entry == NULL ? "unknown" : df_media_timer_name(entry->timer);
+    sink->string(sink->context, "timer", timer);
+    if (entry != NULL && strcmp(timer, "unknown") != 0)
+        sink->number(sink->context, "remaining_ms", entry->remaining_ms);
+    sink->string(sink->context, "end_reason", entry == NULL ? "unknown" :
+        df_media_end_reason_name(entry->end_reason));
+    sink->string(sink->context, "failure_reason", entry == NULL ? "unknown" :
+        df_media_failure_reason_name(entry->failure_reason));
+}
+void df_runtime_ubus_emit_media_diagnostics(const struct df_runtime_media_status *status,
+    const struct df_media_session_status_v3 *session,
+    const struct df_runtime_diagnostic_sink *sink) {
+    const struct df_media_session_diagnostics_v2 *entry = NULL;
+    if (status->diagnostics_v2 != NULL) {
+        for (size_t i = 0; i < status->diagnostics_v2_count; i++) {
+            const struct df_media_session_diagnostics_v2 *candidate =
+                &status->diagnostics_v2[i];
+            if (candidate->generation == session->generation &&
+                strcmp(candidate->station_id, session->station_id) == 0) {
+                entry = candidate;
+                break;
+            }
+        }
+    }
+    df_runtime_emit_media_fields(entry, sink);
+}
+void df_runtime_ubus_emit_media_last_results(const struct df_runtime_media_status *status,
+    const struct df_runtime_diagnostic_sink *sink) {
+    if (status->last_results == NULL) return;
+    for (size_t i = 0; i < status->last_result_count; i++) {
+        const struct df_media_session_diagnostics_v2 *entry = &status->last_results[i];
+        void *cookie = sink->open_result(sink->context);
+        sink->string(sink->context, "station_id", entry->station_id);
+        sink->number(sink->context, "generation", entry->generation);
+        df_runtime_emit_media_fields(entry, sink);
+        sink->close_result(sink->context, cookie);
+    }
+}
+
 struct df_runtime_station_route_entry {
     uint32_t ipv4;
     uint64_t discovery_ms;
@@ -333,10 +391,30 @@ static void df_ubus_deployment_health(struct blob_buf *b) {
     blobmsg_close_table(b, table);
 }
 
+static void df_ubus_diagnostic_string(void *context, const char *key,
+    const char *value) {
+    blobmsg_add_string(context, key, value);
+}
+static void df_ubus_diagnostic_number(void *context, const char *key,
+    uint64_t value) {
+    blobmsg_add_u64(context, key, value);
+}
+static void *df_ubus_diagnostic_open(void *context) {
+    return blobmsg_open_table(context, NULL);
+}
+static void df_ubus_diagnostic_close(void *context, void *cookie) {
+    blobmsg_close_table(context, cookie);
+}
+static struct df_runtime_diagnostic_sink df_ubus_diagnostic_sink(struct blob_buf *buffer) {
+    return (struct df_runtime_diagnostic_sink){buffer, df_ubus_diagnostic_string,
+        df_ubus_diagnostic_number, df_ubus_diagnostic_open, df_ubus_diagnostic_close};
+}
+
 static void df_ubus_add_media_status(struct blob_buf *buffer,
     const struct df_runtime_media_status *status) {
     void *sessions;
     size_t index;
+    struct df_runtime_diagnostic_sink sink = df_ubus_diagnostic_sink(buffer);
 
     blobmsg_add_u8(buffer, "installed", status->installed);
     blobmsg_add_u8(buffer, "available", status->available);
@@ -412,8 +490,12 @@ static void df_ubus_add_media_status(struct blob_buf *buffer,
         if (session->last_error != DF_MEDIA_ERROR_NONE)
             blobmsg_add_u32(buffer, "last_error",
                 (uint32_t)session->last_error);
+        df_runtime_ubus_emit_media_diagnostics(status, session, &sink);
         blobmsg_close_table(buffer, entry);
     }
+    blobmsg_close_array(buffer, sessions);
+    sessions = blobmsg_open_array(buffer, "last_results");
+    df_runtime_ubus_emit_media_last_results(status, &sink);
     blobmsg_close_array(buffer, sessions);
 }
 
@@ -486,10 +568,7 @@ static int df_runtime_ubus_status_handler(
         df_gvs_call_command_type_name(call_status.command_type) == NULL ||
         df_gvs_call_dispatch_state_name(call_status.dispatch_state) == NULL ||
         df_gvs_call_dispatch_state_name(call_status.handshake_dispatch) == NULL ||
-        df_gvs_call_ack_state_name(call_status.acknowledgement_state) == NULL ||
-        df_gvs_call_end_reason_name(call_status.end_reason) == NULL ||
-        df_gvs_call_fault_name(call_status.fault) == NULL ||
-        df_gvs_call_timer_name(call_status.timer) == NULL) {
+        df_gvs_call_ack_state_name(call_status.acknowledgement_state) == NULL) {
         blob_buf_free(&platform->response);
         return UBUS_STATUS_UNKNOWN_ERROR;
     }
@@ -508,22 +587,10 @@ static int df_runtime_ubus_status_handler(
         df_gvs_call_dispatch_state_name(call_status.dispatch_state));
     blobmsg_add_string(&platform->response, "confirmation",
         df_gvs_call_ack_state_name(call_status.acknowledgement_state));
-    blobmsg_add_string(&platform->response, "timer",
-        df_gvs_call_timer_name(call_status.timer));
-    blobmsg_add_u64(&platform->response, "remaining_ms",
-        call_status.remaining_ms);
-    blobmsg_add_string(&platform->response, "end_reason",
-        df_gvs_call_end_reason_name(call_status.end_reason));
-    blobmsg_add_string(&platform->response, "fault",
-        df_gvs_call_fault_name(call_status.fault));
-    blobmsg_add_u64(&platform->response, "last_generation",
-        call_status.last_generation);
     {
-        const char *last_station_id =
-            df_runtime_ubus_last_call_station_id(platform->owner,
-                &call_status);
-        blobmsg_add_string(&platform->response, "last_station_id",
-            last_station_id == NULL ? "unknown" : last_station_id);
+        struct df_runtime_diagnostic_sink sink =
+            df_ubus_diagnostic_sink(&platform->response);
+        df_runtime_ubus_emit_call_diagnostics(platform->owner, &call_status, &sink);
     }
     blobmsg_add_u32(&platform->response, "attempts", call_status.attempts);
     blobmsg_add_string(&platform->response, "handshake_mode",

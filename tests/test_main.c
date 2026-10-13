@@ -4,6 +4,8 @@
 #include <string.h>
 #include <unistd.h>
 void test_event_relay(void);
+void test_runtime_ubus_diagnostic_emitter(void);
+void test_gvs_call_control_observes_capture_error_boundary(void);
 void test_gvs_call_runtime_idle_deadlines(void);
 void test_gvs_call_runtime_tick_is_atomic(void);
 void test_gvs_call_control_answer_reaches_confirmation(void);
@@ -431,6 +433,17 @@ static int capture_media_encoder_arguments(int argc, char **argv)
 
 int main(int argc, char **argv) {
     int capture_result = capture_media_encoder_arguments(argc, argv);
+    if (argc == 2 && strcmp(argv[1], "--wire-observability") == 0) {
+        test_runtime_ubus_diagnostic_emitter();
+        test_runtime_media_module_diagnostics_optional_v2();
+        test_gvs_call_control_records_local_hangup_snapshot();
+        test_gvs_call_control_status_ignores_stale_generation_deadline();
+        test_gvs_call_control_handshake_memory_lifecycle();
+        test_gvs_call_control_observes_capture_error_boundary();
+        if (test_failures() != 0) return 1;
+        puts("wire observability tests passed");
+        return 0;
+    }
     if (capture_result >= 0) return capture_result;
     if (argc == 2 && strcmp(argv[1], "--media-observability") == 0) {
         test_media_session_manager_observability();
@@ -849,6 +862,7 @@ int main(int argc, char **argv) {
     test_gvs_call_control_tracks_answer_sent_by_external_transport();
     test_gvs_call_control_reports_confirmation_timeout_once();
     test_gvs_call_control_records_local_hangup_snapshot();
+    test_gvs_call_control_observes_capture_error_boundary();
     test_gvs_call_control_preserves_terminal_fault_over_late_dispatch_cancel();
     test_gvs_call_control_preemption_keeps_new_generation_fault_clear();
     test_gvs_call_control_rejects_late_ack_without_overwriting_terminal();
@@ -861,6 +875,7 @@ int main(int argc, char **argv) {
     test_gvs_call_control_rejects_receive_before_submission_time();
     test_gvs_call_control_exposes_public_status();
     test_runtime_ubus_validates_and_routes_call_requests();
+    test_runtime_ubus_diagnostic_emitter();
     test_runtime_ubus_reports_handshake_transport();
     test_runtime_ubus_media_controls_require_current_generation();
     test_runtime_ubus_monitor_start_rejects_active_call();

@@ -9,6 +9,137 @@
 #include "gvs_audio_playout.h"
 #include "test.h"
 
+struct diagnostic_recording {
+    char text[4096];
+    size_t length;
+    unsigned results;
+};
+static void diagnostic_string(void *context, const char *key, const char *value) {
+    struct diagnostic_recording *recording = context;
+    int count = snprintf(recording->text + recording->length,
+        sizeof(recording->text) - recording->length, "%s=\"%s\";", key, value);
+    TEST_ASSERT_INT_EQ(1, count > 0 &&
+        (size_t)count < sizeof(recording->text) - recording->length);
+    if (count > 0) recording->length += (size_t)count;
+}
+static void diagnostic_number(void *context, const char *key, uint64_t value) {
+    struct diagnostic_recording *recording = context;
+    int count = snprintf(recording->text + recording->length,
+        sizeof(recording->text) - recording->length, "%s=%llu;", key,
+        (unsigned long long)value);
+    TEST_ASSERT_INT_EQ(1, count > 0 &&
+        (size_t)count < sizeof(recording->text) - recording->length);
+    if (count > 0) recording->length += (size_t)count;
+}
+static void *diagnostic_open(void *context) {
+    struct diagnostic_recording *recording = context;
+    recording->results++;
+    return recording;
+}
+static void diagnostic_close(void *context, void *cookie) {
+    TEST_ASSERT_INT_EQ(1, context == cookie);
+}
+
+void test_runtime_ubus_diagnostic_emitter(void) {
+    struct diagnostic_recording recording = {0};
+    struct df_runtime_diagnostic_sink sink = {&recording, diagnostic_string,
+        diagnostic_number, diagnostic_open, diagnostic_close};
+    struct df_media_session_status_v3 session = {
+        .station_id = "gate_main", .generation = 8,
+        .stream_name = "secret_sensitive_stream"};
+    struct df_media_session_diagnostics_v2 diagnostics[] = {
+        {.station_id = "gate_side", .generation = 8,
+            .timer = DF_MEDIA_TIMER_FIRST_FRAME, .remaining_ms = 666},
+        {.station_id = "gate_main", .generation = 7,
+            .timer = DF_MEDIA_TIMER_FIRST_FRAME, .remaining_ms = 777},
+        {.station_id = "gate_main", .generation = 8,
+            .timer = DF_MEDIA_TIMER_FIRST_FRAME, .remaining_ms = 900},
+    };
+    struct df_media_session_diagnostics_v2 terminals[] = {{
+        .station_id = "gate_main", .generation = 7,
+        .timer = DF_MEDIA_TIMER_NONE, .end_reason = DF_MEDIA_END_UNKNOWN,
+        .failure_reason = DF_MEDIA_FAILURE_FIRST_FRAME_TIMEOUT},
+        {.station_id = "gate_side", .generation = 5,
+         .timer = DF_MEDIA_TIMER_NONE, .end_reason = DF_MEDIA_END_LOCAL_HANGUP,
+         .failure_reason = DF_MEDIA_FAILURE_CANCELLED}};
+    struct df_runtime_media_status media = {.diagnostics_v2 = diagnostics,
+        .diagnostics_v2_count = 3, .last_results = terminals, .last_result_count = 2};
+    struct df_gvs_call_control_status call = {
+        .timer = DF_GVS_CALL_TIMER_CONFIRMATION, .remaining_ms = 500,
+        .end_reason = DF_GVS_CALL_END_NONE, .fault = DF_GVS_CALL_FAULT_NONE,
+        .last_generation = UINT64_MAX};
+    df_runtime_ubus_emit_call_diagnostics(NULL, &call, &sink);
+    TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
+        "timer=\"confirmation\";remaining_ms=500;end_reason=\"none\";"
+        "fault=\"none\";last_generation=18446744073709551615;last_station_id=\"unknown\";"));
+    recording = (struct diagnostic_recording){0};
+    df_runtime_ubus_emit_media_diagnostics(&media, &session, &sink);
+    TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
+        "timer=\"first_frame\";remaining_ms=900;end_reason=\"none\";failure_reason=\"none\";"));
+    diagnostics[2].remaining_ms = 400;
+    recording = (struct diagnostic_recording){0};
+    df_runtime_ubus_emit_media_diagnostics(&media, &session, &sink);
+    TEST_ASSERT_INT_EQ(1, strstr(recording.text, "remaining_ms=400;") != NULL);
+    media.diagnostics_v2 = NULL; /* Legacy/invalid extension, even with stale count. */
+    recording = (struct diagnostic_recording){0};
+    df_runtime_ubus_emit_media_diagnostics(&media, &session, &sink);
+    TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
+        "timer=\"unknown\";end_reason=\"unknown\";failure_reason=\"unknown\";"));
+    media.diagnostics_v2 = diagnostics;
+    session.generation = 9;
+    recording = (struct diagnostic_recording){0};
+    df_runtime_ubus_emit_media_diagnostics(&media, &session, &sink);
+    TEST_ASSERT_INT_EQ(1, strstr(recording.text, "remaining_ms=") == NULL);
+    session.generation = 8;
+    diagnostics[2].timer = (enum df_media_timer)999;
+    diagnostics[2].end_reason = (enum df_media_end_reason)999;
+    diagnostics[2].failure_reason = (enum df_media_failure_reason)999;
+    recording = (struct diagnostic_recording){0};
+    df_runtime_ubus_emit_media_diagnostics(&media, &session, &sink);
+    TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
+        "timer=\"unknown\";end_reason=\"unknown\";failure_reason=\"unknown\";"));
+    recording = (struct diagnostic_recording){0};
+    df_runtime_ubus_emit_media_last_results(&media, &sink);
+    TEST_ASSERT_INT_EQ(2, recording.results);
+    TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
+        "station_id=\"gate_main\";generation=7;timer=\"none\";remaining_ms=0;"
+        "end_reason=\"unknown\";failure_reason=\"first_frame_timeout\";"
+        "station_id=\"gate_side\";generation=5;timer=\"none\";remaining_ms=0;"
+        "end_reason=\"local_hangup\";failure_reason=\"cancelled\";"));
+    TEST_ASSERT_INT_EQ(1, strstr(recording.text, "password") == NULL);
+    TEST_ASSERT_INT_EQ(1, strstr(recording.text, "secret_sensitive_stream") == NULL);
+    media.last_results = NULL;
+    recording = (struct diagnostic_recording){0};
+    df_runtime_ubus_emit_media_last_results(&media, &sink);
+    TEST_ASSERT_INT_EQ(0, recording.results);
+    call.timer = (enum df_gvs_call_timer)999;
+    call.end_reason = (enum df_gvs_call_end_reason)999;
+    call.fault = (enum df_gvs_call_fault)999;
+    df_runtime_ubus_emit_call_diagnostics(NULL, &call, &sink);
+    TEST_ASSERT_INT_EQ(1, strstr(recording.text, "timer=\"unknown\";") != NULL);
+    TEST_ASSERT_INT_EQ(1, strstr(recording.text, "remaining_ms=") == NULL);
+    {
+        struct df_station station = {.id = "gate_side", .enabled = true,
+            .logical_address = {0x32, 2, 1, 0, 2, 0}};
+        struct df_station_registry registry = {.items = &station, .count = 1};
+        struct df_runtime_ubus service = {.started = true,
+            .access_station_registry = &registry};
+        memcpy(call.last_station, station.logical_address, 6);
+        call.end_reason = DF_GVS_CALL_END_HEARTBEAT_TIMEOUT;
+        call.fault = DF_GVS_CALL_FAULT_HEARTBEAT_TIMEOUT;
+        call.timer = DF_GVS_CALL_TIMER_NONE;
+        call.remaining_ms = 0;
+        recording = (struct diagnostic_recording){0};
+        df_runtime_ubus_emit_call_diagnostics(&service, &call, &sink);
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text,
+            "last_station_id=\"gate_side\";") != NULL);
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text,
+            "end_reason=\"heartbeat_timeout\";") != NULL);
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "remaining_ms=0;") != NULL);
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "32:02") == NULL);
+    }
+}
+
 /* Catches deriving call identity from a concurrent preview or an old unlock
  * result, or emitting a station for a stale/ended/ambiguous main call. */
 void test_runtime_ubus_call_station_identity_uses_current_main_call(void) {

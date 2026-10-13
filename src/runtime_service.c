@@ -1422,9 +1422,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (captured == DF_CAPTURE_ERROR) {
             bool ended = false;
+            const struct df_gvs_session previous_session = session;
 
             (void)df_gvs_session_abort(&session, &ended);
             df_gvs_deadline_cancel(&deadline);
+            df_gvs_call_control_observe_external_end(&call_control,
+                &previous_session, &session);
             {
                 struct df_gvs_call_control_result call_result;
                 if (df_gvs_call_control_step(

@@ -104,6 +104,60 @@ function phaseElapsedText(timestamp, started) {
     return String(timestamp - started) + ' ms';
 }
 
+var callDiagnosticTimers = {none: '无', confirmation: '确认', session: '会话'};
+var diagnosticTimers = Object.assign({}, callDiagnosticTimers,
+    {first_frame: '等待首帧', reconnect: '重连'});
+var diagnosticReasons = {none: '无', local_hangup: '主动挂断',
+    peer_hangup: '门口机挂断', session_timeout: '会话超时',
+    confirmation_timeout: '确认超时', preempted: '被抢占',
+    runtime_reset: '运行实例重置', heartbeat_timeout: '保活超时'};
+var callDiagnosticFaults = {none: '无', dispatch_failed: '发送失败',
+    dispatch_timeout: '发送超时', confirmation_rejected: '确认被拒绝',
+    confirmation_timeout: '确认超时', preempted: '被抢占',
+    cancelled: '已取消', runtime_reset: '运行实例重置', heartbeat_timeout: '保活超时'};
+var diagnosticFaults = Object.assign({}, callDiagnosticFaults,
+    {first_frame_timeout: '首帧超时', source_stalled: '源视频停顿',
+     encoder_failed: '编码器失败', publisher_failed: '发布失败', capacity_busy: '容量忙'});
+function diagnosticLabel(value, labels) {
+    return typeof value === 'string' &&
+        Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : '未知';
+}
+function mediaDiagnosticLabel(value, labels) {
+    return value === 'heartbeat_timeout' ? '未知' : diagnosticLabel(value, labels);
+}
+function remainingText(value, timer, labels) {
+    return diagnosticLabel(timer, labels || diagnosticTimers) !== '未知' &&
+        Number.isSafeInteger(value) && value >= 0 ? String(value) + ' ms' : '未知';
+}
+function diagnosticStation(value) {
+    return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,32}$/.test(value) ? value : '未知';
+}
+function diagnosticGeneration(value) {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : '未知';
+}
+function mediaDiagnosticRows(media) {
+    var rows = [];
+    if (Array.isArray(media.sessions)) media.sessions.forEach(function(session) {
+        if (!session || diagnosticStation(session.station_id) === '未知' ||
+            !Number.isSafeInteger(session.generation) || session.generation <= 0) return;
+        rows.push(['当前媒体：' + session.station_id,
+            '代次=' + diagnosticGeneration(session.generation) +
+            ', 计时器=' + diagnosticLabel(session.timer, diagnosticTimers) +
+            ', 剩余=' + remainingText(session.remaining_ms, session.timer) +
+            ', 结束=' + mediaDiagnosticLabel(session.end_reason, diagnosticReasons) +
+            ', 故障=' + mediaDiagnosticLabel(session.failure_reason, diagnosticFaults)]);
+    });
+    if (Array.isArray(media.last_results)) media.last_results.forEach(function(result) {
+        if (!result || diagnosticStation(result.station_id) === '未知' ||
+            !Number.isSafeInteger(result.generation) || result.generation <= 0) return;
+        rows.push(['最近媒体结果：' + result.station_id,
+            '代次=' + diagnosticGeneration(result.generation) +
+            ', 结束=' + mediaDiagnosticLabel(result.end_reason, diagnosticReasons) +
+            ', 故障=' + mediaDiagnosticLabel(result.failure_reason, diagnosticFaults)]);
+    });
+    return rows;
+}
+
 function formatMediaStatus(payload) {
     var media = requireObject(payload, 'media');
     var stateValue = media.state;
@@ -162,9 +216,9 @@ function formatMediaStatus(payload) {
     ];
     if (Array.isArray(media.sessions)) {
         media.sessions.forEach(function(session) {
-            if (!session || typeof session.station_id !== 'string' ||
-                !Number.isInteger(session.control_requests) ||
-                !Number.isInteger(session.busy_replies) ||
+            if (!session || diagnosticStation(session.station_id) === '未知' ||
+                !Number.isSafeInteger(session.control_requests) || session.control_requests < 0 ||
+                !Number.isSafeInteger(session.busy_replies) || session.busy_replies < 0 ||
                 !Number.isInteger(session.confirmed_ms) ||
                 !Number.isInteger(session.first_frame_ms) ||
                 !Number.isInteger(session.publication_ms))
@@ -182,7 +236,7 @@ function formatMediaStatus(payload) {
                     session.started_ms)]);
         });
     }
-    return rows;
+    return rows.concat(mediaDiagnosticRows(media));
 }
 
 function localizedMediaStatus(payload) {
@@ -203,7 +257,7 @@ function localizedMediaStatus(payload) {
             return ['启动：' + row[0].slice(9), row[1]
                 .replace(/Not yet/g, '尚未发生')
                 .replace(/Unavailable/g, '不可用')];
-        return [labels[row[0]], Object.prototype.hasOwnProperty.call(
+        return [labels[row[0]] || row[0], Object.prototype.hasOwnProperty.call(
             states, row[1]) ? states[row[1]] : row[1]];
     });
 }
@@ -250,7 +304,13 @@ function formatStatus(payload) {
                 [root.mode === 'active_host' ? '发送状态' : '模拟发送',
                     callDispatchLabel(call.dispatch)],
                 ['业务确认', callConfirmationLabel(call.confirmation)],
-                ['发送次数', unsignedText(call.attempts, 'attempts')]
+                ['发送次数', unsignedText(call.attempts, 'attempts')],
+                ['计时器', diagnosticLabel(call.timer, callDiagnosticTimers)],
+                ['剩余时间（最近采样）', remainingText(call.remaining_ms, call.timer, callDiagnosticTimers)],
+                ['结束原因', diagnosticLabel(call.end_reason, diagnosticReasons)],
+                ['故障分类', diagnosticLabel(call.fault, callDiagnosticFaults)],
+                ['最近结果门口机', diagnosticStation(call.last_station_id)],
+                ['最近结果代次', diagnosticGeneration(call.last_generation)]
             ]
         },
         {
