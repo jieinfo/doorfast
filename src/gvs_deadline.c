@@ -48,6 +48,27 @@ int df_gvs_deadline_tick(struct df_gvs_deadline *deadline,
     return DF_OK;
 }
 
+int df_gvs_deadline_remaining(const struct df_gvs_deadline *deadline,
+                             uint64_t now_ms, uint64_t *remaining_ms) {
+    if (remaining_ms != NULL) {
+        *remaining_ms = 0;
+    }
+    if (deadline == NULL || remaining_ms == NULL) {
+        return DF_ERR_INVALID;
+    }
+    if (!deadline->armed) {
+        return DF_OK;
+    }
+    if (now_ms < deadline->started_ms) {
+        return DF_ERR_INVALID;
+    }
+    uint64_t elapsed_ms = now_ms - deadline->started_ms;
+    if (elapsed_ms < deadline->timeout_ms) {
+        *remaining_ms = deadline->timeout_ms - elapsed_ms;
+    }
+    return DF_OK;
+}
+
 void df_gvs_deadline_cancel(struct df_gvs_deadline *deadline) {
     if (deadline != NULL) {
         memset(deadline, 0, sizeof(*deadline));

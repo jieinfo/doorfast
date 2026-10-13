@@ -19,6 +19,8 @@ int df_gvs_deadline_arm(struct df_gvs_deadline *deadline,
 int df_gvs_deadline_tick(struct df_gvs_deadline *deadline,
                          struct df_gvs_session *session,
                          uint64_t now_ms, bool *timed_out);
+int df_gvs_deadline_remaining(const struct df_gvs_deadline *deadline,
+                             uint64_t now_ms, uint64_t *remaining_ms);
 void df_gvs_deadline_cancel(struct df_gvs_deadline *deadline);
 
 #endif
