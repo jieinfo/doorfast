@@ -6,6 +6,8 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的 GVS 可视门禁适配服务�
 
 > **现场边界：协议报文已成功提交或收到协议确认，不等于门锁、电梯、门口机或物业平台已实际执行。** 本文分别记录代码接线、测试、材料交叉验证和实体设备闭环，禁止用前三者代替实机结论。
 
+> **连续音频 v1 验收边界（2026-10-12）：** 接收重排、有限补偿、增量 PCM WAV 发布与 HTTP 身份隔离已由本地合成测试覆盖。Home Assistant 连续播放/采集接线、目标设备扬声器听音、回声与实际时延、HTTPS 部署验收仍未完成；测试没有证明实机时延低于任何目标值。
+
 本文基于 2026-09-18 对完整代码和测试的复核，覆盖 `src/`、3 个 APK 配方、LuCI、init 脚本、CLI、HTTP/ubus/Unix 接口和 CI。此前“主程序只构造并排队控制报文”的描述已经过时：呼叫、在线维护、开锁、召梯、音频和视频主链路都已接入生产 UDP；尚未完成的实体设备验证见“已知限制和未完成项”。
 
 ## 安全和部署前提
@@ -14,6 +16,7 @@ Doorfast 是面向 x86_64 ImmortalWrt 25.12.1 的 GVS 可视门禁适配服务�
 - 被动模式只抓包，不给门禁网口绑定室内机 IP；主机模式会临时给指定网口添加室内机 IP，并主动发送 GVS UDP。
 - 透明串联桥由管理员提前配置。Doorfast 只检查和观察，不创建桥、不修改路由、防火墙、DHCP 或 RA。
 - CGI 控制桥自身不实现 Bearer Token 鉴权，应只允许受信管理网或经 Home Assistant 代理访问，禁止直接暴露到 WAN。
+- HTTP 语音只用于可信内网；公网语音建议通过 HTTPS 代理访问，不建议公开暴露 Doorfast CGI。连续音频 v1 不新增认证或证书部署能力。
 - 厂商材料和 PCAP 是实现依据之一，但可能不完整或不准确。任何主动能力都必须以现场双向抓包和实体结果继续验证。
 - 现场串联可能中断原 MT8157。部署时必须保留物理直连回退方案，并先运行只读预检。
 
@@ -84,7 +87,7 @@ GitHub Actions 使用校验过 SHA-256 的官方 ImmortalWrt 25.12.1 x86_64 SDK�
 | 手动召梯 | 向上/向下发送 `08/02`，解析 `08/82` | 是 | 是 | 部分 | 否 |
 | 自动召梯 | 每个来电 generation 最多自动向上召梯一次；LuCI 可开关，默认关闭 | 是 | 是 | 部分 | 否 |
 | 电梯状态 | 周期发送 `08/03`，解析 `08/83` 和轿厢状态 | 是 | 是 | 部分 | 否 |
-| 下行音频 | 接收 UDP/8302 G.711 A-law，统计丢包/重复/乱序，发布增量 WAV | 是 | 是 | 是 | 否 |
+| 下行音频 | 接收 UDP/8302 G.711 A-law，四槽重排、有限补偿、20 块增量 PCM WAV；v1 读取匹配 runtime/station/generation | 是 | 是 | 是（codec/报文字段） | 否 |
 | 上行音频 | generation 绑定的 PCM 经 A-law 编码，以 8 kHz、160 样本/20 ms 发送 UDP/8302 | 是 | 是 | 是 | 否 |
 | 通话视频 | 接收 UDP/8303 JPEG 分片，重组、校验、识别尺寸并发布最新帧 | 是 | 是 | 是 | 否 |
 | 主动预览 | 发送 `03/04`，处理 `03/84`/`03/50`，用 `03/02` 停止 | 是 | 是 | 部分 | 否 |
@@ -253,7 +256,7 @@ ubus call doorfast hangup \
 
 ## HTTP 接口
 
-CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端调用约定；PCM 与 monitor 路由会校验 `REQUEST_METHOD`，普通 status、控制及音视频快照路由当前只按路径分派，不能把表中的方法写法当作安全边界。
+CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端调用约定；PCM、monitor 和带 runtime/station_id 的 v1 音频读取会校验 `REQUEST_METHOD`。普通 status、控制、视频和旧式音频快照请求只按路径分派，不能把表中的方法写法当作安全边界。
 
 | 方法和路径 | 用途 |
 |---|---|
@@ -264,6 +267,7 @@ CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端
 | `POST /api/v1/call_elevator` | 向上/向下召梯 |
 | `GET /api/v1/video/latest.jpg?generation=N` | 当前 generation 的最新 JPEG，支持 ETag |
 | `GET /api/v1/audio/latest.wav?generation=N&after=R` | 增量 WAV；`after` 是上一 revision |
+| `GET /api/v1/audio/latest.wav?runtime=R&station_id=S&generation=N&after=P` | v1 连续音频读取；匹配当前 talking 呼叫身份 |
 | `POST /api/v1/audio/session?runtime=R&generation=N` | 获取独占 PCM producer lease |
 | `POST /api/v1/audio/submit.pcm?runtime=R&generation=N&sequence=S` | 提交 1–5 个 320 字节 PCM 帧 |
 | `POST /api/v1/audio/session/end?runtime=R&generation=N` | 结束 PCM producer session |
@@ -275,6 +279,43 @@ CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端
 PCM 为 little-endian signed 16-bit、单声道、8 kHz；每帧 160 样本/320 字节。session 打开后返回 `audio_session`，后续请求通过 `X-Doorfast-Audio-Session` 传递。lease 为 2 秒，每次成功提交会续期；序号必须连续，部分批次成功会返回已接受前缀和下一序号，调用方应从该位置恢复。
 
 HTTP producer 同一时间只允许一个请求在途。请求超时或失败后必须丢弃该旧请求的完整 body，既不重放已确认的前缀，也不重放未确认的后缀；先按服务返回的 `next_sequence` 对齐，再从新采集的音频继续。`runtime_id` 或 generation 改变时必须立即结束采集并清空本地缓冲。
+
+### 读取连续下行音频 v1
+
+先读取 `/api/v1/status` 的 `runtime_id`、`call.station_id`、`call.generation` 与 `audio.pcm_stream_version=1`。`call.station_id` 来自主呼叫的 peer 与唯一启用站点映射，可在 ringing/talking 状态提供；音频 HTTP v1 读取只接受 talking。身份未知、映射不唯一或呼叫已结束时，客户端应停止播放并清空队列。
+
+请求参数 `runtime` 必须为 16 位小写十六进制运行 ID；`station_id` 为 1–32 个小写 ASCII 字母、数字或下划线，首字符必须是字母。`generation` 为非零十进制 uint64，`after` 可省略或为包含零的十进制 uint64；数值必须采用无前导零的标准写法。出现 runtime 或 station_id 即选择 v1 模式，两个身份字段与 generation 必须同时提供；只带 generation/after 的旧式读取仍可用。客户端应按十进制字符串或可精确保存 uint64 的类型维护 generation、revision 和 timestamp，不要转换成会损失精度的浮点数。
+
+以下是文档用合成身份示例；运行时用刚读取到的状态值替换查询参数：
+
+```sh
+curl -D - -o /dev/null 'http://doorfast.local/cgi-bin/doorfast/api/v1/audio/latest.wav?runtime=0123456789abcdef&station_id=gate_main&generation=7&after=0'
+```
+
+省略 after 时选择最新已发布块；连续读取时将成功响应的 `X-Doorfast-Audio-Revision` 作为下一次 after。revision 是累计真实接收包数，补偿样本不增加它，不应推断 revision 必须加一。每个 WAV 包含独立的 44 字节头，载荷为 s16le、8 kHz、单声道；最多 1600 样本/3200 PCM 字节，总长度不超过 3244 字节。
+
+200 响应带 `X-Doorfast-Runtime-Id`、`X-Doorfast-Station-Id`、`X-Doorfast-Generation`，以及下列以 `X-Doorfast-Audio-` 为前缀的头：
+
+| 头后缀 | 含义 |
+|---|---|
+| `Previous-Revision` / `Revision` | 所选块的真实包计数游标边界 |
+| `Dropped-Bytes` | 为选择最新尾部而丢弃的 A-law 样本字节数，包含补偿样本；不是 PCM 字节数 |
+| `Discontinuity` | 0 或 1；大缺口或丢弃积压时为 1 |
+| `Timestamp-Ms` | 所选块在守护进程单调时钟上的发布时刻 |
+| `Latest-Timestamp-Ms` | 复制后再次读取状态得到的最新块发布时刻 |
+| `Format` / `Sample-Rate` / `Channels` | `s16le` / `8000` / `1` |
+
+`Latest-Timestamp-Ms - Timestamp-Ms` 表示所选块相对最新发布块的积压，不是精确采集时刻或端到端时延，也不能跨 runtime 比较。ETag 保持 `df-audio-<generation>-<revision>` 形式；当前游标或匹配所选块的 ETag 返回 304，并携带三个身份头。客户端缓存和队列必须同时绑定 runtime、station_id、generation，身份切换时丢弃旧 ETag 与 after。
+
+| 状态 | v1 JSON code | 客户端处理 |
+|---|---|---|
+| 400 | `invalid_request` | 修正参数或方法 |
+| 409 | `audio_identity_mismatch` | 重新读取状态并清空旧播放队列 |
+| 409 | `audio_cursor_expired` | 丢弃过期 after，重新从最新块接续 |
+| 404 | `audio_unavailable` | 当前身份尚无就绪块，稍后重读 |
+| 503 | `audio_temporarily_unavailable` | 状态/文件/发布元数据暂不可用，稍后重读 |
+
+v1 在复制 WAV 后再次核对呼叫身份，防止切换或重启时返回旧身份音频；身份未证明的错误不带身份头。音频 ready 与身份分别检查，结束的呼叫不能靠旧文件继续读取。客户端仍需处理网络等待期间发生的身份变化。
 
 本地低层入口也可发送单帧：
 
@@ -289,7 +330,9 @@ doorfast-pcm-submit "$generation" < frame.pcm
 
 ### 通话媒体
 
-- UDP/8302 接收 G.711 A-law，记录 sequence、丢包、重复和迟到包，并保留最近 4 个增量 WAV chunk。
+- UDP/8302 接收 G.711 A-law，支持 128/160/192 字节等不超过 256 样本的载荷。16 位 sequence 按半范围窗口回绕；最多四个等待槽，缺口等待 40 ms，满窗可提前推进，重复/迟到包不进入 PCM。缺口按最近真实包长度补 `0xd5`，每次最多 320 样本；更大缺口标记 discontinuity。
+- 待发布样本达到 800，或最早 pending 样本等待 100 ms 后发布；每块最多保留最新 1600 样本，超量计入 dropped 并标记 discontinuity。发布失败保留 pending，至少等待 100 ms 后重试。这些是调度条件，实际执行时刻取决于主循环，不是实机时延保证。
+- 原子发布的增量 WAV 最多保留 20 块；generation 切换、挂断、超时和关闭会清空重排、缓冲与旧块。真实 packets/bytes 与含补偿的 sample_count/concealed_samples 分开统计，状态通过 `audio.pcm_stream_version=1` 宣告 v1。
 - 本地 `/var/run/doorfast-audio.sock` 只接受当前 talking generation 的 160 样本 PCM，编码后发往已观察到的对端音频路由。
 - UDP/8303 只接纳当前 generation 且来源/目标匹配的媒体，完成 JPEG 分片重组、结构校验和尺寸提取。
 - 最新 JPEG 默认发布到 `/tmp/doorfast-latest.jpg`；HTTP 读取时再次核对 generation、帧号和长度，避免读取到切换中的文件。
@@ -518,9 +561,27 @@ tcpdump -nn -r "$MT8157_DATASET/pcap/gvs-session-20260907.pcap" \
 
 ```sh
 make -B test
+build/doorfast-tests
 make -B doorfast recorder peer-sim peer-udp-inject pcm-submit pcm-http-test
 python3 -B -m unittest discover -s tests -p 'test_*.py'
 ```
+
+连续音频组合与兼容性回归可在仓库根目录复现；`make test` 在产物已是最新时不会再次运行 C runner，因此显式执行一次：
+
+```sh
+set -e
+make test
+build/doorfast-tests
+make doorfast
+sh tests/test_doorfast_http.sh
+sh tests/test_package_manifest.sh
+node tests/test_luci_status.js
+node tests/test_luci_media.js
+node tests/js/test_media_status.mjs
+git diff --check
+```
+
+只定位接收组合测试时，在构建后运行 `build/doorfast-tests --audio-receive-pipeline`。真实 serialize/parse/jitter/buffer/playout/decode 处理合成载荷，fake publisher 只保留计数、元数据与 PCM 摘要，不写音频文件；测试断言样本内容、数量、回调时刻、序号回绕、generation 隔离、1600 样本上限与发布失败重试。对应证据与现场边界见 [音频 PCAP 附录](docs/gvs-audio-pcap-validation.md)。
 
 CI 还执行 LuCI/Node、CLI、包清单、HTTP、站点清单和 PCM fixture 验证。可在本地逐项运行：
 
@@ -566,6 +627,12 @@ python3 tests/run_doorfast_vm_stations.py /absolute/path/to/vm/ssh.sh
 除主动发现外，下面列出的辅助模块仍只能记为库能力，不能列为用户可用的生产功能。
 
 ## 已知限制和未完成项
+
+### 连续音频与 Home Assistant
+
+- Doorfast v1 下行 API 与原 20 ms PCM 上行入口已有合成软件回归。HA 端持续解码/播放、麦克风采集、缓冲策略及 runtime/station/generation 切换处理仍需独立实现和验收。
+- 目标 ImmortalWrt/ubus 构建集成、连续收发长时间稳定性、真实扬声器听音、双向回声和端到端时延未由本轮主机测试验证；HTTPS 代理、认证与证书部署也未验收。
+- 后续 HA 验收应分别记录 API/身份与游标行为、HTTPS 连接结果和现场听音结果；只保存计数、摘要和元数据，不记录原始语音。发布积压指标不能替代采集到扬声器的时延测量。
 
 ### 在线身份维护
 

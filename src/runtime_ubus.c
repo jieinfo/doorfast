@@ -432,6 +432,7 @@ static int df_runtime_ubus_status_handler(
     struct df_runtime_media_status media_status;
     const char *phase_name;
     const char *role_name;
+    const char *call_station_id;
     void *sync_table;
     void *call_table;
     void *elevator_table;
@@ -494,6 +495,10 @@ static int df_runtime_ubus_status_handler(
         df_gvs_session_state_name(call_status.session_state));
     blobmsg_add_u64(&platform->response, "generation",
                     call_status.session_generation);
+    call_station_id = df_runtime_ubus_call_station_id(platform->owner,
+        &call_status);
+    blobmsg_add_string(&platform->response, "station_id",
+        call_station_id == NULL ? "" : call_station_id);
     blobmsg_add_string(&platform->response, "command",
         df_gvs_call_command_type_name(call_status.command_type));
     blobmsg_add_string(&platform->response, "dispatch",
@@ -512,10 +517,15 @@ static int df_runtime_ubus_status_handler(
     blobmsg_close_table(&platform->response, call_table);
     if (df_runtime_ubus_read_audio_status(platform->owner, &audio_status) == DF_OK) {
         void *audio_table = blobmsg_open_table(&platform->response, "audio");
+        blobmsg_add_u32(&platform->response, "pcm_stream_version",
+                       audio_status.pcm_stream_version);
         blobmsg_add_u8(&platform->response, "ready", audio_status.ready);
         blobmsg_add_u64(&platform->response, "generation", audio_status.generation);
         blobmsg_add_u64(&platform->response, "packets", audio_status.packet_count);
         blobmsg_add_u64(&platform->response, "bytes", audio_status.byte_count);
+        blobmsg_add_u64(&platform->response, "sample_count", audio_status.sample_count);
+        blobmsg_add_u64(&platform->response, "concealed_samples", audio_status.concealed_samples);
+        blobmsg_add_u64(&platform->response, "reordered_packets", audio_status.reordered_packets);
         blobmsg_add_u64(&platform->response, "sequence_gaps", audio_status.sequence_gaps);
         blobmsg_add_u64(&platform->response, "missing_packets", audio_status.missing_packets);
         blobmsg_add_u64(&platform->response, "duplicate_packets", audio_status.duplicate_packets);
@@ -524,6 +534,8 @@ static int df_runtime_ubus_status_handler(
         blobmsg_add_u64(&platform->response, "last_timestamp_ms", audio_status.last_timestamp_ms);
         blobmsg_add_u8(&platform->response, "snapshot_ready",
                        audio_status.snapshot_ready);
+        blobmsg_add_u8(&platform->response, "snapshot_discontinuity",
+                       audio_status.snapshot_discontinuity);
         blobmsg_add_u64(&platform->response, "snapshot_packet_count",
                         audio_status.snapshot_packet_count);
         blobmsg_add_u64(&platform->response,
@@ -531,6 +543,8 @@ static int df_runtime_ubus_status_handler(
                         audio_status.snapshot_previous_packet_count);
         blobmsg_add_u64(&platform->response, "snapshot_source_bytes",
                         audio_status.snapshot_source_bytes);
+        blobmsg_add_u64(&platform->response, "snapshot_source_samples",
+                        audio_status.snapshot_source_samples);
         blobmsg_add_u64(&platform->response, "snapshot_dropped_bytes",
                         audio_status.snapshot_dropped_bytes);
         blobmsg_add_u64(&platform->response, "snapshot_bytes",
@@ -1686,7 +1700,22 @@ int df_runtime_ubus_bind_audio(struct df_runtime_ubus *service,
 int df_runtime_ubus_read_audio_status(struct df_runtime_ubus *service,
     struct df_gvs_audio_status *status) {
     if (service == NULL || !service->started || service->audio == NULL || status == NULL) return DF_ERR_INVALID;
-    return df_gvs_audio_buffer_status(service->audio, status);
+    int result = df_gvs_audio_buffer_status(service->audio, status);
+    if (result == 0 && service->audio_jitter != NULL &&
+        service->audio_jitter->generation == status->generation) {
+        status->duplicate_packets += service->audio_jitter->duplicate_packets;
+        status->late_packets += service->audio_jitter->late_packets;
+        status->reordered_packets = service->audio_jitter->reordered_packets;
+    }
+    return result;
+}
+
+int df_runtime_ubus_bind_audio_jitter(struct df_runtime_ubus *service,
+    struct df_gvs_audio_jitter *jitter) {
+    if (service == NULL || !service->started || jitter == NULL ||
+        service->audio_jitter != NULL) return DF_ERR_INVALID;
+    service->audio_jitter = jitter;
+    return DF_OK;
 }
 
 int df_runtime_ubus_bind_audio_tx(struct df_runtime_ubus *service,
@@ -2048,6 +2077,34 @@ void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *service, bool enabl
             service->auto_unlock_station_id[0] = '\0';
         }
     }
+}
+
+const char *df_runtime_ubus_call_station_id(const struct df_runtime_ubus *service,
+    const struct df_gvs_call_control_status *status) {
+    const struct df_gvs_session *session;
+    const struct df_station_registry *registry;
+    const char *station_id = NULL;
+
+    if (service == NULL || !service->started || status == NULL ||
+        service->access_session == NULL ||
+        service->access_station_registry == NULL)
+        return NULL;
+    session = service->access_session;
+    if ((session->state != DF_GVS_RINGING && session->state != DF_GVS_TALKING) ||
+        session->generation == 0U || session->state != status->session_state ||
+        session->generation != status->session_generation)
+        return NULL;
+    registry = service->access_station_registry;
+    if (registry->items == NULL) return NULL;
+    for (size_t i = 0U; i < registry->count; i++) {
+        const struct df_station *station = &registry->items[i];
+        if (!station->enabled ||
+            memcmp(station->logical_address, session->peer, 6U) != 0)
+            continue;
+        if (station_id != NULL) return NULL;
+        station_id = station->id;
+    }
+    return station_id;
 }
 
 const char *df_runtime_ubus_access_station_id(const struct df_runtime_ubus *service) {
