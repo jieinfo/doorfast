@@ -486,7 +486,10 @@ static int df_runtime_ubus_status_handler(
         df_gvs_call_command_type_name(call_status.command_type) == NULL ||
         df_gvs_call_dispatch_state_name(call_status.dispatch_state) == NULL ||
         df_gvs_call_dispatch_state_name(call_status.handshake_dispatch) == NULL ||
-        df_gvs_call_ack_state_name(call_status.acknowledgement_state) == NULL) {
+        df_gvs_call_ack_state_name(call_status.acknowledgement_state) == NULL ||
+        df_gvs_call_end_reason_name(call_status.end_reason) == NULL ||
+        df_gvs_call_fault_name(call_status.fault) == NULL ||
+        df_gvs_call_timer_name(call_status.timer) == NULL) {
         blob_buf_free(&platform->response);
         return UBUS_STATUS_UNKNOWN_ERROR;
     }
@@ -505,6 +508,23 @@ static int df_runtime_ubus_status_handler(
         df_gvs_call_dispatch_state_name(call_status.dispatch_state));
     blobmsg_add_string(&platform->response, "confirmation",
         df_gvs_call_ack_state_name(call_status.acknowledgement_state));
+    blobmsg_add_string(&platform->response, "timer",
+        df_gvs_call_timer_name(call_status.timer));
+    blobmsg_add_u64(&platform->response, "remaining_ms",
+        call_status.remaining_ms);
+    blobmsg_add_string(&platform->response, "end_reason",
+        df_gvs_call_end_reason_name(call_status.end_reason));
+    blobmsg_add_string(&platform->response, "fault",
+        df_gvs_call_fault_name(call_status.fault));
+    blobmsg_add_u64(&platform->response, "last_generation",
+        call_status.last_generation);
+    {
+        const char *last_station_id =
+            df_runtime_ubus_last_call_station_id(platform->owner,
+                &call_status);
+        blobmsg_add_string(&platform->response, "last_station_id",
+            last_station_id == NULL ? "unknown" : last_station_id);
+    }
     blobmsg_add_u32(&platform->response, "attempts", call_status.attempts);
     blobmsg_add_string(&platform->response, "handshake_mode",
         df_runtime_ubus_handshake_mode(platform->owner));
@@ -2100,6 +2120,28 @@ const char *df_runtime_ubus_call_station_id(const struct df_runtime_ubus *servic
         const struct df_station *station = &registry->items[i];
         if (!station->enabled ||
             memcmp(station->logical_address, session->peer, 6U) != 0)
+            continue;
+        if (station_id != NULL) return NULL;
+        station_id = station->id;
+    }
+    return station_id;
+}
+
+const char *df_runtime_ubus_last_call_station_id(
+    const struct df_runtime_ubus *service,
+    const struct df_gvs_call_control_status *status) {
+    const struct df_station_registry *registry;
+    const char *station_id = NULL;
+    size_t index;
+
+    if (service == NULL || !service->started || status == NULL ||
+        status->last_generation == 0U || service->access_station_registry == NULL)
+        return NULL;
+    registry = service->access_station_registry;
+    if (registry->items == NULL) return NULL;
+    for (index = 0U; index < registry->count; index++) {
+        const struct df_station *station = &registry->items[index];
+        if (memcmp(station->logical_address, status->last_station, 6U) != 0)
             continue;
         if (station_id != NULL) return NULL;
         station_id = station->id;

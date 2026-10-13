@@ -260,10 +260,93 @@ void test_gvs_call_control_reports_confirmation_timeout_once(void) {
         DF_GVS_CALL_CONFIRM_TIMEOUT_MS, &result));
     TEST_ASSERT_INT_EQ(1, result.runtime.acknowledgement_expired);
     TEST_ASSERT_INT_EQ(DF_GVS_TALKING, session.state);
+    {
+        struct df_gvs_call_control_status status;
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
+            &control, &session, &status));
+        TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_NONE, status.end_reason);
+        TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT,
+            status.fault);
+        TEST_ASSERT_INT_EQ(DF_GVS_CALL_TIMER_NONE, status.timer);
+        TEST_ASSERT_INT_EQ(0, (int)status.remaining_ms);
+    }
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
         &control, &session, local, &deadline,
         DF_GVS_CALL_CONFIRM_TIMEOUT_MS + 1U, &result));
     TEST_ASSERT_INT_EQ(0, result.runtime.acknowledgement_expired);
+}
+
+void test_gvs_call_control_records_terminal_timeout_snapshot(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_session session = {.state = DF_GVS_TALKING, .generation = 4,
+        .peer = {0x32, 2, 1, 0, 1, 0}};
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    struct df_gvs_call_control_status status;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control, 0, df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_deadline_arm(
+        &deadline, &session, 0, 10));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
+        &control, &session, local, &deadline, 10, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED, session.state);
+    TEST_ASSERT_INT_EQ(0, deadline.armed);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
+        &control, &session, &status));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_SESSION_TIMEOUT, status.end_reason);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_NONE, status.fault);
+    TEST_ASSERT_INT_EQ(4, (int)status.last_generation);
+    TEST_ASSERT_INT_EQ(0, (int)status.remaining_ms);
+}
+
+void test_gvs_call_control_records_peer_hangup_and_clears_timer(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_gvs_session session = {.state = DF_GVS_TALKING, .generation = 8,
+        .peer = {0x32, 2, 1, 0, 1, 0}};
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_result result;
+    struct df_gvs_call_control_status status;
+    uint8_t packet[64];
+    const uint8_t payload[1] = {1};
+    size_t length;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control, 0, df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_deadline_arm(&deadline, &session, 0, 100));
+    length = control_reply(packet, local, session.peer, 0x02, payload, 1);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_receive(
+        &control, packet, length, local, &session, &deadline, 10, &result));
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED, session.state);
+    TEST_ASSERT_INT_EQ(0, deadline.armed);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
+        &control, &session, &status));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_PEER_HANGUP, status.end_reason);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_NONE, status.fault);
+    TEST_ASSERT_INT_EQ(8, (int)status.last_generation);
+}
+
+void test_gvs_call_control_runtime_reset_is_explicit(void) {
+    struct df_gvs_session session = {.state = DF_GVS_RINGING, .generation = 11,
+        .peer = {0x32, 2, 1, 0, 1, 0}};
+    struct df_gvs_deadline deadline = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_call_control_status status;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(
+        &control, 0, df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_deadline_arm(&deadline, &session, 0, 100));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_runtime_reset(
+        &control, &session, &deadline));
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED, session.state);
+    TEST_ASSERT_INT_EQ(0, deadline.armed);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
+        &control, &session, &status));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_RUNTIME_RESET, status.end_reason);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_RUNTIME_RESET, status.fault);
+    TEST_ASSERT_INT_EQ(11, (int)status.last_generation);
 }
 
 void test_gvs_call_control_rejects_busy_and_stale_submission(void) {

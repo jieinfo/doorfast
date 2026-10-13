@@ -211,6 +211,8 @@ const char *df_runtime_ubus_access_station_id(const struct df_runtime_ubus *);
  * NULL for preview, ended, unknown, ambiguous or stale call identity. */
 const char *df_runtime_ubus_call_station_id(const struct df_runtime_ubus *,
     const struct df_gvs_call_control_status *);
+const char *df_runtime_ubus_last_call_station_id(const struct df_runtime_ubus *,
+    const struct df_gvs_call_control_status *);
 void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *, bool);
 void df_runtime_ubus_set_auto_unlock_delay(struct df_runtime_ubus *, int);
 int df_runtime_ubus_schedule_auto_unlock(struct df_runtime_ubus *,

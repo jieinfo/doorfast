@@ -9,6 +9,86 @@ static bool df_gvs_call_control_dispatch_active(
            state == DF_GVS_CALL_RETRY;
 }
 
+static bool df_gvs_call_control_session_active(enum df_gvs_session_state state) {
+    return state == DF_GVS_PREVIEW || state == DF_GVS_RINGING ||
+           state == DF_GVS_TALKING;
+}
+
+static void df_gvs_call_control_record_terminal(
+    struct df_gvs_call_control *control,
+    enum df_gvs_call_end_reason end_reason, enum df_gvs_call_fault fault,
+    const struct df_gvs_session *session, const uint8_t station[6],
+    uint64_t generation) {
+    if (control == NULL || session == NULL || station == NULL ||
+        generation == 0U) return;
+    control->terminal.end_reason = end_reason;
+    control->terminal.fault = fault;
+    memcpy(control->terminal.station, station, sizeof(control->terminal.station));
+    control->terminal.generation = generation;
+    control->fault = fault;
+}
+
+static void df_gvs_call_control_classify_transition(
+    struct df_gvs_call_control *control,
+    const struct df_gvs_session *previous,
+    const struct df_gvs_session *session,
+    const struct df_gvs_call_control_result *result) {
+    enum df_gvs_call_fault fault = DF_GVS_CALL_FAULT_NONE;
+
+    if (control == NULL || previous == NULL || session == NULL || result == NULL)
+        return;
+    /* Rejected acknowledgements include stale, malformed, and unmatched
+     * frames. The receive path has no distinct explicit peer-refusal signal. */
+    if (result->runtime.acknowledgement_expired)
+        fault = DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT;
+    if (result->runtime.receive.preempted_session) {
+        if (df_gvs_call_control_session_active(previous->state)) {
+            df_gvs_call_control_record_terminal(control,
+                DF_GVS_CALL_END_PREEMPTED, DF_GVS_CALL_FAULT_PREEMPTED,
+                previous, previous->peer, previous->generation);
+        }
+        control->fault = DF_GVS_CALL_FAULT_NONE;
+        control->observed_generation = session->generation;
+        return;
+    }
+    if (result->runtime.session_timed_out &&
+        df_gvs_call_control_session_active(previous->state)) {
+        df_gvs_call_control_record_terminal(control,
+            DF_GVS_CALL_END_SESSION_TIMEOUT, DF_GVS_CALL_FAULT_NONE,
+            previous, previous->peer, previous->generation);
+        control->observed_generation = session->generation;
+        return;
+    }
+    if (result->runtime.receive.ended_transition &&
+        df_gvs_call_control_session_active(previous->state) &&
+        session->state == DF_GVS_ENDED) {
+        df_gvs_call_control_record_terminal(control,
+            result->runtime.receive.local_hangup
+                ? DF_GVS_CALL_END_LOCAL_HANGUP
+                : DF_GVS_CALL_END_PEER_HANGUP,
+            DF_GVS_CALL_FAULT_NONE, previous, previous->peer,
+            previous->generation);
+        control->observed_generation = session->generation;
+        return;
+    }
+    if (df_gvs_call_control_session_active(previous->state) &&
+        session->state == DF_GVS_ENDED) {
+        df_gvs_call_control_record_terminal(control,
+            DF_GVS_CALL_END_UNKNOWN, fault, previous, previous->peer,
+            previous->generation);
+        control->observed_generation = session->generation;
+        return;
+    }
+    if (fault != DF_GVS_CALL_FAULT_NONE) {
+        control->fault = fault;
+    } else if (!df_gvs_call_control_session_active(previous->state) &&
+               df_gvs_call_control_session_active(session->state) &&
+               previous->generation != session->generation) {
+        control->fault = DF_GVS_CALL_FAULT_NONE;
+    }
+    control->observed_generation = session->generation;
+}
+
 int df_gvs_call_control_init(struct df_gvs_call_control *control,
     uint64_t now_ms, df_gvs_header_provider_fn provide_fields,
     void *fields_context) {
@@ -23,6 +103,9 @@ int df_gvs_call_control_init(struct df_gvs_call_control *control,
     control->handshake_sender = control->sender;
     df_gvs_call_dispatch_init(&control->handshake_dispatch, now_ms);
     control->handshake.last_now_ms = now_ms;
+    control->terminal.end_reason = DF_GVS_CALL_END_NONE;
+    control->terminal.fault = DF_GVS_CALL_FAULT_NONE;
+    control->fault = DF_GVS_CALL_FAULT_NONE;
     return DF_OK;
 }
 
@@ -131,6 +214,7 @@ int df_gvs_call_control_step(
     struct df_gvs_deadline next_deadline;
     struct df_gvs_call_control_result next_result = {0};
     enum df_gvs_call_dispatch_state previous;
+    struct df_gvs_session previous_session;
 
     if (control == NULL || session == NULL || local == NULL ||
         deadline == NULL || result == NULL) {
@@ -139,6 +223,7 @@ int df_gvs_call_control_step(
     next = *control;
     next_session = *session;
     next_deadline = *deadline;
+    previous_session = next_session;
     if (df_gvs_handshake_tick(&next.handshake, &next_session, local, now_ms,
                               &next_result.handshake) != DF_OK)
         return DF_ERR_INVALID;
@@ -149,6 +234,8 @@ int df_gvs_call_control_step(
             now_ms, &next_result.runtime) != DF_OK) {
         return DF_ERR_INVALID;
     }
+    df_gvs_call_control_classify_transition(&next, &previous_session,
+        &next_session, &next_result);
     if (!next.handshake.active &&
         (next_session.state == DF_GVS_RINGING ||
          next_session.state == DF_GVS_TALKING ||
@@ -196,6 +283,13 @@ int df_gvs_call_control_step(
             next.dispatch.state == DF_GVS_CALL_TIMEOUT;
         next_result.dispatch_cancelled =
             next.dispatch.state == DF_GVS_CALL_CANCELLED;
+        if (next_result.dispatch_failed)
+            next.fault = DF_GVS_CALL_FAULT_DISPATCH_FAILED;
+        else if (next_result.dispatch_timed_out)
+            next.fault = DF_GVS_CALL_FAULT_DISPATCH_TIMEOUT;
+        else if (next_result.dispatch_cancelled &&
+                 !next_result.runtime.receive.preempted_session)
+            next.fault = DF_GVS_CALL_FAULT_CANCELLED;
     }
     if (previous != DF_GVS_CALL_SENT &&
         next.dispatch.state == DF_GVS_CALL_SENT) {
@@ -242,6 +336,7 @@ int df_gvs_call_control_receive(
     struct df_gvs_session next_session;
     struct df_gvs_deadline next_deadline;
     struct df_gvs_call_control_result next_result = {0};
+    struct df_gvs_session previous_session;
 
     struct df_gvs_frame frame;
     struct df_event event;
@@ -256,6 +351,7 @@ int df_gvs_call_control_receive(
     next = *control;
     next_session = *session;
     next_deadline = *deadline;
+    previous_session = next_session;
     if (df_gvs_frame_parse(data, length, &frame, &event) != DF_OK)
         return DF_ERR_INVALID;
     if (frame.family == 3 && (frame.opcode == 0x51 || frame.opcode == 0x52)) {
@@ -275,6 +371,8 @@ int df_gvs_call_control_receive(
             &next_deadline, now_ms, &next_result.runtime) != DF_OK) {
         return DF_ERR_INVALID;
     }
+    df_gvs_call_control_classify_transition(&next, &previous_session,
+        &next_session, &next_result);
     *control = next;
     *session = next_session;
     *deadline = next_deadline;
@@ -331,11 +429,51 @@ const char *df_gvs_call_ack_state_name(enum df_gvs_call_ack_state state) {
     }
 }
 
-int df_gvs_call_control_status(
+const char *df_gvs_call_end_reason_name(enum df_gvs_call_end_reason reason) {
+    switch (reason) {
+    case DF_GVS_CALL_END_NONE: return "none";
+    case DF_GVS_CALL_END_LOCAL_HANGUP: return "local_hangup";
+    case DF_GVS_CALL_END_PEER_HANGUP: return "peer_hangup";
+    case DF_GVS_CALL_END_SESSION_TIMEOUT: return "session_timeout";
+    case DF_GVS_CALL_END_CONFIRMATION_TIMEOUT: return "confirmation_timeout";
+    case DF_GVS_CALL_END_PREEMPTED: return "preempted";
+    case DF_GVS_CALL_END_RUNTIME_RESET: return "runtime_reset";
+    case DF_GVS_CALL_END_UNKNOWN: return "unknown";
+    default: return NULL;
+    }
+}
+
+const char *df_gvs_call_fault_name(enum df_gvs_call_fault fault) {
+    switch (fault) {
+    case DF_GVS_CALL_FAULT_NONE: return "none";
+    case DF_GVS_CALL_FAULT_DISPATCH_FAILED: return "dispatch_failed";
+    case DF_GVS_CALL_FAULT_DISPATCH_TIMEOUT: return "dispatch_timeout";
+    case DF_GVS_CALL_FAULT_CONFIRMATION_REJECTED: return "confirmation_rejected";
+    case DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT: return "confirmation_timeout";
+    case DF_GVS_CALL_FAULT_PREEMPTED: return "preempted";
+    case DF_GVS_CALL_FAULT_CANCELLED: return "cancelled";
+    case DF_GVS_CALL_FAULT_RUNTIME_RESET: return "runtime_reset";
+    case DF_GVS_CALL_FAULT_UNKNOWN: return "unknown";
+    default: return NULL;
+    }
+}
+
+const char *df_gvs_call_timer_name(enum df_gvs_call_timer timer) {
+    switch (timer) {
+    case DF_GVS_CALL_TIMER_NONE: return "none";
+    case DF_GVS_CALL_TIMER_CONFIRMATION: return "confirmation";
+    case DF_GVS_CALL_TIMER_SESSION: return "session";
+    default: return NULL;
+    }
+}
+
+int df_gvs_call_control_status_with_deadline(
     const struct df_gvs_call_control *control,
     const struct df_gvs_session *session,
+    const struct df_gvs_deadline *deadline,
     struct df_gvs_call_control_status *status) {
     struct df_gvs_call_control_status next;
+    uint64_t now_ms;
 
     if (control == NULL || session == NULL || status == NULL ||
         df_gvs_session_state_name(session->state) == NULL ||
@@ -359,6 +497,56 @@ int df_gvs_call_control_status(
         ? control->handshake.next_probe_ms - control->handshake.last_now_ms : 0;
     next.handshake_dropped = control->handshake_dropped;
     next.handshake_dispatch = control->handshake_dispatch.state;
+    next.end_reason = df_gvs_call_control_session_active(session->state)
+        ? DF_GVS_CALL_END_NONE : control->terminal.end_reason;
+    next.fault = control->fault;
+    memcpy(next.last_station, control->terminal.station,
+        sizeof(next.last_station));
+    next.last_generation = control->terminal.generation;
+    next.timer = DF_GVS_CALL_TIMER_NONE;
+    next.remaining_ms = 0U;
+    now_ms = control->acknowledgement.last_now_ms;
+    if (control->dispatch.last_now_ms > now_ms)
+        now_ms = control->dispatch.last_now_ms;
+    if (control->handshake.last_now_ms > now_ms)
+        now_ms = control->handshake.last_now_ms;
+    if (df_gvs_call_control_session_active(session->state) &&
+        control->acknowledgement.state == DF_GVS_CALL_ACK_WAITING) {
+        next.timer = DF_GVS_CALL_TIMER_CONFIRMATION;
+        next.remaining_ms = now_ms < control->acknowledgement.deadline_ms
+            ? control->acknowledgement.deadline_ms - now_ms : 0U;
+    } else if (df_gvs_call_control_session_active(session->state) &&
+               deadline != NULL && deadline->armed) {
+        next.timer = DF_GVS_CALL_TIMER_SESSION;
+        if (df_gvs_deadline_remaining(deadline, now_ms,
+                &next.remaining_ms) != DF_OK)
+            return DF_ERR_INVALID;
+    }
     *status = next;
+    return DF_OK;
+}
+
+int df_gvs_call_control_status(
+    const struct df_gvs_call_control *control,
+    const struct df_gvs_session *session,
+    struct df_gvs_call_control_status *status) {
+    return df_gvs_call_control_status_with_deadline(control, session, NULL,
+        status);
+}
+
+int df_gvs_call_control_runtime_reset(struct df_gvs_call_control *control,
+    struct df_gvs_session *session, struct df_gvs_deadline *deadline) {
+    bool ended;
+
+    if (control == NULL || session == NULL || deadline == NULL ||
+        !df_gvs_call_control_session_active(session->state))
+        return DF_ERR_INVALID;
+    df_gvs_call_control_record_terminal(control,
+        DF_GVS_CALL_END_RUNTIME_RESET, DF_GVS_CALL_FAULT_RUNTIME_RESET,
+        session, session->peer, session->generation);
+    if (df_gvs_session_abort(session, &ended) != DF_OK || !ended)
+        return DF_ERR_INVALID;
+    df_gvs_deadline_cancel(deadline);
+    control->observed_generation = session->generation;
     return DF_OK;
 }
