@@ -37,6 +37,7 @@ struct df_media_session_manager {
     struct df_media_station_config_v3 *stations;
     uint64_t *station_cooldown_until_ms;
     struct df_media_session *sessions;
+    struct df_media_session_diagnostics_v2 *last_results;
     size_t capacity;
     size_t active_count;
     uint64_t next_generation;

@@ -19,6 +19,56 @@ struct runtime_fake {
 
 static struct runtime_fake runtime_fake_instance;
 
+static int runtime_invalid_diagnostics_v2(const void *instance, uint64_t now_ms,
+    struct df_media_module_diagnostics_v2 *status) {
+    (void)instance; (void)now_ms;
+    status->required_session_count = 2U;
+    status->session_count = 2U;
+    return DF_OK;
+}
+
+void test_runtime_media_module_diagnostics_optional_v2(void) {
+    struct df_runtime_media_module module = {0};
+    struct df_media_session_diagnostics_v2 current[1], last[1];
+    struct df_media_module_diagnostics_v2 status = {
+        .sessions = current, .session_count = 1U,
+        .last_results = last, .last_result_count = 1U,
+    };
+    struct df_media_module_diagnostics_api_v2 invalid =
+        df_media_module_diagnostics_api_v2;
+    /* A working v3 module with no extension must report unavailable; the
+     * bridge leaves enum fields unknown and omits remaining_ms. */
+    module.api = &df_media_module_api_v3;
+    module.instance = &runtime_fake_instance;
+    module.available = true;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_diagnostics_v2(&module, 100U, &status));
+    TEST_ASSERT_INT_EQ(0, status.session_count);
+    TEST_ASSERT_INT_EQ(0, status.last_result_count);
+    invalid.abi_version = 1U;
+    module.diagnostics_api_v2 = &invalid;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_diagnostics_v2(&module, 100U, &status));
+    invalid.abi_version = 2U;
+    invalid.struct_size--;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_diagnostics_v2(&module, 100U, &status));
+    invalid.struct_size = sizeof(invalid);
+    invalid.status = runtime_invalid_diagnostics_v2;
+    status.session_count = 1U;
+    status.last_result_count = 1U;
+    TEST_ASSERT_INT_EQ(DF_ERR_IO,
+        df_runtime_media_module_diagnostics_v2(&module, 100U, &status));
+    TEST_ASSERT_INT_EQ(0, status.session_count);
+    TEST_ASSERT_INT_EQ(0, status.last_result_count);
+    TEST_ASSERT_INT_EQ(0, strcmp("unknown",
+        df_media_timer_name((enum df_media_timer)999)));
+    TEST_ASSERT_INT_EQ(0, strcmp("unknown",
+        df_media_end_reason_name((enum df_media_end_reason)999)));
+    TEST_ASSERT_INT_EQ(0, strcmp("unknown",
+        df_media_failure_reason_name((enum df_media_failure_reason)999)));
+}
+
 static void *runtime_fake_create(
     const struct df_media_module_config_v3 *config,
     const struct df_media_module_callbacks_v3 *callbacks) {

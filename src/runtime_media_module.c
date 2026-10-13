@@ -29,6 +29,21 @@ df_runtime_media_module_resolve_diagnostics(void *handle) {
     return api;
 }
 
+static bool df_runtime_media_diagnostics_v2_valid(
+    const struct df_media_module_diagnostics_api_v2 *api) {
+    return api != NULL &&
+        api->abi_version == DF_MEDIA_MODULE_DIAGNOSTICS_ABI_VERSION_V2 &&
+        api->struct_size == sizeof(*api) && api->status != NULL;
+}
+
+static const struct df_media_module_diagnostics_api_v2 *
+df_runtime_media_module_resolve_diagnostics_v2(void *handle) {
+    const struct df_media_module_diagnostics_api_v2 *api = NULL;
+    if (handle == NULL) return NULL;
+    *(void **)(&api) = dlsym(handle, "df_media_module_diagnostics_api_v2");
+    return df_runtime_media_diagnostics_v2_valid(api) ? api : NULL;
+}
+
 int df_runtime_media_module_start_with_api(struct df_runtime_media_module *module,
     const struct df_media_module_api_v3 *api,
     const struct df_media_module_config_v3 *config,
@@ -87,6 +102,8 @@ int df_runtime_media_module_start(struct df_runtime_media_module *module,
     } else {
         module->diagnostics_api =
             df_runtime_media_module_resolve_diagnostics(handle);
+        module->diagnostics_api_v2 =
+            df_runtime_media_module_resolve_diagnostics_v2(handle);
     }
     return result;
 }
@@ -256,6 +273,102 @@ int df_runtime_media_module_diagnostics(
             &required) != DF_OK) return DF_ERR_IO;
     if (required > capacity) return DF_ERR_IO;
     *count = copied;
+    return DF_OK;
+}
+
+const char *df_media_timer_name(enum df_media_timer value) {
+    switch (value) {
+    case DF_MEDIA_TIMER_NONE: return "none";
+    case DF_MEDIA_TIMER_CONFIRMATION: return "confirmation";
+    case DF_MEDIA_TIMER_SESSION: return "session";
+    case DF_MEDIA_TIMER_FIRST_FRAME: return "first_frame";
+    case DF_MEDIA_TIMER_RECONNECT: return "reconnect";
+    default: return "unknown";
+    }
+}
+
+const char *df_media_end_reason_name(enum df_media_end_reason value) {
+    switch (value) {
+    case DF_MEDIA_END_NONE: return "none";
+    case DF_MEDIA_END_LOCAL_HANGUP: return "local_hangup";
+    case DF_MEDIA_END_PEER_HANGUP: return "peer_hangup";
+    case DF_MEDIA_END_SESSION_TIMEOUT: return "session_timeout";
+    case DF_MEDIA_END_CONFIRMATION_TIMEOUT: return "confirmation_timeout";
+    case DF_MEDIA_END_PREEMPTED: return "preempted";
+    case DF_MEDIA_END_RUNTIME_RESET: return "runtime_reset";
+    default: return "unknown";
+    }
+}
+
+const char *df_media_failure_reason_name(enum df_media_failure_reason value) {
+    switch (value) {
+    case DF_MEDIA_FAILURE_NONE: return "none";
+    case DF_MEDIA_FAILURE_DISPATCH_FAILED: return "dispatch_failed";
+    case DF_MEDIA_FAILURE_DISPATCH_TIMEOUT: return "dispatch_timeout";
+    case DF_MEDIA_FAILURE_CONFIRMATION_REJECTED: return "confirmation_rejected";
+    case DF_MEDIA_FAILURE_CONFIRMATION_TIMEOUT: return "confirmation_timeout";
+    case DF_MEDIA_FAILURE_FIRST_FRAME_TIMEOUT: return "first_frame_timeout";
+    case DF_MEDIA_FAILURE_SOURCE_STALLED: return "source_stalled";
+    case DF_MEDIA_FAILURE_ENCODER_FAILED: return "encoder_failed";
+    case DF_MEDIA_FAILURE_PUBLISHER_FAILED: return "publisher_failed";
+    case DF_MEDIA_FAILURE_CAPACITY_BUSY: return "capacity_busy";
+    case DF_MEDIA_FAILURE_PREEMPTED: return "preempted";
+    case DF_MEDIA_FAILURE_CANCELLED: return "cancelled";
+    case DF_MEDIA_FAILURE_RUNTIME_RESET: return "runtime_reset";
+    default: return "unknown";
+    }
+}
+
+static bool df_runtime_media_diagnostic_entry_valid(
+    const struct df_media_session_diagnostics_v2 *entry, bool terminal) {
+    return entry->station_id[0] != '\0' &&
+        memchr(entry->station_id, '\0', sizeof(entry->station_id)) != NULL &&
+        entry->generation != 0U &&
+        entry->timer >= DF_MEDIA_TIMER_NONE &&
+        entry->timer <= DF_MEDIA_TIMER_UNKNOWN &&
+        entry->end_reason >= DF_MEDIA_END_NONE &&
+        entry->end_reason <= DF_MEDIA_END_UNKNOWN &&
+        entry->failure_reason >= DF_MEDIA_FAILURE_NONE &&
+        entry->failure_reason <= DF_MEDIA_FAILURE_UNKNOWN &&
+        (entry->timer != DF_MEDIA_TIMER_NONE || entry->remaining_ms == 0U) &&
+        (terminal ? (entry->end_reason != DF_MEDIA_END_NONE &&
+                     entry->timer == DF_MEDIA_TIMER_NONE &&
+                     entry->remaining_ms == 0U) :
+                    entry->end_reason == DF_MEDIA_END_NONE);
+}
+
+int df_runtime_media_module_diagnostics_v2(
+    const struct df_runtime_media_module *module, uint64_t now_ms,
+    struct df_media_module_diagnostics_v2 *status) {
+    struct df_media_module_diagnostics_v2 next;
+    size_t capacity, last_capacity;
+    size_t index;
+
+    if (status == NULL) return DF_ERR_INVALID;
+    next = *status;
+    capacity = status->sessions != NULL ? status->session_count : 0U;
+    last_capacity = status->last_results != NULL ? status->last_result_count : 0U;
+    status->session_count = status->required_session_count = 0U;
+    status->last_result_count = status->required_last_result_count = 0U;
+    if (df_runtime_media_module_available(module) != DF_OK ||
+        !df_runtime_media_diagnostics_v2_valid(module->diagnostics_api_v2))
+        return DF_ERR_INVALID;
+    if (module->diagnostics_api_v2->status(module->instance, now_ms, &next) !=
+            DF_OK || next.sessions != status->sessions ||
+        next.last_results != status->last_results ||
+        next.session_count > capacity || next.required_session_count > capacity ||
+        next.session_count != next.required_session_count ||
+        next.last_result_count > last_capacity ||
+        next.required_last_result_count > last_capacity ||
+        next.last_result_count != next.required_last_result_count)
+        return DF_ERR_IO;
+    for (index = 0U; index < next.session_count; index++)
+        if (!df_runtime_media_diagnostic_entry_valid(&next.sessions[index],
+                false)) return DF_ERR_IO;
+    for (index = 0U; index < next.last_result_count; index++)
+        if (!df_runtime_media_diagnostic_entry_valid(&next.last_results[index],
+                true)) return DF_ERR_IO;
+    *status = next;
     return DF_OK;
 }
 

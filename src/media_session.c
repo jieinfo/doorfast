@@ -33,6 +33,7 @@ static void df_media_session_fail_encoder(struct df_media_session *session) {
     df_media_session_clear_publication(session);
     session->state = DF_MEDIA_SESSION_FAILED;
     session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
+    session->failure_reason = DF_MEDIA_FAILURE_ENCODER_FAILED;
 }
 
 static int df_media_session_recover_preview_encoder(
@@ -57,6 +58,7 @@ static int df_media_session_recover_preview_encoder(
     else
         session->state = DF_MEDIA_SESSION_PUBLISHING;
     session->last_error = DF_MEDIA_ERROR_NONE;
+    session->failure_reason = DF_MEDIA_FAILURE_ENCODER_FAILED;
     return DF_OK;
 }
 
@@ -346,6 +348,8 @@ int df_media_session_upgrade_to_call(struct df_media_session *session,
     session->state = DF_MEDIA_SESSION_REQUESTING;
     session->last_error = DF_MEDIA_ERROR_NONE;
     session->viewer_active = false;
+    session->failure_reason = DF_MEDIA_FAILURE_NONE;
+    session->pending_end_reason = DF_MEDIA_END_NONE;
     return DF_OK;
 }
 
@@ -496,5 +500,49 @@ int df_media_session_push_jpeg(struct df_media_session *session,
     session->state = session->viewer_active ? DF_MEDIA_SESSION_VIEWING :
         DF_MEDIA_SESSION_PUBLISHING;
     session->last_error = DF_MEDIA_ERROR_NONE;
+    session->failure_reason = DF_MEDIA_FAILURE_NONE;
     return DF_OK;
+}
+
+void df_media_session_diagnostics(const struct df_media_session *session,
+    uint64_t now_ms, struct df_media_session_diagnostics_v2 *entry) {
+    const struct df_gvs_monitor *monitor;
+    uint64_t gate = 0U;
+
+    if (session == NULL || entry == NULL) return;
+    memset(entry, 0, sizeof(*entry));
+    (void)snprintf(entry->station_id, sizeof(entry->station_id), "%s",
+        session->station_id);
+    entry->generation = session->generation;
+    entry->failure_reason = session->failure_reason;
+    switch (session->last_error) {
+    case DF_MEDIA_ERROR_NONE: break;
+    case DF_MEDIA_ERROR_ENCODER_FAILED:
+        entry->failure_reason = DF_MEDIA_FAILURE_ENCODER_FAILED; break;
+    case DF_MEDIA_ERROR_CAPACITY_BUSY:
+        entry->failure_reason = DF_MEDIA_FAILURE_CAPACITY_BUSY; break;
+    case DF_MEDIA_ERROR_VIDEO_STALLED:
+        entry->failure_reason = DF_MEDIA_FAILURE_SOURCE_STALLED; break;
+    case DF_MEDIA_ERROR_SESSION_PREEMPTED:
+        entry->failure_reason = DF_MEDIA_FAILURE_PREEMPTED; break;
+    default: entry->failure_reason = DF_MEDIA_FAILURE_UNKNOWN; break;
+    }
+    monitor = &session->monitor;
+    if (session->pending_end_reason != DF_MEDIA_END_NONE) return;
+    if (monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO &&
+        !monitor->media_ready && monitor->first_frame_deadline_ms != 0U) {
+        entry->timer = DF_MEDIA_TIMER_FIRST_FRAME;
+        gate = monitor->first_frame_deadline_ms;
+    } else if ((monitor->state == DF_GVS_MONITOR_STOPPING &&
+                monitor->retry_after_stop && monitor->stop_sent) ||
+               (monitor->state == DF_GVS_MONITOR_REQUESTING &&
+                (monitor->retry_waiting ||
+                 (monitor->request_attempts == 0U &&
+                  (monitor->peer_stop_seen ||
+                   (monitor->cooldown_until_ms != 0U &&
+                    monitor->next_action_ms == monitor->cooldown_until_ms)))))) {
+        entry->timer = DF_MEDIA_TIMER_RECONNECT;
+        gate = monitor->next_action_ms;
+    }
+    entry->remaining_ms = gate > now_ms ? gate - now_ms : 0U;
 }

@@ -1800,6 +1800,25 @@ int df_runtime_ubus_bind_media(struct df_runtime_ubus *service,
             service->media = NULL;
             return DF_ERR_IO;
         }
+        service->media_diagnostics_v2_entries = calloc(
+            media->session_snapshot_capacity,
+            sizeof(*service->media_diagnostics_v2_entries));
+        service->media_last_result_entries = calloc(
+            media->session_snapshot_capacity,
+            sizeof(*service->media_last_result_entries));
+        if (service->media_diagnostics_v2_entries == NULL ||
+            service->media_last_result_entries == NULL) {
+            free(service->media_session_entries);
+            free(service->media_diagnostics_entries);
+            free(service->media_diagnostics_v2_entries);
+            free(service->media_last_result_entries);
+            service->media_session_entries = NULL;
+            service->media_diagnostics_entries = NULL;
+            service->media_diagnostics_v2_entries = NULL;
+            service->media_last_result_entries = NULL;
+            service->media = NULL;
+            return DF_ERR_IO;
+        }
         service->media_session_capacity = media->session_snapshot_capacity;
     }
     memcpy(service->media_credentials_path, credentials_path, length + 1U);
@@ -1971,6 +1990,22 @@ int df_runtime_ubus_read_media_status(struct df_runtime_ubus *service,
                 next.diagnostics_count = diagnostic_count;
             }
         }
+        if (service->media_diagnostics_v2_entries != NULL &&
+            service->media_last_result_entries != NULL) {
+            struct df_media_module_diagnostics_v2 diagnostics = {
+                .sessions = service->media_diagnostics_v2_entries,
+                .session_count = service->media_session_capacity,
+                .last_results = service->media_last_result_entries,
+                .last_result_count = service->media_session_capacity,
+            };
+            if (df_runtime_media_module_diagnostics_v2(service->media,
+                    service->last_now_ms, &diagnostics) == DF_OK) {
+                next.diagnostics_v2 = diagnostics.sessions;
+                next.diagnostics_v2_count = diagnostics.session_count;
+                next.last_results = diagnostics.last_results;
+                next.last_result_count = diagnostics.last_result_count;
+            }
+        }
     }
     if (df_runtime_ubus_read_credential_status(
             service->media_credentials_path, &credentials_status) != DF_OK)
@@ -2063,6 +2098,8 @@ void df_runtime_ubus_stop(struct df_runtime_ubus *service) {
     free(service->station_route_entries);
     free(service->media_session_entries);
     free(service->media_diagnostics_entries);
+    free(service->media_diagnostics_v2_entries);
+    free(service->media_last_result_entries);
     memset(service, 0, sizeof(*service));
 }
 

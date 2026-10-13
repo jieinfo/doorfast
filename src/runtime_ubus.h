@@ -79,6 +79,10 @@ struct df_runtime_media_status {
     size_t session_count;
     const struct df_media_session_diagnostics_v1 *diagnostics;
     size_t diagnostics_count;
+    const struct df_media_session_diagnostics_v2 *diagnostics_v2;
+    size_t diagnostics_v2_count;
+    const struct df_media_session_diagnostics_v2 *last_results;
+    size_t last_result_count;
     bool rtsp_password_set;
     bool has_credential_text;
 };
@@ -156,6 +160,8 @@ struct df_runtime_ubus {
     struct df_runtime_media_module *media;
     struct df_media_session_status_v3 *media_session_entries;
     struct df_media_session_diagnostics_v1 *media_diagnostics_entries;
+    struct df_media_session_diagnostics_v2 *media_diagnostics_v2_entries;
+    struct df_media_session_diagnostics_v2 *media_last_result_entries;
     size_t media_session_capacity;
     char media_credentials_path[DF_RUNTIME_UBUS_MEDIA_PATH_MAX];
     const uint8_t *elevator_identity;
