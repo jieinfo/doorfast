@@ -159,6 +159,77 @@ static void manager_assert_current_diagnostic(
     TEST_ASSERT_INT_EQ(manager->sessions[0].generation, entry.generation);
 }
 
+/* Run the real monitor overflow branches, preserving any earlier evidenced
+ * first-frame cause instead of manufacturing an error-free terminal result. */
+void test_media_session_manager_monitor_overflow_diagnostic(void) {
+    static const struct df_media_station_config_v3 station = {
+        .id = "gate_main", .stream_name = "doorfast_gate_main", .enabled = true,
+        .logical_address = {0x32U, 2U, 1U, 0U, 2U, 0U}, .ipv4 = 0x01020304U,
+    };
+    static const uint8_t peer_stop[] = {1U};
+    static const uint8_t confirmation[] = {0x1eU, 0x00U, 0x01U};
+    unsigned scenario;
+
+    for (scenario = 0U; scenario < 2U; scenario++) {
+        struct df_media_module_config_v3 config;
+        struct df_media_module_callbacks_v3 callbacks;
+        struct manager_trace trace = {.available_kib = 4096U};
+        struct df_media_session_manager manager = {0};
+        struct df_media_session_diagnostics_v2 last;
+        struct df_media_module_diagnostics_v2 diagnostics = {
+            .last_results = &last, .last_result_count = 1U,
+        };
+        struct df_gvs_frame frame = {.family = 0x03U};
+        uint64_t generation = 0U;
+
+        manager_fixture(&config, &callbacks, &trace);
+        config.stations = &station;
+        config.station_count = 1U;
+        config.max_encoders = 1U;
+        config.local[0] = 0x61U;
+        config.first_frame_timeout_s = 1U;
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_init(&manager, &config, &callbacks));
+        manager.next_generation = UINT64_MAX - 1U;
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+            "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &generation));
+        TEST_ASSERT_INT_EQ(1, generation == UINT64_MAX);
+        memcpy(frame.source, station.logical_address, sizeof(frame.source));
+        memcpy(frame.destination, config.local, sizeof(frame.destination));
+        if (scenario == 0U) {
+            frame.opcode = 0x02U;
+            frame.payload = peer_stop;
+            frame.payload_length = sizeof(peer_stop);
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(
+                &manager, &frame, station.ipv4, 101U));
+        } else {
+            frame.opcode = 0x84U;
+            frame.payload = confirmation;
+            frame.payload_length = sizeof(confirmation);
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(
+                &manager, &frame, station.ipv4, 101U));
+            TEST_ASSERT_INT_EQ(DF_OK,
+                df_media_session_manager_tick(&manager, 1101U));
+            TEST_ASSERT_INT_EQ(DF_OK,
+                df_media_session_manager_tick(&manager, 1102U));
+            TEST_ASSERT_INT_EQ(DF_OK,
+                df_media_session_manager_tick(&manager, 2102U));
+        }
+        TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_module_diagnostics_api_v2.status(
+            &manager, 2200U, &diagnostics));
+        TEST_ASSERT_INT_EQ(1, diagnostics.last_result_count);
+        TEST_ASSERT_INT_EQ(1, last.generation == UINT64_MAX);
+        TEST_ASSERT_INT_EQ(0, strcmp("gate_main", last.station_id));
+        TEST_ASSERT_INT_EQ(DF_MEDIA_END_UNKNOWN, last.end_reason);
+        TEST_ASSERT_INT_EQ(scenario == 0U ? DF_MEDIA_FAILURE_UNKNOWN :
+            DF_MEDIA_FAILURE_FIRST_FRAME_TIMEOUT, last.failure_reason);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_TIMER_NONE, last.timer);
+        TEST_ASSERT_INT_EQ(0, last.remaining_ms);
+        df_media_session_manager_destroy(&manager);
+    }
+}
+
 void test_media_session_manager_diagnostics_capacity(void) {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;

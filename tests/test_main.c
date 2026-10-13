@@ -234,6 +234,7 @@ void test_media_session_manager_isolates_encoder_exit(void);
 void test_media_session_manager_recovers_preview_encoder_exit(void);
 void test_media_video_reject_reason_names(void);
 void test_media_session_manager_observability(void);
+void test_media_session_manager_monitor_overflow_diagnostic(void);
 void test_media_session_manager_diagnostics_capacity(void);
 void test_runtime_media_module_diagnostics_optional_v2(void);
 void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void);
@@ -433,6 +434,7 @@ int main(int argc, char **argv) {
     if (capture_result >= 0) return capture_result;
     if (argc == 2 && strcmp(argv[1], "--media-observability") == 0) {
         test_media_session_manager_observability();
+        test_media_session_manager_monitor_overflow_diagnostic();
         test_media_session_manager_diagnostics_capacity();
         test_runtime_media_module_diagnostics_optional_v2();
         test_media_session_manager_cleans_busy_preview_after_three_rejections();
@@ -467,6 +469,7 @@ int main(int argc, char **argv) {
     }
     test_runtime_ubus_call_station_identity_uses_current_main_call();
     test_media_session_manager_observability();
+    test_media_session_manager_monitor_overflow_diagnostic();
     test_media_session_manager_diagnostics_capacity();
     test_runtime_media_module_diagnostics_optional_v2();
     test_runtime_audio_service_advances_deadlines_and_retries();

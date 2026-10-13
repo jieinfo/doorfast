@@ -245,7 +245,12 @@ static int df_media_session_manager_release_failed(
         case DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT:
             session->failure_reason = DF_MEDIA_FAILURE_FIRST_FRAME_TIMEOUT;
             break;
-        default: break;
+        default:
+            if (session->monitor.failure != DF_GVS_MONITOR_FAILURE_NONE &&
+                session->failure_reason == DF_MEDIA_FAILURE_NONE &&
+                session->last_error == DF_MEDIA_ERROR_NONE)
+                session->failure_reason = DF_MEDIA_FAILURE_UNKNOWN;
+            break;
         }
     }
     if (session->last_error != DF_MEDIA_ERROR_NONE) {
