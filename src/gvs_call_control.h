@@ -21,8 +21,6 @@ struct df_gvs_call_control {
     struct df_gvs_call_terminal terminal;
     enum df_gvs_call_fault fault;
     uint64_t observed_generation;
-    bool local_hangup_pending;
-    uint64_t local_hangup_generation;
 };
 
 struct df_gvs_call_control_result {

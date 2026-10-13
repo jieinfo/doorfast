@@ -41,17 +41,14 @@ static void df_gvs_call_control_classify_transition(
         return;
     /* Rejected acknowledgements include stale, malformed, and unmatched
      * frames. The receive path has no distinct explicit peer-refusal signal. */
-    if (result->runtime.acknowledgement_expired) {
+    if (result->runtime.acknowledgement_expired)
         fault = DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT;
-        control->local_hangup_pending = false;
-    }
     if (result->handshake.disconnected &&
         df_gvs_call_control_session_active(previous->state)) {
         df_gvs_call_control_record_terminal(control,
             DF_GVS_CALL_END_HEARTBEAT_TIMEOUT,
             DF_GVS_CALL_FAULT_HEARTBEAT_TIMEOUT, previous, previous->peer,
             previous->generation);
-        control->local_hangup_pending = false;
         control->observed_generation = session->generation;
         return;
     }
@@ -77,16 +74,11 @@ static void df_gvs_call_control_classify_transition(
         df_gvs_call_control_session_active(previous->state) &&
         session->state == DF_GVS_ENDED) {
         df_gvs_call_control_record_terminal(control,
-            (result->runtime.receive.local_hangup ||
-             (control->local_hangup_pending &&
-              control->local_hangup_generation == previous->generation &&
-              control->dispatch.state == DF_GVS_CALL_SENT &&
-              control->dispatch.command.type == DF_GVS_CALL_COMMAND_HANGUP))
+            result->runtime.receive.local_hangup
                 ? DF_GVS_CALL_END_LOCAL_HANGUP
                 : DF_GVS_CALL_END_PEER_HANGUP,
             DF_GVS_CALL_FAULT_NONE, previous, previous->peer,
             previous->generation);
-        control->local_hangup_pending = false;
         control->observed_generation = session->generation;
         return;
     }
@@ -218,18 +210,12 @@ int df_gvs_call_control_submit_hangup(
     uint64_t expected_generation, const uint8_t local[6], uint8_t reason,
     uint64_t now_ms) {
     struct df_gvs_call_command command;
-    int status;
 
     if (df_gvs_call_command_prepare_hangup(
             session, expected_generation, local, reason, &command) != DF_OK) {
         return DF_ERR_INVALID;
     }
-    status = df_gvs_call_control_enqueue(control, &command, now_ms);
-    if (status == DF_OK) {
-        control->local_hangup_pending = true;
-        control->local_hangup_generation = expected_generation;
-    }
-    return status;
+    return df_gvs_call_control_enqueue(control, &command, now_ms);
 }
 
 int df_gvs_call_control_step(
@@ -315,15 +301,18 @@ int df_gvs_call_control_step(
             bool terminal_for_session =
                 next.terminal.end_reason != DF_GVS_CALL_END_NONE &&
                 next.terminal.generation == next_session.generation;
-            if (next_result.dispatch_failed && !terminal_for_session)
+            bool dispatch_for_session =
+                next.dispatch.command.session_generation == next_session.generation;
+            if (next_result.dispatch_failed && !terminal_for_session &&
+                dispatch_for_session)
                 next.fault = DF_GVS_CALL_FAULT_DISPATCH_FAILED;
-            else if (next_result.dispatch_timed_out && !terminal_for_session)
+            else if (next_result.dispatch_timed_out && !terminal_for_session &&
+                     dispatch_for_session)
                 next.fault = DF_GVS_CALL_FAULT_DISPATCH_TIMEOUT;
             else if (next_result.dispatch_cancelled && !terminal_for_session &&
+                     dispatch_for_session &&
                      !next_result.runtime.receive.preempted_session)
                 next.fault = DF_GVS_CALL_FAULT_CANCELLED;
-            if (next.local_hangup_pending)
-                next.local_hangup_pending = false;
         }
     }
     if (previous != DF_GVS_CALL_SENT &&
@@ -405,21 +394,6 @@ int df_gvs_call_control_receive(
             &next.acknowledgement, data, length, local, &next_session,
             &next_deadline, now_ms, &next_result.runtime) != DF_OK) {
         return DF_ERR_INVALID;
-    }
-    if (next_result.runtime.acknowledgement_confirmed &&
-        next.local_hangup_pending &&
-        next.local_hangup_generation == previous_session.generation &&
-        df_gvs_call_control_session_active(previous_session.state)) {
-        bool ended = false;
-
-        if (df_gvs_session_abort(&next_session, &ended) != DF_OK)
-            return DF_ERR_INVALID;
-        if (ended) {
-            df_gvs_deadline_cancel(&next_deadline);
-            next_result.runtime.receive.ended_transition = true;
-            next_result.runtime.receive.observed_hangup = true;
-            next_result.runtime.receive.local_hangup = true;
-        }
     }
     df_gvs_call_control_classify_transition(&next, &previous_session,
         &next_session, &next_result);
@@ -563,12 +537,15 @@ int df_gvs_call_control_status_with_deadline(
     if (control->handshake.last_now_ms > now_ms)
         now_ms = control->handshake.last_now_ms;
     if (df_gvs_call_control_session_active(session->state) &&
-        control->acknowledgement.state == DF_GVS_CALL_ACK_WAITING) {
+        control->acknowledgement.state == DF_GVS_CALL_ACK_WAITING &&
+        control->acknowledgement.command.session_generation ==
+            session->generation) {
         next.timer = DF_GVS_CALL_TIMER_CONFIRMATION;
         next.remaining_ms = now_ms < control->acknowledgement.deadline_ms
             ? control->acknowledgement.deadline_ms - now_ms : 0U;
     } else if (df_gvs_call_control_session_active(session->state) &&
-               deadline != NULL && deadline->armed) {
+               deadline != NULL && deadline->armed &&
+               deadline->generation == session->generation) {
         next.timer = DF_GVS_CALL_TIMER_SESSION;
         if (df_gvs_deadline_remaining(deadline, now_ms,
                 &next.remaining_ms) != DF_OK)
@@ -600,6 +577,5 @@ int df_gvs_call_control_runtime_reset(struct df_gvs_call_control *control,
         return DF_ERR_INVALID;
     df_gvs_deadline_cancel(deadline);
     control->observed_generation = session->generation;
-    control->local_hangup_pending = false;
     return DF_OK;
 }
