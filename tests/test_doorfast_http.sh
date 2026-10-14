@@ -68,6 +68,11 @@ while [ "$#" -gt 0 ]; do
     shift
   fi
 done
+if [ -n "${TEST_JSONFILTER_INTEGER_VALUE:-}" ]; then
+  case "$expression" in
+    '@.operation_id'|'@.generation') printf '%s\n' "$TEST_JSONFILTER_INTEGER_VALUE"; exit 0 ;;
+  esac
+fi
 case "$expression" in
   '@.call.'*|'@.video.'*|'@.audio.'*)
     python3 -c 'import json,sys
@@ -156,7 +161,19 @@ if ! tail -n 1 "$trace" | grep -Fq '"operation_id":18446744073709551615'; then
   printf '%s\n' 'FAIL: station hangup discarded operation_id'
   exit 1
 fi
-for invalid in '"1"' 'null' 'true' '-1' '0' '1.5' '1e2' '18446744073709551616' '1,"operation_id":2'; do
+for distorted in 18446744073709552000 1.8446744073709552e19 not-a-number; do
+  (TEST_JSONFILTER_INTEGER_VALUE="$distorted" run_method /api/v1/hangup \
+    "{$identity,\"generation\":18446744073709551615,\"operation_id\":18446744073709551615}" POST) >"$workspace/operation"
+  if ! tail -n 1 "$trace" | grep -Fq '"generation":18446744073709551615,"operation_id":18446744073709551615'; then
+    printf '%s\n' 'FAIL: station hangup numeric identities depend on jsonfilter conversion'
+    exit 1
+  fi
+  ! grep -aFq 'Status: 400 Bad Request' "$workspace/operation"
+done
+(TEST_JSONFILTER_INTEGER_VALUE=not-a-number run_method /api/v1/hangup \
+  '{ "operation_id" : 18446744073709551615 , "station_id" : "gate_main", "runtime_id" : "0123456789abcdef", "generation" : 18446744073709551615 }' POST) >"$workspace/operation"
+tail -n 1 "$trace" | grep -Fq '"generation":18446744073709551615,"operation_id":18446744073709551615'
+for invalid in '"1"' 'null' 'true' '-1' '0' '1.5' '1e2' '1 2' '18446744073709551616' '1,"operation_id":2'; do
   before=$(wc -l <"$trace")
   run_method /api/v1/hangup "{$identity,\"operation_id\":$invalid}" POST >"$workspace/operation"
   grep -aFq 'Status: 400 Bad Request' "$workspace/operation"
@@ -275,7 +292,7 @@ run_method /api/v1/monitor/viewer \
   '{"active":true,"generation":7,"station_id":"gate_main","runtime_id":"0123456789abcdef"}' POST \
   >"$workspace/monitor-viewer"
 run_method /api/v1/monitor/status '' GET >"$workspace/monitor-status"
-test "$(wc -l <"$trace" | tr -d ' ')" -eq 20
+test "$(wc -l <"$trace" | tr -d ' ')" -eq 24
 grep -Fxq 'call doorfast stations' "$trace"
 grep -Fxq 'call doorfast monitor_start {"runtime_id":"0123456789abcdef","station_id":"gate_main"}' "$trace"
 grep -Fxq 'call doorfast monitor_stop {"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' "$trace"

@@ -771,7 +771,11 @@ if [ "$path" = /api/v1/call ] || [ "$path" = /api/v1/hangup ]; then
     body="{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\"}"
     for field in generation operation_id; do
       if printf '%s' "$MONITOR_COMPACT" | grep -q "\"$field\":"; then
-        value="$(json_field "$MONITOR_BODY" "@.$field")"
+        # Strict flat-object validation above already proved a unique digit
+        # token. Preserve it exactly instead of converting uint64 via JSON.
+        value="${MONITOR_BODY#*\"$field\"}"
+        value="$(printf '%s' "$value" | tr '\r\n' '  ' | sed -n \
+          's/^[[:space:]]*:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*[,}].*/\1/p')"
         uint64_nonzero "$value" || { http_error '400 Bad Request' 'invalid request'; exit 0; }
         body="${body%\}},\"$field\":$value}"
       fi
