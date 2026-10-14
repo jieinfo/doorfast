@@ -544,6 +544,7 @@ int df_runtime_sync_configure(struct df_gvs_runtime_sync *sync,
 struct df_runtime_call_binding {
     struct df_gvs_call_control *control;
     struct df_gvs_session *session;
+    struct df_gvs_deadline *deadline;
     const uint8_t *identity;
     const struct df_station_registry *stations;
 };
@@ -567,8 +568,8 @@ static int df_runtime_call_status_provider(
     if (binding == NULL) {
         return DF_ERR_INVALID;
     }
-    return df_gvs_call_control_status(
-        binding->control, binding->session, status);
+    return df_gvs_call_control_status_with_deadline(
+        binding->control, binding->session, binding->deadline, status);
 }
 
 static int df_runtime_call_submit(
@@ -974,6 +975,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_runtime_call_binding call_binding = {
         .control = &call_control,
         .session = &session,
+        .deadline = &deadline,
         .identity = identity,
         .stations = &runtime->stations,
     };
@@ -1420,9 +1422,12 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         if (captured == DF_CAPTURE_ERROR) {
             bool ended = false;
+            const struct df_gvs_session previous_session = session;
 
             (void)df_gvs_session_abort(&session, &ended);
             df_gvs_deadline_cancel(&deadline);
+            df_gvs_call_control_observe_external_end(&call_control,
+                &previous_session, &session);
             {
                 struct df_gvs_call_control_result call_result;
                 if (df_gvs_call_control_step(

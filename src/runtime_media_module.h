@@ -14,6 +14,7 @@ struct df_runtime_media_module {
     void *handle;
     const struct df_media_module_api_v3 *api;
     const struct df_media_module_diagnostics_api_v1 *diagnostics_api;
+    const struct df_media_module_diagnostics_api_v2 *diagnostics_api_v2;
     void *instance;
     struct df_media_session_status_v3 *session_snapshot;
     size_t session_snapshot_capacity;
@@ -59,6 +60,12 @@ int df_runtime_media_module_status(const struct df_runtime_media_module *,
 int df_runtime_media_module_diagnostics(
     const struct df_runtime_media_module *,
     struct df_media_session_diagnostics_v1 *, size_t, size_t *);
+int df_runtime_media_module_diagnostics_v2(
+    const struct df_runtime_media_module *, uint64_t now_ms,
+    struct df_media_module_diagnostics_v2 *);
+const char *df_media_timer_name(enum df_media_timer);
+const char *df_media_end_reason_name(enum df_media_end_reason);
+const char *df_media_failure_reason_name(enum df_media_failure_reason);
 void df_runtime_media_module_stop(struct df_runtime_media_module *);
 
 #endif

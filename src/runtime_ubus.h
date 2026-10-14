@@ -79,9 +79,33 @@ struct df_runtime_media_status {
     size_t session_count;
     const struct df_media_session_diagnostics_v1 *diagnostics;
     size_t diagnostics_count;
+    const struct df_media_session_diagnostics_v2 *diagnostics_v2;
+    size_t diagnostics_v2_count;
+    const struct df_media_session_diagnostics_v2 *last_results;
+    size_t last_result_count;
     bool rtsp_password_set;
     bool has_credential_text;
 };
+
+/* Emits only the added diagnostic fields into the caller's current table.
+ * Inputs are validated runtime snapshots; sink callbacks must be non-NULL.
+ * open_result/close_result wrap each row in the caller's last_results array. */
+struct df_runtime_ubus;
+struct df_runtime_diagnostic_sink {
+    void *context;
+    void (*string)(void *, const char *, const char *);
+    void (*number)(void *, const char *, uint64_t);
+    void *(*open_result)(void *);
+    void (*close_result)(void *, void *);
+};
+void df_runtime_ubus_emit_call_diagnostics(const struct df_runtime_ubus *,
+    const struct df_gvs_call_control_status *,
+    const struct df_runtime_diagnostic_sink *);
+void df_runtime_ubus_emit_media_diagnostics(const struct df_runtime_media_status *,
+    const struct df_media_session_status_v3 *,
+    const struct df_runtime_diagnostic_sink *);
+void df_runtime_ubus_emit_media_last_results(const struct df_runtime_media_status *,
+    const struct df_runtime_diagnostic_sink *);
 
 struct df_station_snapshot_entry {
     char id[33];
@@ -156,6 +180,8 @@ struct df_runtime_ubus {
     struct df_runtime_media_module *media;
     struct df_media_session_status_v3 *media_session_entries;
     struct df_media_session_diagnostics_v1 *media_diagnostics_entries;
+    struct df_media_session_diagnostics_v2 *media_diagnostics_v2_entries;
+    struct df_media_session_diagnostics_v2 *media_last_result_entries;
     size_t media_session_capacity;
     char media_credentials_path[DF_RUNTIME_UBUS_MEDIA_PATH_MAX];
     const uint8_t *elevator_identity;
@@ -210,6 +236,8 @@ const char *df_runtime_ubus_access_station_id(const struct df_runtime_ubus *);
 /* Unique enabled station for the same live main call as the supplied status.
  * NULL for preview, ended, unknown, ambiguous or stale call identity. */
 const char *df_runtime_ubus_call_station_id(const struct df_runtime_ubus *,
+    const struct df_gvs_call_control_status *);
+const char *df_runtime_ubus_last_call_station_id(const struct df_runtime_ubus *,
     const struct df_gvs_call_control_status *);
 void df_runtime_ubus_set_auto_unlock(struct df_runtime_ubus *, bool);
 void df_runtime_ubus_set_auto_unlock_delay(struct df_runtime_ubus *, int);

@@ -15,6 +15,7 @@ struct df_gvs_receive_result {
     bool rejected_pick;
     bool ended_transition;
     bool observed_hangup;
+    bool local_hangup;
     bool preempted_session;
     bool time_sync_update;
     bool rejected_time_sync;

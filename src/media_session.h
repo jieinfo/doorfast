@@ -30,6 +30,8 @@ struct df_media_session {
     enum df_media_session_purpose purpose;
     enum df_media_session_state_v3 state;
     enum df_media_error_v3 last_error;
+    enum df_media_failure_reason failure_reason;
+    enum df_media_end_reason pending_end_reason;
     bool reserved;
     bool active;
     bool viewer_active;
@@ -83,5 +85,7 @@ void df_media_session_mark_source_lost(struct df_media_session *,
 int df_media_session_stop_pipeline(struct df_media_session *);
 int df_media_session_upgrade_to_call(struct df_media_session *,
     uint64_t generation, uint64_t call_generation, uint64_t now_ms);
+void df_media_session_diagnostics(const struct df_media_session *, uint64_t,
+    struct df_media_session_diagnostics_v2 *);
 
 #endif

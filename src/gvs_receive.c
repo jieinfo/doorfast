@@ -31,6 +31,7 @@ static int df_gvs_receive_hangup(struct df_gvs_frame *frame,
         df_gvs_deadline_cancel(deadline);
         result->ended_transition = true;
         result->observed_hangup = true;
+        result->local_hangup = outbound;
     }
     return DF_OK;
 }

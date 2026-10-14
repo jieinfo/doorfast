@@ -157,6 +157,54 @@ struct df_media_module_diagnostics_api_v1 {
 extern const struct df_media_module_diagnostics_api_v1
     df_media_module_diagnostics_api_v1;
 
+/* A separately versioned extension; v3 and diagnostics v1 remain untouched. */
+#define DF_MEDIA_MODULE_DIAGNOSTICS_ABI_VERSION_V2 2U
+enum df_media_timer {
+    DF_MEDIA_TIMER_NONE = 0, DF_MEDIA_TIMER_CONFIRMATION,
+    DF_MEDIA_TIMER_SESSION, DF_MEDIA_TIMER_FIRST_FRAME,
+    DF_MEDIA_TIMER_RECONNECT, DF_MEDIA_TIMER_UNKNOWN,
+};
+enum df_media_end_reason {
+    DF_MEDIA_END_NONE = 0, DF_MEDIA_END_LOCAL_HANGUP,
+    DF_MEDIA_END_PEER_HANGUP, DF_MEDIA_END_SESSION_TIMEOUT,
+    DF_MEDIA_END_CONFIRMATION_TIMEOUT, DF_MEDIA_END_PREEMPTED,
+    DF_MEDIA_END_RUNTIME_RESET, DF_MEDIA_END_UNKNOWN,
+};
+enum df_media_failure_reason {
+    DF_MEDIA_FAILURE_NONE = 0, DF_MEDIA_FAILURE_DISPATCH_FAILED,
+    DF_MEDIA_FAILURE_DISPATCH_TIMEOUT, DF_MEDIA_FAILURE_CONFIRMATION_REJECTED,
+    DF_MEDIA_FAILURE_CONFIRMATION_TIMEOUT, DF_MEDIA_FAILURE_FIRST_FRAME_TIMEOUT,
+    DF_MEDIA_FAILURE_SOURCE_STALLED, DF_MEDIA_FAILURE_ENCODER_FAILED,
+    DF_MEDIA_FAILURE_PUBLISHER_FAILED, DF_MEDIA_FAILURE_CAPACITY_BUSY,
+    DF_MEDIA_FAILURE_PREEMPTED, DF_MEDIA_FAILURE_CANCELLED,
+    DF_MEDIA_FAILURE_RUNTIME_RESET, DF_MEDIA_FAILURE_UNKNOWN,
+};
+struct df_media_session_diagnostics_v2 {
+    char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t generation; /* Public media generation, never monitor attempt. */
+    enum df_media_timer timer;
+    uint64_t remaining_ms;
+    enum df_media_end_reason end_reason;
+    enum df_media_failure_reason failure_reason;
+};
+struct df_media_module_diagnostics_v2 {
+    /* Input counts are caller-owned array capacities; output counts copied. */
+    struct df_media_session_diagnostics_v2 *sessions;
+    size_t session_count;
+    size_t required_session_count;
+    struct df_media_session_diagnostics_v2 *last_results;
+    size_t last_result_count;
+    size_t required_last_result_count;
+};
+struct df_media_module_diagnostics_api_v2 {
+    uint32_t abi_version;
+    size_t struct_size;
+    int (*status)(const void *, uint64_t now_ms,
+                  struct df_media_module_diagnostics_v2 *);
+};
+extern const struct df_media_module_diagnostics_api_v2
+    df_media_module_diagnostics_api_v2;
+
 struct df_media_module_config_v2 {
     bool enabled;
     uint8_t local[6];

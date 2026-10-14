@@ -4,6 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 void test_event_relay(void);
+void test_runtime_ubus_diagnostic_emitter(void);
+void test_gvs_call_control_observes_capture_error_boundary(void);
+void test_gvs_call_control_records_zero_time_sync_timeout(void);
 void test_gvs_call_runtime_idle_deadlines(void);
 void test_gvs_call_runtime_tick_is_atomic(void);
 void test_gvs_call_control_answer_reaches_confirmation(void);
@@ -43,6 +46,14 @@ void test_gvs_pcm_pump_drops_stale_frames_and_obeys_pacing(void);
 void test_g711_alaw(void);
 void test_gvs_audio_chunk_store(void);
 void test_gvs_call_control_reports_confirmation_timeout_once(void);
+void test_gvs_call_control_records_local_hangup_snapshot(void);
+void test_gvs_call_control_preserves_terminal_fault_over_late_dispatch_cancel(void);
+void test_gvs_call_control_preemption_keeps_new_generation_fault_clear(void);
+void test_gvs_call_control_rejects_late_ack_without_overwriting_terminal(void);
+void test_gvs_call_control_status_ignores_stale_generation_deadline(void);
+void test_gvs_call_control_records_terminal_timeout_snapshot(void);
+void test_gvs_call_control_records_peer_hangup_and_clears_timer(void);
+void test_gvs_call_control_new_runtime_has_empty_diagnostics(void);
 void test_gvs_call_control_rejects_busy_and_stale_submission(void);
 void test_gvs_call_control_bounds_failed_simulated_delivery(void);
 void test_gvs_call_control_rejects_receive_before_submission_time(void);
@@ -225,6 +236,10 @@ void test_media_session_manager_routes_independent_encoder_pipelines(void);
 void test_media_session_manager_isolates_encoder_exit(void);
 void test_media_session_manager_recovers_preview_encoder_exit(void);
 void test_media_video_reject_reason_names(void);
+void test_media_session_manager_observability(void);
+void test_media_session_manager_monitor_overflow_diagnostic(void);
+void test_media_session_manager_diagnostics_capacity(void);
+void test_runtime_media_module_diagnostics_optional_v2(void);
 void test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing(void);
 void test_runtime_module_rejects_commands_when_unavailable(void);
 void test_runtime_module_rejects_incompatible_or_incomplete_api(void);
@@ -359,6 +374,12 @@ void test_capture_retry_is_bounded_and_resets_after_recovery(void);
 void test_gvs_deadline_expires_without_another_packet(void);
 void test_gvs_deadline_does_not_end_a_new_generation(void);
 void test_gvs_deadline_rejects_backwards_time(void);
+void test_gvs_deadline_remaining_unarmed_is_zero(void);
+void test_gvs_deadline_remaining_reports_relative_time_without_mutation(void);
+void test_gvs_deadline_remaining_handles_expiry_and_zero_timeout(void);
+void test_gvs_deadline_remaining_avoids_uint64_overflow(void);
+void test_gvs_deadline_remaining_rejects_backwards_time(void);
+void test_gvs_deadline_remaining_rejects_invalid_pointers_and_clears_output(void);
 void test_gvs_receive_drives_call_pick_sync_and_timeout(void);
 void test_gvs_receive_applies_peer_hangup_and_cancels_deadline(void);
 void test_audit_format_is_redacted(void);
@@ -413,7 +434,34 @@ static int capture_media_encoder_arguments(int argc, char **argv)
 
 int main(int argc, char **argv) {
     int capture_result = capture_media_encoder_arguments(argc, argv);
+    if (argc == 2 && strcmp(argv[1], "--wire-observability") == 0) {
+        test_runtime_ubus_diagnostic_emitter();
+        test_runtime_media_module_diagnostics_optional_v2();
+        test_gvs_call_control_records_local_hangup_snapshot();
+        test_gvs_call_control_status_ignores_stale_generation_deadline();
+        test_gvs_call_control_handshake_memory_lifecycle();
+        test_gvs_call_control_observes_capture_error_boundary();
+        test_gvs_call_control_records_zero_time_sync_timeout();
+        if (test_failures() != 0) return 1;
+        puts("wire observability tests passed");
+        return 0;
+    }
     if (capture_result >= 0) return capture_result;
+    if (argc == 2 && strcmp(argv[1], "--media-observability") == 0) {
+        test_media_session_manager_observability();
+        test_media_session_manager_monitor_overflow_diagnostic();
+        test_media_session_manager_diagnostics_capacity();
+        test_runtime_media_module_diagnostics_optional_v2();
+        test_media_session_manager_cleans_busy_preview_after_three_rejections();
+        test_media_session_manager_retries_stalled_video_session();
+        test_media_session_manager_recovers_preview_encoder_exit();
+        test_media_session_manager_isolates_encoder_exit();
+        test_media_session_manager_preempts_oldest_preview_for_call();
+        test_media_session_reconnect_rejects_dimension_change();
+        if (test_failures() != 0) return 1;
+        puts("media observability tests passed");
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--audio-receive-pipeline") == 0) {
         test_audio_receive_pipeline_sequence_and_reset();
         test_audio_receive_pipeline_tail_and_retry();
@@ -435,6 +483,10 @@ int main(int argc, char **argv) {
         return 0;
     }
     test_runtime_ubus_call_station_identity_uses_current_main_call();
+    test_media_session_manager_observability();
+    test_media_session_manager_monitor_overflow_diagnostic();
+    test_media_session_manager_diagnostics_capacity();
+    test_runtime_media_module_diagnostics_optional_v2();
     test_runtime_audio_service_advances_deadlines_and_retries();
     test_runtime_audio_receive_preserves_admission_and_reordering();
     test_runtime_audio_lifecycle_clears_tail_and_preserves_call_video();
@@ -794,6 +846,12 @@ int main(int argc, char **argv) {
     test_gvs_deadline_expires_without_another_packet();
     test_gvs_deadline_does_not_end_a_new_generation();
     test_gvs_deadline_rejects_backwards_time();
+    test_gvs_deadline_remaining_unarmed_is_zero();
+    test_gvs_deadline_remaining_reports_relative_time_without_mutation();
+    test_gvs_deadline_remaining_handles_expiry_and_zero_timeout();
+    test_gvs_deadline_remaining_avoids_uint64_overflow();
+    test_gvs_deadline_remaining_rejects_backwards_time();
+    test_gvs_deadline_remaining_rejects_invalid_pointers_and_clears_output();
     test_gvs_receive_drives_call_pick_sync_and_timeout();
     test_gvs_receive_applies_peer_hangup_and_cancels_deadline();
     test_audit_format_is_redacted();
@@ -805,11 +863,22 @@ int main(int argc, char **argv) {
     test_gvs_call_control_promotes_preview_after_station_ack();
     test_gvs_call_control_tracks_answer_sent_by_external_transport();
     test_gvs_call_control_reports_confirmation_timeout_once();
+    test_gvs_call_control_records_local_hangup_snapshot();
+    test_gvs_call_control_observes_capture_error_boundary();
+    test_gvs_call_control_preserves_terminal_fault_over_late_dispatch_cancel();
+    test_gvs_call_control_preemption_keeps_new_generation_fault_clear();
+    test_gvs_call_control_rejects_late_ack_without_overwriting_terminal();
+    test_gvs_call_control_status_ignores_stale_generation_deadline();
+    test_gvs_call_control_records_terminal_timeout_snapshot();
+    test_gvs_call_control_records_zero_time_sync_timeout();
+    test_gvs_call_control_records_peer_hangup_and_clears_timer();
+    test_gvs_call_control_new_runtime_has_empty_diagnostics();
     test_gvs_call_control_rejects_busy_and_stale_submission();
     test_gvs_call_control_bounds_failed_simulated_delivery();
     test_gvs_call_control_rejects_receive_before_submission_time();
     test_gvs_call_control_exposes_public_status();
     test_runtime_ubus_validates_and_routes_call_requests();
+    test_runtime_ubus_diagnostic_emitter();
     test_runtime_ubus_reports_handshake_transport();
     test_runtime_ubus_media_controls_require_current_generation();
     test_runtime_ubus_monitor_start_rejects_active_call();

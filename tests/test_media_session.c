@@ -262,6 +262,13 @@ void test_media_session_reconnect_rejects_dimension_change(void) {
         301U));
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_FAILED, session.state);
     TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_RECONNECT_FRAME, session.last_error);
+    {
+        struct df_media_session_diagnostics_v2 diagnostic;
+        df_media_session_diagnostics(&session, 301U, &diagnostic);
+        /* Reconnect allocation/dimension failures do not evidence publishing. */
+        TEST_ASSERT_INT_EQ(DF_MEDIA_FAILURE_UNKNOWN, diagnostic.failure_reason);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_END_NONE, diagnostic.end_reason);
+    }
     TEST_ASSERT_INT_EQ(0, session.reconnect_frame.data != NULL);
     TEST_ASSERT_INT_EQ(0, session.publication_generation);
     TEST_ASSERT_INT_EQ(0, df_media_encoder_is_running(&session.encoder));

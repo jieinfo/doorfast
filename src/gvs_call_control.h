@@ -18,6 +18,9 @@ struct df_gvs_call_control {
     void *call_attempt_context;
     df_gvs_call_attempt_fn handshake_attempt;
     void *handshake_attempt_context;
+    struct df_gvs_call_terminal terminal;
+    enum df_gvs_call_fault fault;
+    uint64_t observed_generation;
 };
 
 struct df_gvs_call_control_result {
@@ -43,6 +46,12 @@ struct df_gvs_call_control_status {
     unsigned handshake_missed;
     uint64_t handshake_next_ms, handshake_dropped;
     enum df_gvs_call_dispatch_state handshake_dispatch;
+    enum df_gvs_call_end_reason end_reason;
+    enum df_gvs_call_fault fault;
+    uint8_t last_station[6];
+    uint64_t last_generation;
+    enum df_gvs_call_timer timer;
+    uint64_t remaining_ms;
 };
 
 int df_gvs_call_control_init(struct df_gvs_call_control *, uint64_t,
@@ -69,6 +78,12 @@ int df_gvs_call_control_receive(struct df_gvs_call_control *,
     struct df_gvs_call_control_result *);
 int df_gvs_call_control_status(const struct df_gvs_call_control *,
     const struct df_gvs_session *, struct df_gvs_call_control_status *);
+int df_gvs_call_control_status_with_deadline(
+    const struct df_gvs_call_control *, const struct df_gvs_session *,
+    const struct df_gvs_deadline *, struct df_gvs_call_control_status *);
+/* Observe an already completed runtime transition; never aborts or sends. */
+void df_gvs_call_control_observe_external_end(struct df_gvs_call_control *,
+    const struct df_gvs_session *previous, const struct df_gvs_session *current);
 const char *df_gvs_session_state_name(enum df_gvs_session_state);
 const char *df_gvs_call_command_type_name(enum df_gvs_call_command_type);
 const char *df_gvs_call_dispatch_state_name(enum df_gvs_call_dispatch_state);
