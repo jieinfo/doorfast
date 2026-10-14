@@ -2173,7 +2173,10 @@ int df_runtime_ubus_hangup_station_operation(struct df_runtime_ubus *service,
         /* Do not let a terminal outbound identity terminate a newer incoming owner. */
         const struct df_runtime_call_binding *b = service->submit_call == df_runtime_call_submit ?
             service->call_context : NULL;
+        const struct df_station *station = b == NULL ? NULL :
+            df_station_registry_find(b->stations, station_id);
         if (!df_runtime_station_call_active(service) && b != NULL && b->session != NULL &&
+            station != NULL && memcmp(b->session->peer, station->logical_address, 6) == 0 &&
             b->session->state != DF_GVS_IDLE && b->session->state != DF_GVS_ENDED)
             return DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH;
         if (generation != 0 && generation != op->media_generation)

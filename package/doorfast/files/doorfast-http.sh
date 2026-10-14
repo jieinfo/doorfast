@@ -123,6 +123,26 @@ monitor_validate_keys() {
   '
 }
 
+# Reject escaped key spellings before station/global routing. JSON decoders
+# normalize them, while literal key matching would otherwise miss identities.
+monitor_plain_keys() {
+  printf '%s\n' "$MONITOR_COMPACT" | awk '
+    {
+      for (i = 1; i <= length($0); i++) {
+        if (substr($0, i, 1) != "\"") continue
+        escaped = 0
+        closed = 0
+        for (i++; i <= length($0); i++) {
+          character = substr($0, i, 1)
+          if (character == "\\") { escaped = 1; i++; continue }
+          if (character == "\"") { closed = 1; break }
+        }
+        if (!closed || (escaped && substr($0, i + 1, 1) == ":")) exit 1
+      }
+    }
+  '
+}
+
 monitor_string_field() {
   local expression="$1" value
   value="$(json_field "$MONITOR_BODY" "$expression")" || return 1
@@ -737,6 +757,7 @@ if [ "$path" = /api/v1/call ] || [ "$path" = /api/v1/hangup ]; then
   [ "${REQUEST_METHOD:-GET}" = POST ] || { http_error '405 Method Not Allowed' 'method not allowed' POST; exit 0; }
   monitor_json_content_type || { http_error '415 Unsupported Media Type' 'application/json required'; exit 0; }
   monitor_body || { http_error '400 Bad Request' 'invalid request'; exit 0; }
+  monitor_plain_keys || { http_error '400 Bad Request' 'invalid request'; exit 0; }
   body="$MONITOR_BODY"
   # Global hangup keeps the legacy runtime/control-generation request shape.
   if [ "$path" = /api/v1/hangup ] && ! printf '%s' "$MONITOR_COMPACT" | grep -q '"station_id"\|"operation_id"'; then

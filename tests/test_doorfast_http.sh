@@ -162,6 +162,21 @@ for invalid in '"1"' 'null' 'true' '-1' '0' '1.5' '1e2' '18446744073709551616' '
   grep -aFq 'Status: 400 Bad Request' "$workspace/operation"
   test "$before" -eq "$(wc -l <"$trace")"
 done
+for invalid in \
+  '{"runtime_id":"0123456789abcdef","station\u005fid":"gate_main","operation\u005fid":18446744073709551616,"generation":7}' \
+  '{"runtime_id":"0123456789abcdef","station\u005fid":"gate_main","station\u005fid":"gate_side","generation":7}' \
+  '{"runtime_id":"0123456789abcdef","operation\u005fid":-1,"generation":7}' \
+  '{"runtime_id":"0123456789abcdef","station\u005fid":"gate_main","secret\u005fkey":"do-not-echo","generation":7}'
+do
+  before=$(wc -l <"$trace")
+  run_method /api/v1/hangup "$invalid" POST >"$workspace/operation"
+  if ! grep -aFq 'Status: 400 Bad Request' "$workspace/operation"; then
+    printf '%s\n' 'FAIL: escaped station hangup key bypassed validation'
+    exit 1
+  fi
+  test "$before" -eq "$(wc -l <"$trace")"
+  ! grep -aFq 'do-not-echo' "$workspace/operation"
+done
 for invalid in "{$identity,\"station_id\":\"gate_side\"}" "{$identity,\"secret\":\"do-not-echo\"}"; do
   before=$(wc -l <"$trace")
   run_method /api/v1/call "$invalid" POST >"$workspace/operation"

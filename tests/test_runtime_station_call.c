@@ -514,6 +514,21 @@ void test_runtime_station_call_terminal_reasons(void) {
     TEST_ASSERT_INT_EQ(1, diagnostics.last_result_count);
     TEST_ASSERT_INT_EQ(DF_MEDIA_END_PEER_HANGUP, history[0].end_reason);
     TEST_ASSERT_INT_EQ(0, ((struct df_media_session_manager *)f.media.instance)->active_count);
+    uint64_t operation = f.ubus.station_call.operation_id;
+    const uint8_t ring[] = {0, 0x20, 0x6f, 0, 0x20, 0x6e, 30};
+    receive(&f, 1, ring, sizeof(ring), 1, 0x01020304, 107);
+    const struct df_media_session *side = df_media_session_manager_find(f.media.instance, "gate_side");
+    TEST_ASSERT_INT_EQ(1, side != NULL && side->active);
+    uint64_t side_generation = side == NULL ? 0 : side->generation;
+    unsigned hangups = f.hangups;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_hangup_station_operation(&f.ubus,
+        f.ubus.runtime_id, "gate_main", 0, true, operation));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_ENDED, f.ubus.station_call.stage);
+    TEST_ASSERT_INT_EQ(DF_GVS_RINGING, f.session.state);
+    TEST_ASSERT_INT_EQ(0, memcmp(f.session.peer, f.stations[1].logical_address, 6));
+    TEST_ASSERT_INT_EQ(hangups, f.hangups);
+    side = df_media_session_manager_find(f.media.instance, "gate_side");
+    TEST_ASSERT_INT_EQ(1, side != NULL && side->active && side->generation == side_generation);
     df_runtime_media_module_stop(&f.media);
 }
 
