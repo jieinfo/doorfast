@@ -188,7 +188,7 @@
 
   运行：`git diff --check`、`git diff --stat origin/codex/preview-startup-state...HEAD`、`git status --short --branch`，确认只包含计划内主程序、测试、CGI 和计划记录；不触碰 `.DS_Store` 或已有恢复目录。
 
-- [ ] **步骤 4：Commit**
+- [ ] **步骤 4：记录验证结果**
 
-  `git add docs/superpowers/plans/2026-10-14-outbound-call-ownership-repair.md && git commit -m "docs: plan outbound call ownership repair"`
+  将完整命令、测试数量、退出码、已知警告和最终 diff 摘要追加到本计划的 SDD ledger；计划文档已经在执行前提交，不重复制造空提交。
 
