@@ -69,6 +69,9 @@ void test_runtime_station_call_deadlines_and_identity(void);
 void test_runtime_station_call_global_hangup_and_failed_enqueue(void);
 void test_runtime_station_call_direct_submit_and_ack_guards(void);
 void test_runtime_station_call_cleanup_error_and_shared_owner(void);
+void test_media_session_manager_release_failure_retries_exact_owner(void);
+void test_runtime_station_call_release_failure_survives_main_replacement(void);
+void test_runtime_station_call_legacy_capabilities(void);
 void test_runtime_ubus_call_station_identity_uses_current_main_call(void);
 void test_runtime_ubus_reports_handshake_transport(void);
 void test_runtime_ubus_media_controls_require_current_generation(void);
@@ -459,6 +462,9 @@ int main(int argc, char **argv) {
         test_runtime_station_call_global_hangup_and_failed_enqueue();
         test_runtime_station_call_direct_submit_and_ack_guards();
         test_runtime_station_call_cleanup_error_and_shared_owner();
+        test_media_session_manager_release_failure_retries_exact_owner();
+        test_runtime_station_call_release_failure_survives_main_replacement();
+        test_runtime_station_call_legacy_capabilities();
         if (test_failures() != 0) return 1;
         puts("station call lifecycle tests passed");
         return 0;
@@ -522,6 +528,7 @@ int main(int argc, char **argv) {
         test_media_session_manager_outbound_watchdogs_and_incoming_replacement();
         test_media_session_manager_outbound_bound_rollback_preserves_pipeline();
         test_media_session_manager_outbound_negative_gates();
+        test_media_session_manager_release_failure_retries_exact_owner();
         test_runtime_media_outbound_extension_fails_closed();
         test_runtime_media_outbound_uses_real_manager();
         test_gvs_monitor_retries_after_unconfirmed_response();
@@ -944,6 +951,9 @@ int main(int argc, char **argv) {
     test_runtime_station_call_global_hangup_and_failed_enqueue();
     test_runtime_station_call_direct_submit_and_ack_guards();
     test_runtime_station_call_cleanup_error_and_shared_owner();
+    test_media_session_manager_release_failure_retries_exact_owner();
+    test_runtime_station_call_release_failure_survives_main_replacement();
+    test_runtime_station_call_legacy_capabilities();
     test_runtime_ubus_diagnostic_emitter();
     test_runtime_ubus_reports_handshake_transport();
     test_runtime_ubus_media_controls_require_current_generation();

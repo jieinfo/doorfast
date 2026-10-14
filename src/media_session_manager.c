@@ -552,6 +552,8 @@ int df_media_session_manager_outbound_operation(
     if (session == NULL || session->generation != key->generation)
         return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     if (now_ms < session->monitor.last_now_ms) return DF_ERR_INVALID;
+    if (session->pending_release != 0 && operation != session->pending_release)
+        return DF_MEDIA_ERROR_ENCODER_FAILED;
     bool incoming_release = operation >= DF_MEDIA_INCOMING_RELEASE_LOCAL &&
         operation <= DF_MEDIA_INCOMING_RELEASE_UNKNOWN;
     bool release = incoming_release || operation == DF_MEDIA_OUTBOUND_RELEASE ||
@@ -570,6 +572,8 @@ int df_media_session_manager_outbound_operation(
     if (release) {
         enum df_media_end_reason reason = DF_MEDIA_END_LOCAL_HANGUP;
         enum df_media_failure_reason failure = DF_MEDIA_FAILURE_NONE;
+        if (session->pending_release != 0 && now_ms < session->release_retry_ms)
+            return DF_MEDIA_ERROR_ENCODER_FAILED;
         switch (operation) {
         case DF_MEDIA_INCOMING_RELEASE_PEER:
         case DF_MEDIA_OUTBOUND_RELEASE_PEER: reason = DF_MEDIA_END_PEER_HANGUP; break;
@@ -588,8 +592,23 @@ int df_media_session_manager_outbound_operation(
             reason = DF_MEDIA_END_UNKNOWN; failure = DF_MEDIA_FAILURE_UNKNOWN; break;
         default: break;
         }
-        if (df_media_session_manager_stop_resources(session) != DF_OK)
+        if (df_media_session_manager_stop_resources(session) != DF_OK) {
+            /* Retain the exact media/control owner independently of main's
+             * next session. Ticks retry local resource cleanup, never UDP. */
+            session->pending_release = operation;
+            session->release_retry_ms = now_ms <= UINT64_MAX - 100U ? now_ms + 100U : UINT64_MAX;
+            session->state = DF_MEDIA_SESSION_STOPPING;
+            session->last_error = DF_MEDIA_ERROR_ENCODER_FAILED;
+            session->pending_end_reason = reason;
+            session->failure_reason = DF_MEDIA_FAILURE_ENCODER_FAILED;
+            session->viewer_active = false;
+            (void)snprintf(manager->failed_station_id,
+                sizeof(manager->failed_station_id), "%s", session->station_id);
+            manager->failed_generation = session->generation;
+            manager->failed_error = session->last_error;
+            df_media_session_manager_advance_revisions(manager, session);
             return DF_MEDIA_ERROR_ENCODER_FAILED;
+        }
         df_media_session_manager_record_terminal(manager, session,
             reason, failure);
         df_media_session_reset(session);
@@ -903,6 +922,7 @@ int df_media_session_manager_receive_control(
         if (memcmp(frame->destination, manager->config.local,
                 sizeof(manager->config.local)) != 0)
             return DF_ERR_INVALID;
+        if (session->pending_release != 0) return DF_MEDIA_ERROR_ENCODER_FAILED;
         if (frame->family == 0x03U && frame->opcode == 0x51U &&
             session->purpose != DF_MEDIA_SESSION_PREVIEW)
             return DF_ERR_INVALID;
@@ -1106,6 +1126,8 @@ int df_media_session_manager_incoming_call(
     if (!manager->config.enabled || !station->enabled)
         return DF_MEDIA_ERROR_STATION_DISABLED;
     session = df_media_session_manager_find_active(manager, station_id);
+    if (session != NULL && session->pending_release != 0)
+        return DF_MEDIA_ERROR_CAPACITY_BUSY;
     {
         size_t call_index;
         for (call_index = 0U; call_index < manager->capacity; call_index++) {
@@ -1199,6 +1221,7 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
     session = df_media_session_manager_find_active(manager, key->station_id);
     if (session == NULL || session->generation != key->generation ||
         key->generation == 0U) return DF_MEDIA_ERROR_GENERATION_MISMATCH;
+    if (session->pending_release != 0) return DF_MEDIA_ERROR_ENCODER_FAILED;
     if (command == DF_MEDIA_MODULE_COMMAND_STOP) {
         if (session->monitor.state == DF_GVS_MONITOR_REQUESTING ||
             session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO ||
@@ -1300,6 +1323,7 @@ int df_media_session_manager_push_jpeg(struct df_media_session_manager *manager,
                     DF_MEDIA_VIDEO_REJECT_SOURCE_IPV4), NULL, source_ipv4);
             return DF_ERR_INVALID;
         }
+        if (session->pending_release != 0) return DF_ERR_INVALID;
         {
             struct df_gvs_monitor_result monitor_result;
             enum df_media_source_state previous_source = session->source_state;
@@ -1424,6 +1448,16 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
 
         if (!session->active)
             continue;
+        if (session->pending_release != 0) {
+            if (now_ms >= session->release_retry_ms) {
+                const struct df_media_session_key key = {
+                    session->station_id, session->generation};
+                if (df_media_session_manager_outbound_operation(manager,
+                        session->pending_release, &key, session->call_generation,
+                        now_ms) != DF_OK) overall = DF_ERR_IO;
+            }
+            continue;
+        }
         if (session->state == DF_MEDIA_SESSION_FAILED) {
             if (df_media_session_manager_release_failed(manager, session) != DF_OK)
                 overall = DF_ERR_IO;
@@ -1588,12 +1622,20 @@ static int df_media_module_api_start_v3(void *instance, const char *station_id,
         &generation);
 }
 
-static int df_media_module_outbound_upgrade_v1_operation(
+static int df_media_module_lifecycle_v2_operation(
     void *instance, enum df_media_outbound_operation operation,
     const struct df_media_session_key *key, uint64_t control_generation,
     uint64_t now_ms) {
     return df_media_session_manager_outbound_operation(instance, operation,
         key, control_generation, now_ms);
+}
+
+static int df_media_module_outbound_upgrade_v1_operation(
+    void *instance, enum df_media_outbound_operation operation,
+    const struct df_media_session_key *key, uint64_t control_generation, uint64_t now_ms) {
+    if (operation > DF_MEDIA_OUTBOUND_MARK_SENT) return DF_ERR_INVALID;
+    return df_media_module_lifecycle_v2_operation(instance, operation, key,
+        control_generation, now_ms);
 }
 
 static int df_media_module_api_command_v3(void *instance,
@@ -1889,6 +1931,12 @@ const struct df_media_module_outbound_upgrade_api_v1
     .abi_version = DF_MEDIA_MODULE_OUTBOUND_UPGRADE_ABI_VERSION,
     .struct_size = sizeof(struct df_media_module_outbound_upgrade_api_v1),
     .operation = df_media_module_outbound_upgrade_v1_operation,
+};
+
+const struct df_media_module_lifecycle_api_v2 df_media_module_lifecycle_api_v2 = {
+    .abi_version = DF_MEDIA_MODULE_LIFECYCLE_ABI_VERSION,
+    .struct_size = sizeof(struct df_media_module_lifecycle_api_v2),
+    .operation = df_media_module_lifecycle_v2_operation,
 };
 
 const struct df_media_module_diagnostics_api_v1

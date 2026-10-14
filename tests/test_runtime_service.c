@@ -77,6 +77,8 @@ void test_runtime_station_call_admission_prepares_real_preview(void) {
         &df_media_module_api_v3, &config, &callbacks));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_set_outbound_api(&media,
         &df_media_module_outbound_upgrade_api_v1));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_set_lifecycle_api(&media,
+        &df_media_module_lifecycle_api_v2));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_call_station(&ubus,
         ubus.runtime_id, "gate_main", &generation));
     TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_PREPARING, ubus.station_call.stage);

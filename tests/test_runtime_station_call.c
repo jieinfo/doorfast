@@ -73,6 +73,8 @@ static void init(struct call_fixture *f) {
         &df_media_module_api_v3, &config, &f->callbacks));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_set_outbound_api(&f->media,
         &df_media_module_outbound_upgrade_api_v1));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_set_lifecycle_api(&f->media,
+        &df_media_module_lifecycle_api_v2));
     f->binding = (struct df_runtime_call_binding){.ubus = &f->ubus,
         .control = &f->control, .session = &f->session, .deadline = &f->deadline,
         .identity = local, .stations = &f->registry};
@@ -132,6 +134,164 @@ static void talking(struct call_fixture *f) {
     TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_TALKING, f->ubus.station_call.stage);
     TEST_ASSERT_INT_EQ(1, f->calls);
     TEST_ASSERT_INT_EQ(1, media(f)->outbound_command_sent);
+}
+
+static int fail_encoder_stop(struct df_media_encoder_process *encoder, unsigned timeout) {
+    (void)encoder; (void)timeout;
+    return DF_ERR_IO;
+}
+
+/* A real manager behind the original v1 surface: newer opcodes unavailable. */
+static int original_v1_operation(void *instance, enum df_media_outbound_operation op,
+    const struct df_media_session_key *key, uint64_t control, uint64_t now) {
+    if (op > DF_MEDIA_OUTBOUND_MARK_SENT) return DF_ERR_INVALID;
+    return df_media_session_manager_outbound_operation(instance, op, key, control, now);
+}
+
+void test_runtime_station_call_legacy_capabilities(void) {
+    static const struct df_media_module_outbound_upgrade_api_v1 original = {
+        .abi_version = 1, .struct_size = sizeof(original), .operation = original_v1_operation};
+    for (unsigned v1 = 0; v1 < 2; v1++) {
+        struct call_fixture f;
+        init(&f);
+        f.media.outbound_upgrade_api = v1 ? &original : NULL;
+        f.media.lifecycle_api = NULL;
+        uint64_t generation = 0;
+        TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station(&f.ubus,
+            f.ubus.runtime_id, "gate_main", &generation) != DF_OK);
+        TEST_ASSERT_INT_EQ(0, ((struct df_media_session_manager *)f.media.instance)->active_count);
+        TEST_ASSERT_INT_EQ(0, f.previews);
+        df_runtime_media_module_stop(&f.media);
+
+        init(&f);
+        f.media.outbound_upgrade_api = v1 ? &original : NULL;
+        f.media.lifecycle_api = NULL;
+        const uint8_t ring[] = {0, 0x20, 0x6f, 0, 0x20, 0x6e, 30};
+        receive(&f, 1, ring, sizeof(ring), 0, 0x01020304, 101);
+        TEST_ASSERT_INT_EQ(DF_GVS_RINGING, f.session.state);
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_hangup_station(&f.ubus,
+            f.ubus.runtime_id, "gate_main", media(&f)->generation));
+        step(&f, 102);
+        receive(&f, 0x82, NULL, 0, 0, 0x01020304, 103);
+        TEST_ASSERT_INT_EQ(DF_GVS_ENDED, f.session.state);
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&f.media, 5103));
+        TEST_ASSERT_INT_EQ(0, ((struct df_media_session_manager *)f.media.instance)->active_count);
+        TEST_ASSERT_INT_EQ(1, f.hangups);
+        df_runtime_media_module_stop(&f.media);
+
+        init(&f);
+        f.media.outbound_upgrade_api = v1 ? &original : NULL;
+        f.media.lifecycle_api = NULL;
+        receive(&f, 1, ring, sizeof(ring), 0, 0x01020304, 101);
+        struct df_media_session_manager *manager = f.media.instance;
+        manager->sessions[0].stop_encoder = fail_encoder_stop;
+        uint64_t old_media = media(&f)->generation;
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED,
+            df_runtime_media_module_release_incoming(&f.media, "gate_main", 41,
+                DF_MEDIA_INCOMING_RELEASE_LOCAL, 102));
+        struct df_media_session_status_v3 entries[2];
+        struct df_media_module_status_v3 status = {.sessions = entries, .session_count = 2};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_status(&f.media, &status));
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED, entries[0].last_error);
+        TEST_ASSERT_INT_EQ(1, f.media.incoming_bindings[0].cleanup_pending);
+        TEST_ASSERT_INT_EQ(0, f.hangups);
+        manager->sessions[0].stop_encoder = NULL;
+        char preempted[DF_MEDIA_MODULE_STATION_ID_MAX];
+        uint64_t preempted_generation;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_incoming_call(&f.media,
+            "gate_main", 42, 103, preempted, &preempted_generation));
+        TEST_ASSERT_INT_EQ(1, media(&f)->generation != old_media);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+            df_runtime_media_module_release_incoming(&f.media, "gate_main", 41,
+                DF_MEDIA_INCOMING_RELEASE_LOCAL, 104));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&f.media, 202));
+        TEST_ASSERT_INT_EQ(1, manager->active_count);
+        TEST_ASSERT_INT_EQ(42, media(&f)->call_generation);
+        TEST_ASSERT_INT_EQ(0, f.hangups);
+        df_runtime_media_module_stop(&f.media);
+        TEST_ASSERT_INT_EQ(0, f.media.incoming_binding_count);
+
+        init(&f);
+        f.media.lifecycle_api = NULL;
+        f.media.outbound_upgrade_api = v1 ? &original : NULL;
+        receive(&f, 1, ring, sizeof(ring), 0, 0x01020304, 101);
+        manager = f.media.instance;
+        manager->sessions[0].stop_encoder = fail_encoder_stop;
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED,
+            df_runtime_media_module_release_incoming(&f.media, "gate_main", 41,
+                DF_MEDIA_INCOMING_RELEASE_LOCAL, 102));
+        f.session.generation = 42;
+        f.session.state = DF_GVS_RINGING;
+        memcpy(f.session.peer, f.stations[1].logical_address, 6);
+        manager->sessions[0].stop_encoder = NULL;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&f.media, 202));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&f.media, 302));
+        TEST_ASSERT_INT_EQ(0, manager->active_count);
+        TEST_ASSERT_INT_EQ(0, f.media.incoming_bindings[0].cleanup_pending);
+        TEST_ASSERT_INT_EQ(42, f.session.generation);
+        TEST_ASSERT_INT_EQ(DF_GVS_RINGING, f.session.state);
+        TEST_ASSERT_INT_EQ(0, f.hangups);
+        df_runtime_media_module_stop(&f.media);
+
+        init(&f);
+        f.media.lifecycle_api = NULL;
+        f.media.outbound_upgrade_api = v1 ? &original : NULL;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_request_start(&f.media,
+            "gate_main", 100, &generation));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&f.media, 100));
+        const struct df_media_session_key preview = {"gate_main", generation};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_command(&f.media,
+            DF_MEDIA_MODULE_COMMAND_STOP, &preview, false, 101));
+        TEST_ASSERT_INT_EQ(1, f.hangups);
+        df_runtime_media_module_stop(&f.media);
+    }
+}
+
+void test_runtime_station_call_release_failure_survives_main_replacement(void) {
+    for (unsigned incoming = 0; incoming < 2; incoming++) {
+        struct call_fixture f;
+        init(&f);
+        if (incoming) {
+            const uint8_t ring[] = {0, 0x20, 0x6f, 0, 0x20, 0x6e, 30};
+            receive(&f, 1, ring, sizeof(ring), 0, 0x01020304, 101);
+        } else talking(&f);
+        struct df_media_session_manager *manager = f.media.instance;
+        struct df_media_session *old = &manager->sessions[0];
+        const struct df_media_session_key key = {"gate_main", old->generation};
+        old->stop_encoder = fail_encoder_stop;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_hangup_station(&f.ubus,
+            f.ubus.runtime_id, "gate_main", key.generation));
+        step(&f, 105);
+        receive(&f, 0x82, NULL, 0, 0, 0x01020304, 106);
+        TEST_ASSERT_INT_EQ(DF_GVS_ENDED, f.session.state);
+        struct df_media_session_status_v3 entries[2];
+        struct df_media_module_status_v3 status = {.sessions = entries, .session_count = 2};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_status(&f.media, &status));
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED, entries[0].last_error);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_STOPPING, entries[0].state);
+        TEST_ASSERT_INT_EQ(1, manager->active_count);
+        unsigned hangups = f.hangups;
+        /* The runtime may move on; retained cleanup must not depend on ENDED. */
+        f.session.generation = 42;
+        f.session.state = DF_GVS_RINGING;
+        memcpy(f.session.peer, f.stations[1].logical_address, 6);
+        old->stop_encoder = NULL;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&f.media, 206));
+        TEST_ASSERT_INT_EQ(0, manager->active_count);
+        TEST_ASSERT_INT_EQ(hangups, f.hangups);
+        TEST_ASSERT_INT_EQ(DF_GVS_RINGING, f.session.state);
+        TEST_ASSERT_INT_EQ(42, f.session.generation);
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_incoming_call(
+            manager, "gate_main", 43, 207));
+        uint64_t replacement = media(&f)->generation;
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+            df_runtime_media_module_outbound_operation(&f.media, incoming ?
+                DF_MEDIA_INCOMING_RELEASE_LOCAL : DF_MEDIA_OUTBOUND_RELEASE,
+                &key, 41, 208));
+        TEST_ASSERT_INT_EQ(replacement, media(&f)->generation);
+        TEST_ASSERT_INT_EQ(1, manager->active_count);
+        df_runtime_media_module_stop(&f.media);
+    }
 }
 
 void test_runtime_station_call_real_control_lifecycle(void) {
@@ -365,7 +525,7 @@ void test_runtime_station_call_incoming_and_limits(void) {
         if (scenario == 2) f.ubus.next_station_call_operation_id = UINT64_MAX;
         if (scenario == 3) f.control.dispatch.next_id = 0;
         if (scenario == 4) f.ubus.last_now_ms = UINT64_MAX - 10;
-        if (scenario == 5) f.media.outbound_upgrade_api = NULL;
+        if (scenario == 5) f.media.lifecycle_api = NULL;
         if (scenario == 6) f.control.dispatch.state = DF_GVS_CALL_QUEUED;
         uint64_t generation = 1;
         TEST_ASSERT_INT_EQ(1, df_runtime_ubus_call_station(&f.ubus,

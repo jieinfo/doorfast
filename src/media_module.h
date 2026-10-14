@@ -314,6 +314,17 @@ struct df_media_module_outbound_upgrade_api_v1 {
 extern const struct df_media_module_outbound_upgrade_api_v1
     df_media_module_outbound_upgrade_api_v1;
 
+/* v1 guarantees operations 1–5 only. v2 additionally guarantees exact local
+ * incoming/reasoned release and persistent cleanup/error recovery on ticks. */
+#define DF_MEDIA_MODULE_LIFECYCLE_ABI_VERSION 2U
+struct df_media_module_lifecycle_api_v2 {
+    uint32_t abi_version;
+    size_t struct_size;
+    int (*operation)(void *, enum df_media_outbound_operation,
+                     const struct df_media_session_key *, uint64_t, uint64_t);
+};
+extern const struct df_media_module_lifecycle_api_v2 df_media_module_lifecycle_api_v2;
+
 int df_media_module_config_v3_validate(
     const struct df_media_module_config_v3 *,
     const struct df_media_module_callbacks_v3 *);

@@ -373,6 +373,18 @@ void test_runtime_media_outbound_extension_fails_closed(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_runtime_media_module_set_outbound_api(&module, &extension));
     TEST_ASSERT_INT_EQ(1, module.outbound_upgrade_api == NULL);
+    struct df_media_module_lifecycle_api_v2 lifecycle = df_media_module_lifecycle_api_v2;
+    lifecycle.abi_version = 1;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_set_lifecycle_api(&module, &lifecycle));
+    lifecycle = df_media_module_lifecycle_api_v2;
+    lifecycle.struct_size--;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_set_lifecycle_api(&module, &lifecycle));
+    lifecycle = df_media_module_lifecycle_api_v2;
+    lifecycle.operation = NULL;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_set_lifecycle_api(&module, &lifecycle));
+    TEST_ASSERT_INT_EQ(1, module.lifecycle_api == NULL);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_module_outbound_upgrade_api_v1.operation(
+        NULL, DF_MEDIA_INCOMING_RELEASE_LOCAL, &key, 41, 100));
 
     /* Exercise the same dlopen API/instance boundary as runtime startup with
      * an actual legacy v3 library, rather than inferring support from v3. */

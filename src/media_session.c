@@ -222,7 +222,9 @@ int df_media_session_stop_pipeline(struct df_media_session *session) {
     int result;
 
     if (session == NULL) return DF_ERR_INVALID;
-    result = df_media_encoder_stop(&session->encoder, 100U);
+    result = session->stop_encoder != NULL ?
+        session->stop_encoder(&session->encoder, 100U) :
+        df_media_encoder_stop(&session->encoder, 100U);
     df_media_session_queue_destroy(session);
     df_media_session_clear_publication(session);
     return result;

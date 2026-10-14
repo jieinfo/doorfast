@@ -170,7 +170,7 @@ int df_runtime_station_call_admit(struct df_runtime_ubus *u, const char *station
     uint64_t now;
     int result;
     if (b == NULL || station == NULL || generation == NULL || u->media == NULL ||
-        u->media->outbound_upgrade_api == NULL) return DF_ERR_IO;
+        u->media->lifecycle_api == NULL) return DF_ERR_IO;
     now = u->last_now_ms;
     s = df_station_registry_find(b->stations, station);
     if (s == NULL) return DF_MEDIA_ERROR_STATION_NOT_FOUND;
@@ -230,7 +230,8 @@ int df_runtime_station_call_install(struct df_runtime_call_binding *b,
     if (b == NULL || r == NULL || r->type != DF_GVS_CALL_COMMAND_CALL) return DF_ERR_INVALID;
     u = b->ubus;
     if (u == NULL || binding_for(u) != b || !df_runtime_id_is_valid(r->runtime_id) ||
-        strcmp(r->runtime_id, u->runtime_id) != 0) return DF_ERR_INVALID;
+        strcmp(r->runtime_id, u->runtime_id) != 0 || u->media == NULL ||
+        u->media->lifecycle_api == NULL) return DF_ERR_INVALID;
     op = &u->station_call;
     s = df_station_registry_find(b->stations, r->station_id);
     if (s == NULL || !s->enabled || main_active(b->session) || slot_busy(b->control) ||
@@ -391,9 +392,8 @@ void df_runtime_call_release_ended(struct df_runtime_call_binding *b, uint64_t n
     case DF_GVS_CALL_END_RUNTIME_RESET: operation = DF_MEDIA_INCOMING_RELEASE_RUNTIME; break;
     default: break;
     }
-    const struct df_media_session_key key = {station->id, media.generation};
-    (void)df_runtime_media_module_outbound_operation(b->ubus->media, operation,
-        &key, b->session->generation, now);
+    (void)df_runtime_media_module_release_incoming(b->ubus->media, station->id,
+        b->session->generation, operation, now);
 }
 
 int df_runtime_call_hangup(struct df_runtime_call_binding *b, uint64_t generation,
