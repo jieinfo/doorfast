@@ -150,7 +150,11 @@ RECORDER_SOURCES += src/evidence_metadata.c src/evidence_log.c
 build/doorfast-recorder: $(RECORDER_SOURCES) | build
 	$(CC) $(CPPFLAGS) -DDF_RECORDER_PROGRAM $(CFLAGS) $(RECORDER_SOURCES) -o $@ $(PCAP_LIBS)
 
-test: build/doorfast-tests
+test: build/doorfast-tests build/capture-delivery-tests
+
+build/capture-delivery-tests: tests/test_capture_delivery.c src/capture.c src/capture.h tests/test.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_capture_delivery.c -o $@ $(PCAP_LIBS)
+	$@
 
 doorfast: build/doorfast
 

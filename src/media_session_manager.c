@@ -958,15 +958,20 @@ int df_media_session_manager_receive_control(
             session->confirmed_ms = now_ms;
             session->preview_confirmation_current =
                 previous_monitor.request_attempts != 0U &&
-                now_ms < previous_monitor.next_action_ms;
+                previous_monitor.confirmation_deadline_ms != 0U &&
+                now_ms < previous_monitor.confirmation_deadline_ms;
             session->preview_confirmation_generation = session->monitor.generation;
             df_media_phase_log(session, "confirmed", now_ms);
-            if (df_media_session_reset_attempt(session,
-                    session->monitor.generation) != DF_OK)
-                return DF_ERR_IO;
-            session->state = session->publication_generation != 0U ?
-                (session->viewer_active ? DF_MEDIA_SESSION_VIEWING :
-                    DF_MEDIA_SESSION_PUBLISHING) : DF_MEDIA_SESSION_AWAITING_VIDEO;
+            /* A current confirmation may follow the first real JPEG on the
+             * independent UDP media socket. Do not discard its live pipeline. */
+            if (!previous_monitor.media_ready) {
+                if (df_media_session_reset_attempt(session,
+                        session->monitor.generation) != DF_OK)
+                    return DF_ERR_IO;
+                session->state = session->publication_generation != 0U ?
+                    (session->viewer_active ? DF_MEDIA_SESSION_VIEWING :
+                        DF_MEDIA_SESSION_PUBLISHING) : DF_MEDIA_SESSION_AWAITING_VIDEO;
+            }
         }
         if (result.retrying) {
             session->preview_confirmation_current = false;

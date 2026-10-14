@@ -386,6 +386,10 @@ void test_default_capture_filter(void);
 void test_runtime_capture_filter_excludes_owned_media_ports(void);
 void test_capture_next_rejects_invalid_arguments(void);
 void test_capture_record_preserves_timestamp_and_wire_length(void);
+void test_media_session_manager_video_before_outbound_confirmation(void);
+void test_media_session_manager_video_first_confirmation_guards(void);
+void test_runtime_station_call_video_before_confirmation_talks(void);
+void test_gvs_monitor_video_first_confirmation_is_request_scoped(void);
 void test_gvs_media_receiver_binds_and_routes_complete_datagrams(void);
 void test_gvs_media_receiver_rejects_truncation_and_duplicate_ownership(void);
 void test_gvs_media_receiver_reserves_burst_safe_receive_buffer(void);
@@ -452,6 +456,15 @@ static int capture_media_encoder_arguments(int argc, char **argv)
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--outbound-field-timing") == 0) {
+        test_media_session_manager_video_before_outbound_confirmation();
+        test_media_session_manager_video_first_confirmation_guards();
+        test_runtime_station_call_video_before_confirmation_talks();
+        test_gvs_monitor_video_first_confirmation_is_request_scoped();
+        if (test_failures() != 0) return 1;
+        puts("outbound field timing tests passed");
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--station-call-lifecycle") == 0) {
         test_runtime_station_call_admission_prepares_real_preview();
         test_runtime_station_call_real_control_lifecycle();
@@ -902,6 +915,10 @@ int main(int argc, char **argv) {
     test_runtime_capture_filter_excludes_owned_media_ports();
     test_capture_next_rejects_invalid_arguments();
     test_capture_record_preserves_timestamp_and_wire_length();
+    test_media_session_manager_video_before_outbound_confirmation();
+    test_media_session_manager_video_first_confirmation_guards();
+    test_runtime_station_call_video_before_confirmation_talks();
+    test_gvs_monitor_video_first_confirmation_is_request_scoped();
     test_gvs_media_receiver_binds_and_routes_complete_datagrams();
     test_gvs_media_receiver_rejects_truncation_and_duplicate_ownership();
     test_gvs_media_receiver_reserves_burst_safe_receive_buffer();
