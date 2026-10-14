@@ -19,6 +19,34 @@
 #include "runtime_ubus.h"
 #include "test.h"
 
+void test_runtime_call_submit_updates_live_owner(void) {
+    const uint8_t identity[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_station station = {
+        .id = "gate_main", .logical_address = {0x32, 2, 1, 0, 2, 0},
+    };
+    const struct df_station_registry stations = {.items = &station, .count = 1U};
+    struct df_gvs_call_control control;
+    struct df_gvs_session session = {0};
+    struct df_gvs_deadline deadline = {0};
+    struct df_runtime_call_binding binding;
+    struct df_runtime_call_request request = {
+        .type = DF_GVS_CALL_COMMAND_CALL, .session_generation = 9U,
+        .primary_media_port = 8303, .secondary_media_port = 8302,
+        .duration_seconds = 120,
+    };
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(&control, 0U,
+        df_gvs_placeholder_header_fields, NULL));
+    (void)snprintf(request.station_id, sizeof(request.station_id), "%s", "gate_main");
+    binding.control = &control; binding.session = &session;
+    binding.deadline = &deadline; binding.identity = identity;
+    binding.stations = &stations;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_call_submit(&request, 0U, &binding));
+    TEST_ASSERT_INT_EQ(DF_GVS_PREVIEW, session.state);
+    TEST_ASSERT_INT_EQ(9, (int)session.generation);
+    TEST_ASSERT_INT_EQ(0, memcmp(session.peer, station.logical_address, 6U));
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_QUEUED, control.dispatch.state);
+}
+
 struct runtime_audio_sink {
     struct df_gvs_audio_chunk chunk;
     uint8_t samples[1600];

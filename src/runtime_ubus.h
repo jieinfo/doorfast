@@ -43,11 +43,36 @@ struct df_runtime_call_request {
     enum df_gvs_call_command_type type;
     char runtime_id[DF_RUNTIME_ID_HEX_LENGTH + 1U];
     uint64_t session_generation;
+    /* Media and control identities are intentionally independent.  The
+     * legacy session_generation field remains the control owner generation. */
+    uint64_t media_generation;
     uint16_t primary_media_port;
     uint16_t secondary_media_port;
     uint8_t duration_seconds;
     uint8_t reason;
     char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+};
+
+enum df_runtime_station_call_stage {
+    DF_RUNTIME_STATION_CALL_IDLE = 0,
+    DF_RUNTIME_STATION_CALL_PREPARING,
+    DF_RUNTIME_STATION_CALL_CALLING,
+    DF_RUNTIME_STATION_CALL_TALKING,
+    DF_RUNTIME_STATION_CALL_ENDING,
+    DF_RUNTIME_STATION_CALL_ENDED,
+    DF_RUNTIME_STATION_CALL_FAILED,
+};
+
+struct df_runtime_station_call_operation {
+    uint64_t operation_id;
+    char station_id[DF_MEDIA_MODULE_STATION_ID_MAX];
+    uint64_t media_generation;
+    uint64_t control_generation;
+    enum df_runtime_station_call_stage stage;
+    bool owns_preview;
+    int error;
+    uint64_t started_ms;
+    uint64_t deadline_ms;
 };
 
 typedef int (*df_runtime_call_submit_fn)(
@@ -209,6 +234,8 @@ struct df_runtime_ubus {
     uint8_t station_identity[6];
     bool stations_bound;
     bool station_scan_enabled;
+    struct df_runtime_station_call_operation station_call;
+    uint64_t next_station_call_operation_id;
 };
 
 int df_runtime_ubus_start(struct df_runtime_ubus *service,

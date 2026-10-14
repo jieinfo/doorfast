@@ -56,6 +56,10 @@ static const struct df_runtime_media_paths df_runtime_media_paths = {
     DF_RUNTIME_VIDEO_SNAPSHOT,
 };
 
+uint64_t df_runtime_control_generation_next(uint64_t current) {
+    return current == UINT64_MAX ? 0U : current + 1U;
+}
+
 #define DF_RUNTIME_PREVIEW_ROUTE_MAX_AGE_MS 60000U
 
 static void df_runtime_audio_clear(struct df_gvs_audio_jitter *jitter,
@@ -541,14 +545,6 @@ int df_runtime_sync_configure(struct df_gvs_runtime_sync *sync,
     return DF_OK;
 }
 
-struct df_runtime_call_binding {
-    struct df_gvs_call_control *control;
-    struct df_gvs_session *session;
-    struct df_gvs_deadline *deadline;
-    const uint8_t *identity;
-    const struct df_station_registry *stations;
-};
-
 static const struct df_station *df_runtime_call_station_find(
     const struct df_station_registry *registry, const char *station_id) {
     size_t index;
@@ -572,7 +568,7 @@ static int df_runtime_call_status_provider(
         binding->control, binding->session, binding->deadline, status);
 }
 
-static int df_runtime_call_submit(
+int df_runtime_call_submit(
     const struct df_runtime_call_request *request, uint64_t now_ms,
     void *context) {
     struct df_runtime_call_binding *binding = context;
@@ -589,18 +585,27 @@ static int df_runtime_call_submit(
     if (request->type == DF_GVS_CALL_COMMAND_CALL) {
         const struct df_station *station = df_runtime_call_station_find(
             binding->stations, request->station_id);
-        struct df_gvs_session station_session;
+        struct df_gvs_session previous_session;
+        int result;
 
         if (station == NULL) return DF_ERR_INVALID;
-        station_session = *binding->session;
-        station_session.state = DF_GVS_PREVIEW;
-        station_session.generation = request->session_generation;
-        memcpy(station_session.peer, station->logical_address,
-            sizeof(station_session.peer));
-        return df_gvs_call_control_submit_call(
-            binding->control, &station_session, request->session_generation,
+        /* The dispatch command must be prepared from the actual runtime
+         * session.  A stack copy makes current()/ACK/heartbeat checks observe
+         * the old idle owner forever. */
+        if (request->session_generation == 0U ||
+            request->session_generation == UINT64_MAX)
+            return DF_ERR_INVALID;
+        previous_session = *binding->session;
+        binding->session->state = DF_GVS_PREVIEW;
+        binding->session->generation = request->session_generation;
+        memcpy(binding->session->peer, station->logical_address,
+            sizeof(binding->session->peer));
+        result = df_gvs_call_control_submit_call(
+            binding->control, binding->session, request->session_generation,
             binding->identity, request->primary_media_port,
             request->secondary_media_port, request->duration_seconds, now_ms);
+        if (result != DF_OK) *binding->session = previous_session;
+        return result;
     }
     if (request->type == DF_GVS_CALL_COMMAND_HANGUP) {
         return df_gvs_call_control_submit_hangup(

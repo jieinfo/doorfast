@@ -1,4 +1,5 @@
 #include "runtime_ubus.h"
+#include "runtime_service.h"
 #include "deployment_health.h"
 
 #include <arpa/inet.h>
@@ -74,6 +75,7 @@ struct df_runtime_station_route_entry {
 };
 
 #define DF_RUNTIME_UBUS_RECONNECT_MS 5000U
+#define DF_RUNTIME_STATION_CALL_PREPARE_MS 30000U
 
 static bool df_runtime_ubus_log_safe(const char *message) {
     return message != NULL && strstr(message, "access_material") == NULL &&
@@ -1962,20 +1964,63 @@ int df_runtime_ubus_monitor_viewer(struct df_runtime_ubus *service,
 
 int df_runtime_ubus_call_station(struct df_runtime_ubus *service,
     const char *runtime_id, const char *station_id, uint64_t *generation) {
+    struct df_gvs_call_control_status call_status;
+    uint64_t control_generation;
     int result = df_runtime_ubus_media_identity(service, runtime_id, station_id);
     if (generation == NULL) return DF_ERR_INVALID;
     *generation = 0U;
     if (result != DF_OK) return result;
     if (service->submit_call == NULL) return DF_ERR_IO;
+    if (service->station_call.stage != DF_RUNTIME_STATION_CALL_IDLE &&
+        service->station_call.stage != DF_RUNTIME_STATION_CALL_ENDED &&
+        service->station_call.stage != DF_RUNTIME_STATION_CALL_FAILED &&
+        strcmp(service->station_call.station_id, station_id) == 0) {
+        *generation = service->station_call.media_generation;
+        return DF_OK;
+    }
+    if (service->provide_call_status == NULL ||
+        df_runtime_ubus_read_call_status(service, &call_status) != DF_OK ||
+        call_status.session_generation == UINT64_MAX)
+        return DF_ERR_IO;
+    if (call_status.session_state == DF_GVS_RINGING ||
+        call_status.session_state == DF_GVS_TALKING)
+        return DF_ERR_INVALID;
+    control_generation = df_runtime_control_generation_next(
+        call_status.session_generation);
+    if (control_generation == 0U) return DF_ERR_IO;
+    if (service->next_station_call_operation_id == UINT64_MAX)
+        return DF_ERR_IO;
+    service->next_station_call_operation_id++;
+    memset(&service->station_call, 0, sizeof(service->station_call));
+    service->station_call.operation_id = service->next_station_call_operation_id;
+    (void)snprintf(service->station_call.station_id,
+        sizeof(service->station_call.station_id), "%s", station_id);
+    service->station_call.control_generation = control_generation;
+    service->station_call.stage = DF_RUNTIME_STATION_CALL_PREPARING;
+    service->station_call.owns_preview = true;
+    service->station_call.started_ms = service->last_now_ms;
+    service->station_call.deadline_ms =
+        service->last_now_ms <= UINT64_MAX - DF_RUNTIME_STATION_CALL_PREPARE_MS
+            ? service->last_now_ms + DF_RUNTIME_STATION_CALL_PREPARE_MS : UINT64_MAX;
     result = df_runtime_media_module_call(service->media, station_id,
         service->last_now_ms, generation);
     if (result == DF_OK) {
+        service->station_call.media_generation = *generation;
         struct df_runtime_call_request request = {.type = DF_GVS_CALL_COMMAND_CALL,
-            .session_generation = *generation, .primary_media_port = 8303,
+            .session_generation = control_generation,
+            .media_generation = *generation, .primary_media_port = 8303,
             .secondary_media_port = 8302, .duration_seconds = 120};
         (void)snprintf(request.runtime_id, sizeof(request.runtime_id), "%s", service->runtime_id);
         (void)snprintf(request.station_id, sizeof(request.station_id), "%s", station_id);
         result = service->submit_call(&request, service->last_now_ms, service->call_context);
+        service->station_call.stage = result == DF_OK
+            ? DF_RUNTIME_STATION_CALL_CALLING : DF_RUNTIME_STATION_CALL_FAILED;
+        service->station_call.error = result == DF_OK ? DF_OK : result;
+    } else {
+        service->station_call.stage = DF_RUNTIME_STATION_CALL_FAILED;
+        service->station_call.error = result;
+        service->station_call.media_generation = 0U;
+        service->station_call.owns_preview = false;
     }
     return result;
 }
@@ -1989,8 +2034,16 @@ int df_runtime_ubus_hangup_station(struct df_runtime_ubus *service,
     if (result != DF_OK || generation == 0U || service->submit_call == NULL)
         return DF_ERR_INVALID;
     {
+        uint64_t control_generation;
+        if (strcmp(service->station_call.station_id, station_id) != 0 ||
+            service->station_call.media_generation != generation ||
+            service->station_call.control_generation == 0U ||
+            service->station_call.stage == DF_RUNTIME_STATION_CALL_IDLE)
+            return DF_ERR_INVALID;
+        control_generation = service->station_call.control_generation;
         struct df_runtime_call_request request = {.type = DF_GVS_CALL_COMMAND_HANGUP,
-            .session_generation = generation, .reason = 1U};
+            .session_generation = control_generation,
+            .media_generation = generation, .reason = 1U};
         (void)snprintf(request.runtime_id, sizeof(request.runtime_id), "%s", service->runtime_id);
         (void)snprintf(request.station_id, sizeof(request.station_id), "%s", station_id);
         result = service->submit_call(&request, service->last_now_ms, service->call_context);
@@ -1999,6 +2052,7 @@ int df_runtime_ubus_hangup_station(struct df_runtime_ubus *service,
             DF_MEDIA_MODULE_COMMAND_STOP, &key, false, service->last_now_ms);
         if (enqueue_result != DF_OK) return enqueue_result;
         if (result != DF_OK) return result;
+        service->station_call.stage = DF_RUNTIME_STATION_CALL_ENDING;
     }
     return DF_OK;
 }

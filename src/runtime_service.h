@@ -15,6 +15,18 @@
 
 struct df_runtime_ubus;
 struct df_event_stream;
+struct df_runtime_call_request;
+
+struct df_runtime_call_binding {
+    struct df_gvs_call_control *control;
+    struct df_gvs_session *session;
+    struct df_gvs_deadline *deadline;
+    const uint8_t *identity;
+    const struct df_station_registry *stations;
+};
+
+int df_runtime_call_submit(const struct df_runtime_call_request *, uint64_t,
+    void *);
 
 struct df_runtime_media_paths {
     const char *audio_snapshot;
@@ -65,5 +77,9 @@ int df_runtime_media_push_video_with_event(struct df_runtime_media_module *,
 int df_runtime_media_tick_with_event(struct df_runtime_media_module *,
     struct df_runtime_ubus *, struct df_event_stream *, uint64_t now_ms);
 int df_runtime_service_run(const struct df_runtime_config *runtime);
+
+/* Control generations belong to the live runtime session; media generations
+ * are allocated by the media module and must never be substituted here. */
+uint64_t df_runtime_control_generation_next(uint64_t current);
 
 #endif
