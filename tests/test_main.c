@@ -6,6 +6,7 @@
 void test_event_relay(void);
 void test_runtime_ubus_diagnostic_emitter(void);
 void test_gvs_call_control_observes_capture_error_boundary(void);
+void test_gvs_call_control_records_zero_time_sync_timeout(void);
 void test_gvs_call_runtime_idle_deadlines(void);
 void test_gvs_call_runtime_tick_is_atomic(void);
 void test_gvs_call_control_answer_reaches_confirmation(void);
@@ -440,6 +441,7 @@ int main(int argc, char **argv) {
         test_gvs_call_control_status_ignores_stale_generation_deadline();
         test_gvs_call_control_handshake_memory_lifecycle();
         test_gvs_call_control_observes_capture_error_boundary();
+        test_gvs_call_control_records_zero_time_sync_timeout();
         if (test_failures() != 0) return 1;
         puts("wire observability tests passed");
         return 0;
@@ -868,6 +870,7 @@ int main(int argc, char **argv) {
     test_gvs_call_control_rejects_late_ack_without_overwriting_terminal();
     test_gvs_call_control_status_ignores_stale_generation_deadline();
     test_gvs_call_control_records_terminal_timeout_snapshot();
+    test_gvs_call_control_records_zero_time_sync_timeout();
     test_gvs_call_control_records_peer_hangup_and_clears_timer();
     test_gvs_call_control_new_runtime_has_empty_diagnostics();
     test_gvs_call_control_rejects_busy_and_stale_submission();

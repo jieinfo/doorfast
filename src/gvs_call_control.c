@@ -62,7 +62,8 @@ static void df_gvs_call_control_classify_transition(
         control->observed_generation = session->generation;
         return;
     }
-    if (result->runtime.session_timed_out &&
+    if ((result->runtime.session_timed_out ||
+         result->runtime.receive.timed_out_transition) &&
         df_gvs_call_control_session_active(previous->state)) {
         df_gvs_call_control_record_terminal(control,
             DF_GVS_CALL_END_SESSION_TIMEOUT, DF_GVS_CALL_FAULT_NONE,

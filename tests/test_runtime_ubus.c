@@ -13,6 +13,8 @@ struct diagnostic_recording {
     char text[4096];
     size_t length;
     unsigned results;
+    unsigned closed_results;
+    unsigned depth;
 };
 static void diagnostic_string(void *context, const char *key, const char *value) {
     struct diagnostic_recording *recording = context;
@@ -34,10 +36,16 @@ static void diagnostic_number(void *context, const char *key, uint64_t value) {
 static void *diagnostic_open(void *context) {
     struct diagnostic_recording *recording = context;
     recording->results++;
+    TEST_ASSERT_INT_EQ(0, recording->depth);
+    recording->depth++;
     return recording;
 }
 static void diagnostic_close(void *context, void *cookie) {
+    struct diagnostic_recording *recording = context;
     TEST_ASSERT_INT_EQ(1, context == cookie);
+    TEST_ASSERT_INT_EQ(1, recording->depth);
+    recording->closed_results++;
+    if (recording->depth > 0) recording->depth--;
 }
 
 void test_runtime_ubus_diagnostic_emitter(void) {
@@ -101,6 +109,8 @@ void test_runtime_ubus_diagnostic_emitter(void) {
     recording = (struct diagnostic_recording){0};
     df_runtime_ubus_emit_media_last_results(&media, &sink);
     TEST_ASSERT_INT_EQ(2, recording.results);
+    TEST_ASSERT_INT_EQ(recording.results, recording.closed_results);
+    TEST_ASSERT_INT_EQ(0, recording.depth);
     TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
         "station_id=\"gate_main\";generation=7;timer=\"none\";remaining_ms=0;"
         "end_reason=\"unknown\";failure_reason=\"first_frame_timeout\";"
@@ -112,6 +122,8 @@ void test_runtime_ubus_diagnostic_emitter(void) {
     recording = (struct diagnostic_recording){0};
     df_runtime_ubus_emit_media_last_results(&media, &sink);
     TEST_ASSERT_INT_EQ(0, recording.results);
+    TEST_ASSERT_INT_EQ(0, recording.closed_results);
+    TEST_ASSERT_INT_EQ(0, recording.depth);
     call.timer = (enum df_gvs_call_timer)999;
     call.end_reason = (enum df_gvs_call_end_reason)999;
     call.fault = (enum df_gvs_call_fault)999;
