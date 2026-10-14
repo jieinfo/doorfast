@@ -102,6 +102,8 @@ TEST_SOURCES += tests/test_media_module.c src/media_module.c src/media_module_co
 TEST_SOURCES += tests/test_media_session.c src/media_session.c
 TEST_SOURCES += tests/test_media_session_manager.c src/media_session_manager.c
 TEST_SOURCES += tests/test_runtime_media_module.c src/runtime_media_module.c
+TEST_SOURCES += src/runtime_station_call.c tests/test_runtime_station_call.c
+DAEMON_SOURCES += src/runtime_station_call.c
 build/doorfast-tests: src/evidence_recorder.h
 build/doorfast-tests: src/evidence_classifier.h
 build/doorfast-tests: src/evidence_log.h

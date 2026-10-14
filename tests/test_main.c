@@ -59,11 +59,16 @@ void test_gvs_call_control_bounds_failed_simulated_delivery(void);
 void test_gvs_call_control_rejects_receive_before_submission_time(void);
 void test_gvs_call_control_exposes_public_status(void);
 void test_runtime_ubus_validates_and_routes_call_requests(void);
-void test_runtime_call_submit_updates_live_owner(void);
-void test_runtime_ubus_station_call_binds_control_and_media_owners(void);
-void test_runtime_ubus_station_hangup_maps_media_to_control_generation(void);
-void test_runtime_ubus_station_call_failure_is_retryable(void);
-void test_runtime_ubus_station_call_operation_id_overflow_is_safe(void);
+void test_runtime_call_submit_rejects_unowned_generation(void);
+void test_runtime_station_call_admission_prepares_real_preview(void);
+void test_runtime_station_call_real_control_lifecycle(void);
+void test_runtime_station_call_timeout_and_rollback(void);
+void test_runtime_station_call_terminal_reasons(void);
+void test_runtime_station_call_incoming_and_limits(void);
+void test_runtime_station_call_deadlines_and_identity(void);
+void test_runtime_station_call_global_hangup_and_failed_enqueue(void);
+void test_runtime_station_call_direct_submit_and_ack_guards(void);
+void test_runtime_station_call_cleanup_error_and_shared_owner(void);
 void test_runtime_ubus_call_station_identity_uses_current_main_call(void);
 void test_runtime_ubus_reports_handshake_transport(void);
 void test_runtime_ubus_media_controls_require_current_generation(void);
@@ -405,7 +410,7 @@ void test_gvs_call_ack_confirms_hangup_and_cancels_stale(void);
 void test_gvs_call_ack_receives_complete_frame(void);
 void test_gvs_call_runtime_confirms_before_talking_transition(void);
 void test_gvs_call_runtime_swallows_wrong_answer(void);
-void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void);
+void test_gvs_call_runtime_confirms_hangup_reply_and_ends_session(void);
 void test_gvs_call_runtime_cancels_ack_after_preemption(void);
 void test_gvs_transport_policy(void);
 int test_suite_count(void) {
@@ -444,6 +449,20 @@ static int capture_media_encoder_arguments(int argc, char **argv)
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--station-call-lifecycle") == 0) {
+        test_runtime_station_call_admission_prepares_real_preview();
+        test_runtime_station_call_real_control_lifecycle();
+        test_runtime_station_call_timeout_and_rollback();
+        test_runtime_station_call_terminal_reasons();
+        test_runtime_station_call_incoming_and_limits();
+        test_runtime_station_call_deadlines_and_identity();
+        test_runtime_station_call_global_hangup_and_failed_enqueue();
+        test_runtime_station_call_direct_submit_and_ack_guards();
+        test_runtime_station_call_cleanup_error_and_shared_owner();
+        if (test_failures() != 0) return 1;
+        puts("station call lifecycle tests passed");
+        return 0;
+    }
     int capture_result = capture_media_encoder_arguments(argc, argv);
     if (argc == 2 && strcmp(argv[1], "--wire-observability") == 0) {
         test_runtime_ubus_diagnostic_emitter();
@@ -743,7 +762,7 @@ int main(int argc, char **argv) {
     test_gvs_call_ack_receives_complete_frame();
     test_gvs_call_runtime_confirms_before_talking_transition();
     test_gvs_call_runtime_swallows_wrong_answer();
-    test_gvs_call_runtime_confirms_hangup_reply_without_ending_session();
+    test_gvs_call_runtime_confirms_hangup_reply_and_ends_session();
     test_gvs_call_runtime_cancels_ack_after_preemption();
     test_gvs_transport_policy();
     test_gvs_peer_sim_rejects_invalid_time_and_bounds_queue();
@@ -915,11 +934,16 @@ int main(int argc, char **argv) {
     test_gvs_call_control_rejects_receive_before_submission_time();
     test_gvs_call_control_exposes_public_status();
     test_runtime_ubus_validates_and_routes_call_requests();
-    test_runtime_call_submit_updates_live_owner();
-    test_runtime_ubus_station_call_binds_control_and_media_owners();
-    test_runtime_ubus_station_hangup_maps_media_to_control_generation();
-    test_runtime_ubus_station_call_failure_is_retryable();
-    test_runtime_ubus_station_call_operation_id_overflow_is_safe();
+    test_runtime_call_submit_rejects_unowned_generation();
+    test_runtime_station_call_admission_prepares_real_preview();
+    test_runtime_station_call_real_control_lifecycle();
+    test_runtime_station_call_timeout_and_rollback();
+    test_runtime_station_call_terminal_reasons();
+    test_runtime_station_call_incoming_and_limits();
+    test_runtime_station_call_deadlines_and_identity();
+    test_runtime_station_call_global_hangup_and_failed_enqueue();
+    test_runtime_station_call_direct_submit_and_ack_guards();
+    test_runtime_station_call_cleanup_error_and_shared_owner();
     test_runtime_ubus_diagnostic_emitter();
     test_runtime_ubus_reports_handshake_transport();
     test_runtime_ubus_media_controls_require_current_generation();

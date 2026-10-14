@@ -73,6 +73,11 @@ struct df_runtime_station_call_operation {
     int error;
     uint64_t started_ms;
     uint64_t deadline_ms;
+    bool promoted;
+    bool command_sent;
+    enum df_gvs_call_end_reason end_reason;
+    enum df_gvs_call_fault fault;
+    int cleanup_error;
 };
 
 typedef int (*df_runtime_call_submit_fn)(

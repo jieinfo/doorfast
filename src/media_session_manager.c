@@ -552,18 +552,46 @@ int df_media_session_manager_outbound_operation(
     if (session == NULL || session->generation != key->generation)
         return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     if (now_ms < session->monitor.last_now_ms) return DF_ERR_INVALID;
+    bool incoming_release = operation >= DF_MEDIA_INCOMING_RELEASE_LOCAL &&
+        operation <= DF_MEDIA_INCOMING_RELEASE_UNKNOWN;
+    bool release = incoming_release || operation == DF_MEDIA_OUTBOUND_RELEASE ||
+        (operation >= DF_MEDIA_OUTBOUND_RELEASE_PEER &&
+         operation <= DF_MEDIA_OUTBOUND_RELEASE_UNKNOWN);
     if (operation == DF_MEDIA_OUTBOUND_ROLLBACK ||
-        operation == DF_MEDIA_OUTBOUND_RELEASE ||
+        release ||
         operation == DF_MEDIA_OUTBOUND_MARK_SENT) {
-        if (!session->outbound_handoff) return DF_ERR_INVALID;
+        if (incoming_release) {
+            if (session->outbound_handoff || session->purpose != DF_MEDIA_SESSION_CALL ||
+                control_generation == 0) return DF_ERR_INVALID;
+        } else if (!session->outbound_handoff) return DF_ERR_INVALID;
         if (control_generation != session->call_generation)
             return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     }
-    if (operation == DF_MEDIA_OUTBOUND_RELEASE) {
+    if (release) {
+        enum df_media_end_reason reason = DF_MEDIA_END_LOCAL_HANGUP;
+        enum df_media_failure_reason failure = DF_MEDIA_FAILURE_NONE;
+        switch (operation) {
+        case DF_MEDIA_INCOMING_RELEASE_PEER:
+        case DF_MEDIA_OUTBOUND_RELEASE_PEER: reason = DF_MEDIA_END_PEER_HANGUP; break;
+        case DF_MEDIA_INCOMING_RELEASE_SESSION:
+        case DF_MEDIA_OUTBOUND_RELEASE_SESSION: reason = DF_MEDIA_END_SESSION_TIMEOUT; break;
+        case DF_MEDIA_OUTBOUND_RELEASE_CONFIRMATION:
+            reason = DF_MEDIA_END_CONFIRMATION_TIMEOUT;
+            failure = DF_MEDIA_FAILURE_CONFIRMATION_TIMEOUT; break;
+        case DF_MEDIA_OUTBOUND_RELEASE_PREEMPTED:
+            reason = DF_MEDIA_END_PREEMPTED; failure = DF_MEDIA_FAILURE_PREEMPTED; break;
+        case DF_MEDIA_INCOMING_RELEASE_RUNTIME:
+        case DF_MEDIA_OUTBOUND_RELEASE_RUNTIME:
+            reason = DF_MEDIA_END_RUNTIME_RESET; failure = DF_MEDIA_FAILURE_RUNTIME_RESET; break;
+        case DF_MEDIA_INCOMING_RELEASE_UNKNOWN:
+        case DF_MEDIA_OUTBOUND_RELEASE_UNKNOWN:
+            reason = DF_MEDIA_END_UNKNOWN; failure = DF_MEDIA_FAILURE_UNKNOWN; break;
+        default: break;
+        }
         if (df_media_session_manager_stop_resources(session) != DF_OK)
             return DF_MEDIA_ERROR_ENCODER_FAILED;
         df_media_session_manager_record_terminal(manager, session,
-            DF_MEDIA_END_LOCAL_HANGUP, DF_MEDIA_FAILURE_NONE);
+            reason, failure);
         df_media_session_reset(session);
         manager->active_count--;
         df_media_session_manager_advance_revisions(manager, session);

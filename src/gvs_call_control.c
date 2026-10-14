@@ -71,14 +71,14 @@ static void df_gvs_call_control_classify_transition(
         control->observed_generation = session->generation;
         return;
     }
-    if (result->runtime.receive.ended_transition &&
+    if ((result->runtime.receive.ended_transition || result->runtime.local_hangup) &&
         df_gvs_call_control_session_active(previous->state) &&
         session->state == DF_GVS_ENDED) {
         df_gvs_call_control_record_terminal(control,
-            result->runtime.receive.local_hangup
+            (result->runtime.receive.local_hangup || result->runtime.local_hangup)
                 ? DF_GVS_CALL_END_LOCAL_HANGUP
                 : DF_GVS_CALL_END_PEER_HANGUP,
-            DF_GVS_CALL_FAULT_NONE, previous, previous->peer,
+            fault, previous, previous->peer,
             previous->generation);
         control->observed_generation = session->generation;
         return;
@@ -325,6 +325,18 @@ int df_gvs_call_control_step(
                      dispatch_for_session &&
                      !next_result.runtime.receive.preempted_session)
                 next.fault = DF_GVS_CALL_FAULT_CANCELLED;
+            if (dispatch_for_session &&
+                next.dispatch.command.type == DF_GVS_CALL_COMMAND_HANGUP &&
+                (next_result.dispatch_failed || next_result.dispatch_timed_out)) {
+                bool ended;
+                (void)df_gvs_session_abort(&next_session, &ended);
+                df_gvs_deadline_cancel(&next_deadline);
+                df_gvs_call_control_record_terminal(&next,
+                    DF_GVS_CALL_END_LOCAL_HANGUP, next.fault, &previous_session,
+                    previous_session.peer, previous_session.generation);
+                next_result.runtime.receive.ended_transition = ended;
+                next_result.runtime.receive.local_hangup = true;
+            }
         }
     }
     if (previous != DF_GVS_CALL_SENT &&
@@ -356,6 +368,8 @@ int df_gvs_call_control_step(
     }
     if (next_result.handshake_action_dropped && next.handshake_dropped < UINT64_MAX)
         next.handshake_dropped++;
+    if (!df_gvs_call_control_session_active(next_session.state))
+        next.handshake.active = false;
     *control = next;
     *session = next_session;
     *deadline = next_deadline;
@@ -409,6 +423,8 @@ int df_gvs_call_control_receive(
     }
     df_gvs_call_control_classify_transition(&next, &previous_session,
         &next_session, &next_result);
+    if (!df_gvs_call_control_session_active(next_session.state))
+        next.handshake.active = false;
     *control = next;
     *session = next_session;
     *deadline = next_deadline;

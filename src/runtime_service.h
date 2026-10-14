@@ -18,6 +18,8 @@ struct df_event_stream;
 struct df_runtime_call_request;
 
 struct df_runtime_call_binding {
+    /* Production coordinator authority; required for outbound admission. */
+    struct df_runtime_ubus *ubus;
     struct df_gvs_call_control *control;
     struct df_gvs_session *session;
     struct df_gvs_deadline *deadline;

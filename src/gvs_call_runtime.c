@@ -51,6 +51,15 @@ int df_gvs_call_runtime_tick(
         return DF_ERR_INVALID;
     }
     df_gvs_call_runtime_record_terminal(ack->state, &next_ack, &next_result);
+    if (next_result.acknowledgement_expired &&
+        next_ack.command.type == DF_GVS_CALL_COMMAND_HANGUP) {
+        bool ended = false;
+        (void)df_gvs_session_abort(&next_session, &ended);
+        df_gvs_deadline_cancel(&next_deadline);
+        next_result.receive.ended_transition = ended;
+        next_result.receive.local_hangup = true;
+        next_result.local_hangup = true;
+    }
     *ack = next_ack;
     *session = next_session;
     *deadline = next_deadline;
@@ -81,6 +90,15 @@ int df_gvs_call_runtime_receive(
         return DF_ERR_INVALID;
     }
     df_gvs_call_runtime_record_terminal(previous, ack, result);
+    if (result->acknowledgement_expired &&
+        ack->command.type == DF_GVS_CALL_COMMAND_HANGUP) {
+        bool ended = false;
+        (void)df_gvs_session_abort(session, &ended);
+        df_gvs_deadline_cancel(deadline);
+        result->receive.ended_transition = ended;
+        result->receive.local_hangup = true;
+        result->local_hangup = true;
+    }
     if (df_gvs_call_runtime_expected_ack(ack, &frame)) {
         if (ack->state != DF_GVS_CALL_ACK_WAITING ||
             df_gvs_call_ack_observe(ack, session, identity, &frame,
@@ -89,6 +107,15 @@ int df_gvs_call_runtime_receive(
             return DF_OK;
         }
         result->acknowledgement_confirmed = true;
+        if (ack->command.type == DF_GVS_CALL_COMMAND_HANGUP) {
+            bool ended = false;
+            (void)df_gvs_session_abort(session, &ended);
+            df_gvs_deadline_cancel(deadline);
+            result->receive.ended_transition = ended;
+            result->receive.local_hangup = true;
+            result->local_hangup = true;
+            return DF_OK;
+        }
         return df_gvs_receive_datagram(data, length, identity, session,
                                        deadline, now_ms, &result->receive);
     }

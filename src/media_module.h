@@ -283,6 +283,17 @@ enum df_media_outbound_operation {
     DF_MEDIA_OUTBOUND_RELEASE,
     DF_MEDIA_OUTBOUND_BIND_CONTROL,
     DF_MEDIA_OUTBOUND_MARK_SENT,
+    DF_MEDIA_OUTBOUND_RELEASE_PEER,
+    DF_MEDIA_OUTBOUND_RELEASE_SESSION,
+    DF_MEDIA_OUTBOUND_RELEASE_CONFIRMATION,
+    DF_MEDIA_OUTBOUND_RELEASE_PREEMPTED,
+    DF_MEDIA_OUTBOUND_RELEASE_RUNTIME,
+    DF_MEDIA_OUTBOUND_RELEASE_UNKNOWN,
+    DF_MEDIA_INCOMING_RELEASE_LOCAL,
+    DF_MEDIA_INCOMING_RELEASE_PEER,
+    DF_MEDIA_INCOMING_RELEASE_SESSION,
+    DF_MEDIA_INCOMING_RELEASE_RUNTIME,
+    DF_MEDIA_INCOMING_RELEASE_UNKNOWN,
 };
 /* CHECK validates exact public media key and current preview eligibility.
  * BIND_CONTROL installs the runtime's distinct control generation.
@@ -290,6 +301,10 @@ enum df_media_outbound_operation {
  * ROLLBACK and RELEASE require control_generation to match the binding (zero
  * only while unbound); ROLLBACK is allowed only before MARK_SENT. RELEASE
  * relinquishes media resources without sending a formal hangup. */
+/* Appended RELEASE_* variants retain the same exact-key/binding checks and
+ * record the actual terminal reason. INCOMING_RELEASE_* only accepts a CALL
+ * with the matching nonzero incoming control generation and no outbound
+ * handoff; an old owner's cleanup cannot release a replacement. */
 struct df_media_module_outbound_upgrade_api_v1 {
     uint32_t abi_version;
     size_t struct_size;
