@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
 #include "runtime_station_call.h"
 #include "media_session_manager.h"
 #include "gvs_memory_sender.h"
@@ -153,6 +154,41 @@ static void talking(struct call_fixture *f) {
     TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_TALKING, f->ubus.station_call.stage);
     TEST_ASSERT_INT_EQ(1, f->calls);
     TEST_ASSERT_INT_EQ(1, media(f)->outbound_command_sent);
+}
+
+void test_runtime_station_call_video_before_confirmation_talks(void) {
+    static const uint8_t jpeg[] = {0xffU, 0xd8U, 0xffU, 0xe0U, 0U, 4U, 0U, 0U,
+        0xffU, 0xc0U, 0U, 8U, 8U, 1U, 0xe0U, 2U, 0x80U, 0U, 0xffU, 0xd9U};
+    struct call_fixture f;
+    init(&f); admit(&f);
+    struct df_media_session_manager *manager = f.media.instance;
+    struct df_media_session *session = &manager->sessions[0];
+    uint64_t generation = session->generation;
+    session->encoder.input_fd = open("/dev/null", O_WRONLY);
+    session->encoder.input_owned = session->encoder.running = true;
+    session->encoder.generation = generation;
+    TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(manager,
+        f.stations[0].logical_address, local, 0x01020304U,
+        jpeg, sizeof(jpeg), 640U, 480U, 518U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_station_call_step(&f.ubus, 519U));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_PREPARING, f.ubus.station_call.stage);
+    const uint8_t confirmation[] = {0x1e, 0, 1};
+    receive(&f, 0x84, confirmation, sizeof(confirmation), 0, 0x01020304U, 600U);
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_CALLING, f.ubus.station_call.stage);
+    TEST_ASSERT_INT_EQ(0, f.calls);
+    step(&f, 601U);
+    const uint8_t ack[] = {0, 0x20, 0x6f, 0, 0x20, 0x6e, 30};
+    receive(&f, 0x83, ack, sizeof(ack), 0, 0x01020304U, 776U);
+    TEST_ASSERT_INT_EQ(1, f.calls);
+    TEST_ASSERT_INT_EQ(DF_GVS_TALKING, f.session.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_ACK_CONFIRMED, f.control.acknowledgement.state);
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_TALKING, f.ubus.station_call.stage);
+    TEST_ASSERT_INT_EQ(41, f.ubus.station_call.control_generation);
+    TEST_ASSERT_INT_EQ(generation, f.ubus.station_call.media_generation);
+    TEST_ASSERT_INT_EQ(generation, session->generation);
+    TEST_ASSERT_INT_EQ(1, session->frames_received);
+    df_runtime_media_module_stop(&f.media);
 }
 
 static int fail_encoder_stop(struct df_media_encoder_process *encoder, unsigned timeout) {

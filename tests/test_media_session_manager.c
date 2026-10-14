@@ -3379,6 +3379,87 @@ static int outbound_confirm(struct df_media_session_manager *manager,
         session->station_ipv4, now_ms);
 }
 
+void test_media_session_manager_video_before_outbound_confirmation(void) {
+    static const uint8_t jpeg[] = {0xffU, 0xd8U, 0xffU, 0xe0U, 0U, 4U, 0U, 0U,
+        0xffU, 0xc0U, 0U, 8U, 8U, 1U, 0xe0U, 2U, 0x80U, 0U, 0xffU, 0xd9U};
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    struct df_media_session_key key;
+    outbound_fixture(&manager, &trace, &key);
+    struct df_media_session *session = &manager.sessions[0];
+    session->encoder.input_fd = open("/dev/null", O_WRONLY);
+    session->encoder.input_owned = session->encoder.running = true;
+    session->encoder.generation = key.generation;
+    TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
+        session->station, manager.config.local, session->station_ipv4,
+        jpeg, sizeof(jpeg), 640U, 480U, 518U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_VIEWER, &key, true, 519U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_push(&session->queue,
+        jpeg, sizeof(jpeg), session->publication_generation, 520U));
+    struct df_media_encoder_process encoder = session->encoder;
+    struct df_media_frame_queue queue = session->queue;
+    uint64_t publication = session->publication_generation;
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
+        df_media_session_manager_outbound_operation(&manager,
+            DF_MEDIA_OUTBOUND_CHECK, &key, 0U, 599U));
+    TEST_ASSERT_INT_EQ(DF_OK, outbound_confirm(&manager, 600U));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, outbound_confirm(&manager, 601U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_CHECK, &key, 0U, 602U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_PUBLISHING, session->monitor.state);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_VIEWING, session->state);
+    TEST_ASSERT_INT_EQ(1, session->viewer_active);
+    TEST_ASSERT_INT_EQ(1, session->frames_received);
+    TEST_ASSERT_INT_EQ(600, session->confirmed_ms);
+    TEST_ASSERT_INT_EQ(0, memcmp(&encoder, &session->encoder, sizeof(encoder)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&queue, &session->queue, sizeof(queue)));
+    TEST_ASSERT_INT_EQ(publication, session->publication_generation);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+        "gate_main", DF_MEDIA_SESSION_CALL, 0U, 603U));
+    TEST_ASSERT_INT_EQ(key.generation, session->generation);
+    TEST_ASSERT_INT_EQ(0, memcmp(&encoder, &session->encoder, sizeof(encoder)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&queue, &session->queue, sizeof(queue)));
+    TEST_ASSERT_INT_EQ(0, trace.resource_stops);
+    df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_video_first_confirmation_guards(void) {
+    for (unsigned scenario = 0; scenario < 7; scenario++) {
+        struct manager_trace trace = {.available_kib = 4096U};
+        struct df_media_session_manager manager = {0};
+        struct df_media_session_key key;
+        outbound_fixture(&manager, &trace, &key);
+        struct df_media_session *session = &manager.sessions[0];
+        struct df_gvs_monitor_result admitted;
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&session->monitor,
+            session->station, manager.config.local, session->station_ipv4,
+            session->media_generation, 518U, &admitted));
+        const uint8_t ack[] = {0x1e, 0, 1};
+        struct df_gvs_frame frame = {.family = 3, .opcode = 0x84,
+            .payload = ack, .payload_length = sizeof(ack)};
+        memcpy(frame.source, session->station, 6);
+        memcpy(frame.destination, manager.config.local, 6);
+        uint64_t now = scenario == 1 ? 1100U : 600U;
+        if (scenario == 2) frame.source[4]++;
+        if (scenario == 3) frame.destination[4]++;
+        if (scenario == 4) frame.payload_length = 2;
+        if (scenario == 6) TEST_ASSERT_INT_EQ(DF_OK,
+            df_gvs_monitor_request_retry(&session->monitor, 599U));
+        if (scenario != 0) TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+            df_media_session_manager_receive_control(&manager, &frame,
+                session->station_ipv4 + (scenario == 5), now));
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
+            df_media_session_manager_outbound_operation(&manager,
+                DF_MEDIA_OUTBOUND_CHECK, &key, 0, now));
+        TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW, session->purpose);
+        TEST_ASSERT_INT_EQ(0, session->confirmed_ms);
+        TEST_ASSERT_INT_EQ(0, trace.resource_stops);
+        df_media_session_manager_destroy(&manager);
+    }
+}
+
 static unsigned release_stop_attempts;
 static int release_encoder_failure(struct df_media_encoder_process *encoder,
     unsigned timeout_ms) {

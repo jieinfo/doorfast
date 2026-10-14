@@ -37,6 +37,7 @@ static void df_gvs_monitor_fail(struct df_gvs_monitor *monitor,
     monitor->state = DF_GVS_MONITOR_FAILED;
     monitor->failure = failure;
     monitor->next_action_ms = 0U;
+    monitor->confirmation_deadline_ms = 0U;
     monitor->first_frame_deadline_ms = 0U;
     monitor->status_retry_deadline_ms = 0U;
     monitor->keepalive_next_ms = 0U;
@@ -84,6 +85,7 @@ int df_gvs_monitor_request_retry(struct df_gvs_monitor *monitor,
     monitor->state = DF_GVS_MONITOR_STOPPING;
     monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
     monitor->next_action_ms = now_ms;
+    monitor->confirmation_deadline_ms = 0U;
     monitor->first_frame_deadline_ms = 0U;
     monitor->status_retry_deadline_ms = 0U;
     monitor->keepalive_next_ms = 0U;
@@ -109,6 +111,7 @@ static int df_gvs_monitor_restart_after_peer_stop(
     monitor->state = DF_GVS_MONITOR_REQUESTING;
     monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
     monitor->next_action_ms = now_ms + DF_GVS_MONITOR_PEER_RETRY_DELAY_MS;
+    monitor->confirmation_deadline_ms = 0U;
     monitor->first_frame_deadline_ms = 0U;
     monitor->status_retry_deadline_ms = 0U;
     monitor->keepalive_next_ms = 0U;
@@ -179,6 +182,7 @@ int df_gvs_monitor_cancel(struct df_gvs_monitor *monitor, uint64_t now_ms) {
     monitor->state = DF_GVS_MONITOR_IDLE;
     monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
     monitor->next_action_ms = 0U;
+    monitor->confirmation_deadline_ms = 0U;
     monitor->first_frame_deadline_ms = 0U;
     monitor->status_retry_deadline_ms = 0U;
     monitor->keepalive_next_ms = 0U;
@@ -255,6 +259,7 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
             df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_TIMEOUT);
         } else {
             monitor->next_action_ms = now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+            monitor->confirmation_deadline_ms = monitor->next_action_ms;
         }
         return DF_OK;
     }
@@ -358,7 +363,13 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         return DF_ERR_INVALID;
     }
     memset(result, 0, sizeof(*result));
-    if (monitor->state == DF_GVS_MONITOR_REQUESTING &&
+    bool video_first = monitor->media_ready &&
+        (monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO ||
+         monitor->state == DF_GVS_MONITOR_PUBLISHING ||
+         monitor->state == DF_GVS_MONITOR_VIEWING) &&
+        monitor->confirmation_deadline_ms != 0U &&
+        now_ms < monitor->confirmation_deadline_ms;
+    if ((monitor->state == DF_GVS_MONITOR_REQUESTING || video_first) &&
         !monitor->retry_waiting &&
         frame->opcode == 0x84U) {
         if (frame->payload_length != sizeof(df_gvs_monitor_confirmation) ||
@@ -368,14 +379,19 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
             return DF_ERR_INVALID;
         }
         monitor->last_now_ms = now_ms;
-        monitor->state = DF_GVS_MONITOR_AWAITING_VIDEO;
+        monitor->confirmation_deadline_ms = 0U;
+        if (!video_first) {
+            monitor->state = DF_GVS_MONITOR_AWAITING_VIDEO;
+            monitor->first_frame_deadline_ms = now_ms + monitor->first_frame_timeout_ms;
+            monitor->keepalive_next_ms = now_ms;
+        } else if (monitor->state == DF_GVS_MONITOR_AWAITING_VIDEO &&
+                   monitor->first_frame_deadline_ms == 0U) {
+            monitor->first_frame_deadline_ms = now_ms + monitor->first_frame_timeout_ms;
+        }
         monitor->busy_rejections = 0U;
         monitor->failure = DF_GVS_MONITOR_FAILURE_NONE;
         monitor->peer_stop_seen = false;
         monitor->retry_waiting = false;
-        monitor->first_frame_deadline_ms =
-            now_ms + monitor->first_frame_timeout_ms;
-        monitor->keepalive_next_ms = now_ms;
         monitor->keepalive_misses = 0U;
         result->confirmed = true;
         return DF_OK;
@@ -384,6 +400,7 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
         !monitor->retry_waiting && frame->opcode == 0x50U) {
         if (frame->payload_length != 0U) return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
+        monitor->confirmation_deadline_ms = 0U;
         if (monitor->persistent && monitor->busy_rejections < UINT_MAX)
             monitor->busy_rejections++;
         if (monitor->persistent &&

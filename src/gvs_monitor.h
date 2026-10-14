@@ -80,6 +80,8 @@ struct df_gvs_monitor {
     uint64_t generation;
     uint64_t last_now_ms;
     uint64_t next_action_ms;
+    /* Keep the current request's confirmation window across JPEG admission. */
+    uint64_t confirmation_deadline_ms;
     uint64_t cooldown_until_ms;
     uint64_t first_frame_deadline_ms;
     uint64_t status_retry_deadline_ms;

@@ -19,6 +19,40 @@ static int monitor_receive(struct df_gvs_monitor *monitor,
                                   result);
 }
 
+void test_gvs_monitor_video_first_confirmation_is_request_scoped(void) {
+    const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    const uint8_t station[6] = {0x32, 2, 1, 0, 2, 0};
+    const uint8_t ack[] = {0x1e, 0, 1};
+    struct df_gvs_monitor monitor;
+    struct df_gvs_monitor_action action;
+    struct df_gvs_monitor_result result;
+    df_gvs_monitor_init(&monitor);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(&monitor,
+        local, station, 0x01020304U, 100U));
+    /* JPEG arrival is not evidence that a request was actually sent. */
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, 1U, 150U, &result));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, monitor_receive(&monitor, station,
+        local, 0x84, ack, sizeof(ack), 0x01020304U, 200U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_cancel(&monitor, 201U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(&monitor,
+        local, station, 0x01020304U, 202U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, 202U, &action));
+    TEST_ASSERT_INT_EQ(1, action.send);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_admit_jpeg(&monitor,
+        station, local, 0x01020304U, 2U, 203U, &result));
+    TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station,
+        local, 0x84, ack, sizeof(ack), 0x01020304U, 204U, &result));
+    TEST_ASSERT_INT_EQ(1, result.confirmed);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, monitor.state);
+    TEST_ASSERT_INT_EQ(8204, monitor.first_frame_deadline_ms);
+    TEST_ASSERT_INT_EQ(203, monitor.keepalive_next_ms);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, monitor_receive(&monitor, station,
+        local, 0x84, ack, sizeof(ack), 0x01020304U, 205U, &result));
+    TEST_ASSERT_INT_EQ(8204, monitor.first_frame_deadline_ms);
+    TEST_ASSERT_INT_EQ(2, monitor.generation);
+}
+
 void test_gvs_monitor_retries_captured_request_and_accepts_confirmation(void) {
     const uint8_t local[6] = {0x61, 0x02, 0x01, 0x01, 0x01, 0x01};
     const uint8_t station[6] = {0x32, 0x02, 0x01, 0x00, 0x02, 0x00};
