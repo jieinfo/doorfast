@@ -340,6 +340,11 @@ int df_media_session_upgrade_to_call(struct df_media_session *session,
     df_gvs_video_reassembly_init(&session->video);
     session->purpose = DF_MEDIA_SESSION_CALL;
     session->generation = generation;
+    session->outbound_handoff = false;
+    session->outbound_command_sent = false;
+    session->outbound_preview_persistent = false;
+    session->preview_confirmation_current = false;
+    session->preview_confirmation_generation = 0U;
     session->media_generation = generation;
     session->call_generation = call_generation;
     session->started_ms = now_ms;
@@ -362,6 +367,11 @@ int df_media_session_promote_preview_to_call(struct df_media_session *session,
         return DF_ERR_INVALID;
     session->purpose = DF_MEDIA_SESSION_CALL;
     session->outbound_handoff = true;
+    session->outbound_command_sent = false;
+    session->outbound_preview_persistent = session->monitor.persistent;
+    /* The formal control owner sends keepalives. The monitor retains media
+     * admission and timeouts, without preview retries or keepalive sends. */
+    session->monitor.persistent = false;
     session->call_generation = call_generation;
     session->failure_reason = DF_MEDIA_FAILURE_NONE;
     session->pending_end_reason = DF_MEDIA_END_NONE;

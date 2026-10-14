@@ -38,6 +38,8 @@ struct df_media_session {
     bool queue_initialized;
     bool preview_confirmation_current;
     bool outbound_handoff;
+    bool outbound_command_sent;
+    bool outbound_preview_persistent;
     uint64_t preview_confirmation_generation;
     uint64_t started_ms;
     uint64_t frames_received;

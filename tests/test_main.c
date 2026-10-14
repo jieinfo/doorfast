@@ -209,6 +209,11 @@ void test_media_session_viewer_release_preserves_pre_media_state(void);
 void test_media_session_manager_admits_dynamic_station_pool(void);
 void test_media_session_manager_outbound_call_lock(void);
 void test_media_session_manager_outbound_call_requires_current_preview_confirmation(void);
+void test_media_session_manager_outbound_watchdogs_and_incoming_replacement(void);
+void test_media_session_manager_outbound_bound_rollback_preserves_pipeline(void);
+void test_media_session_manager_outbound_negative_gates(void);
+void test_runtime_media_outbound_extension_fails_closed(void);
+void test_runtime_media_outbound_uses_real_manager(void);
 void test_media_module_api_starts_outbound_call_without_incoming_generation(void);
 void test_media_session_manager_rejects_admission_without_mutating_sessions(void);
 void test_media_session_manager_commands_require_exact_key(void);
@@ -491,9 +496,15 @@ int main(int argc, char **argv) {
     if (argc == 4 && strcmp(argv[1], "--runtime-media-module") == 0 &&
         strcmp(argv[2], "--media-session-manager") == 0 &&
         strcmp(argv[3], "--gvs-monitor") == 0) {
+        test_runtime_module_loads_only_fixed_abi_and_fails_closed_when_missing();
         test_runtime_module_request_start_calls_loaded_module();
         test_media_session_manager_outbound_call_lock();
         test_media_session_manager_outbound_call_requires_current_preview_confirmation();
+        test_media_session_manager_outbound_watchdogs_and_incoming_replacement();
+        test_media_session_manager_outbound_bound_rollback_preserves_pipeline();
+        test_media_session_manager_outbound_negative_gates();
+        test_runtime_media_outbound_extension_fails_closed();
+        test_runtime_media_outbound_uses_real_manager();
         test_gvs_monitor_retries_after_unconfirmed_response();
         test_gvs_monitor_unconfirmed_responses_do_not_reset_request_limit();
         test_gvs_monitor_user_stop_cools_down_next_start();
@@ -560,6 +571,11 @@ int main(int argc, char **argv) {
     test_media_session_manager_admits_dynamic_station_pool();
     test_media_session_manager_outbound_call_lock();
     test_media_session_manager_outbound_call_requires_current_preview_confirmation();
+    test_media_session_manager_outbound_watchdogs_and_incoming_replacement();
+    test_media_session_manager_outbound_bound_rollback_preserves_pipeline();
+    test_media_session_manager_outbound_negative_gates();
+    test_runtime_media_outbound_extension_fails_closed();
+    test_runtime_media_outbound_uses_real_manager();
     test_media_module_api_starts_outbound_call_without_incoming_generation();
     test_media_session_manager_rejects_admission_without_mutating_sessions();
     test_media_session_manager_commands_require_exact_key();

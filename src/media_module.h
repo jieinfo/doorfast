@@ -282,7 +282,14 @@ enum df_media_outbound_operation {
     DF_MEDIA_OUTBOUND_ROLLBACK,
     DF_MEDIA_OUTBOUND_RELEASE,
     DF_MEDIA_OUTBOUND_BIND_CONTROL,
+    DF_MEDIA_OUTBOUND_MARK_SENT,
 };
+/* CHECK validates exact public media key and current preview eligibility.
+ * BIND_CONTROL installs the runtime's distinct control generation.
+ * The runtime must MARK_SENT immediately after its first successful CALL send.
+ * ROLLBACK and RELEASE require control_generation to match the binding (zero
+ * only while unbound); ROLLBACK is allowed only before MARK_SENT. RELEASE
+ * relinquishes media resources without sending a formal hangup. */
 struct df_media_module_outbound_upgrade_api_v1 {
     uint32_t abi_version;
     size_t struct_size;

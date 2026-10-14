@@ -69,8 +69,6 @@ int df_runtime_media_module_start_with_api(struct df_runtime_media_module *modul
     memset(module, 0, sizeof(*module));
     module->handle = handle;
     module->api = api;
-    if (api == &df_media_module_api_v3)
-        module->outbound_upgrade_api = &df_media_module_outbound_upgrade_api_v1;
     module->instance = api->create(config, callbacks);
     if (module->instance == NULL) {
         module->api = NULL;
@@ -179,13 +177,8 @@ int df_runtime_media_module_call(struct df_runtime_media_module *module,
         station_id == NULL || station_id[0] == '\0' ||
         module->session_snapshot == NULL || module->session_snapshot_capacity == 0U)
         return DF_ERR_INVALID;
-    if (module->outbound_upgrade_api == NULL && module->handle != NULL)
+    if (module->outbound_upgrade_api == NULL)
         return DF_ERR_INVALID;
-    if (module->outbound_upgrade_api == NULL) {
-        result = module->api->start(module->instance, station_id,
-            DF_MEDIA_SESSION_CALL, 0U, now_ms);
-        if (result != DF_OK) return result;
-    }
     status.sessions = module->session_snapshot;
     status.session_count = module->session_snapshot_capacity;
     result = module->api->status(module->instance, &status);
@@ -196,8 +189,7 @@ int df_runtime_media_module_call(struct df_runtime_media_module *module,
             strcmp(status.sessions[index].station_id, station_id) == 0) {
             struct df_media_session_key key = {.station_id = station_id,
                 .generation = status.sessions[index].generation};
-            result = module->outbound_upgrade_api == NULL ? DF_OK :
-                df_runtime_media_module_call_key(module, &key, now_ms);
+            result = df_runtime_media_module_call_key(module, &key, now_ms);
             if (result == DF_OK) *generation = key.generation;
             return result;
         }

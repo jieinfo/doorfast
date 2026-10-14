@@ -168,6 +168,10 @@ build/doorfast-tests: | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(TEST_SOURCES) -o $@ $(PCAP_LIBS) $(JPEG_LIBS)
 	$@
 
+build/doorfast-tests: build/media-v3-legacy.so
+build/media-v3-legacy.so: tests/support/media_v3_legacy.c src/media_module.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) -shared -fPIC $< -o $@
+
 build/doorfast: $(DAEMON_SOURCES) src/gvs_send_transaction.h src/gvs_memory_sender.h src/gvs_call_command.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(DAEMON_SOURCES) -o $@ $(PCAP_LIBS)
 

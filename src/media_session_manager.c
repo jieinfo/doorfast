@@ -552,8 +552,14 @@ int df_media_session_manager_outbound_operation(
     if (session == NULL || session->generation != key->generation)
         return DF_MEDIA_ERROR_GENERATION_MISMATCH;
     if (now_ms < session->monitor.last_now_ms) return DF_ERR_INVALID;
-    if (operation == DF_MEDIA_OUTBOUND_RELEASE) {
+    if (operation == DF_MEDIA_OUTBOUND_ROLLBACK ||
+        operation == DF_MEDIA_OUTBOUND_RELEASE ||
+        operation == DF_MEDIA_OUTBOUND_MARK_SENT) {
         if (!session->outbound_handoff) return DF_ERR_INVALID;
+        if (control_generation != session->call_generation)
+            return DF_MEDIA_ERROR_GENERATION_MISMATCH;
+    }
+    if (operation == DF_MEDIA_OUTBOUND_RELEASE) {
         if (df_media_session_manager_stop_resources(session) != DF_OK)
             return DF_MEDIA_ERROR_ENCODER_FAILED;
         df_media_session_manager_record_terminal(manager, session,
@@ -564,11 +570,19 @@ int df_media_session_manager_outbound_operation(
         return DF_OK;
     }
     if (operation == DF_MEDIA_OUTBOUND_ROLLBACK) {
-        if (!session->outbound_handoff || session->call_generation != 0U)
+        if (session->outbound_command_sent)
             return DF_ERR_INVALID;
         session->purpose = DF_MEDIA_SESSION_PREVIEW;
         session->outbound_handoff = false;
+        session->call_generation = 0U;
+        session->monitor.persistent = session->outbound_preview_persistent;
+        session->outbound_preview_persistent = false;
         df_media_session_manager_advance_revisions(manager, session);
+        return DF_OK;
+    }
+    if (operation == DF_MEDIA_OUTBOUND_MARK_SENT) {
+        if (control_generation == 0U) return DF_ERR_INVALID;
+        session->outbound_command_sent = true;
         return DF_OK;
     }
     if (operation == DF_MEDIA_OUTBOUND_BIND_CONTROL) {
@@ -894,7 +908,9 @@ int df_media_session_manager_receive_control(
         if (result.confirmed) {
             session->failure_reason = DF_MEDIA_FAILURE_NONE;
             session->confirmed_ms = now_ms;
-            session->preview_confirmation_current = true;
+            session->preview_confirmation_current =
+                previous_monitor.request_attempts != 0U &&
+                now_ms < previous_monitor.next_action_ms;
             session->preview_confirmation_generation = session->monitor.generation;
             df_media_phase_log(session, "confirmed", now_ms);
             if (df_media_session_reset_attempt(session,
@@ -1168,7 +1184,7 @@ int df_media_session_manager_command(struct df_media_session_manager *manager,
                 df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
                 return DF_ERR_INVALID;
             df_media_session_manager_record_cooldown(manager, session);
-            if (action.send && manager->callbacks.emit_control(
+            if (action.send && !session->outbound_handoff && manager->callbacks.emit_control(
                     action.destination, session->station_ipv4, action.source,
                     action.family, action.opcode, action.payload,
                     action.payload_length, manager->callbacks.context) != DF_OK)
@@ -1388,11 +1404,9 @@ int df_media_session_manager_tick(struct df_media_session_manager *manager,
         {
             struct df_gvs_monitor_action action;
             previous_monitor = session->monitor;
-            if (session->outbound_handoff) {
-                memset(&action, 0, sizeof(action));
-            } else if (df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
+            if (df_gvs_monitor_step(&session->monitor, now_ms, &action) != DF_OK)
                 overall = DF_ERR_IO;
-            else if (action.send && manager->callbacks.emit_control(
+            else if (action.send && !session->outbound_handoff && manager->callbacks.emit_control(
                     action.destination, session->station_ipv4, action.source,
                     action.family, action.opcode, action.payload,
                     action.payload_length, manager->callbacks.context) != DF_OK) {

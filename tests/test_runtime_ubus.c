@@ -439,12 +439,36 @@ static int media_call_command(void *instance, enum df_media_module_command comma
     return DF_OK;
 }
 
+static int media_call_outbound_operation(void *instance,
+    enum df_media_outbound_operation operation,
+    const struct df_media_session_key *key, uint64_t control_generation,
+    uint64_t now_ms) {
+    (void)instance; (void)control_generation; (void)now_ms;
+    return operation == DF_MEDIA_OUTBOUND_CHECK &&
+        strcmp(key->station_id, "gate_main") == 0 && key->generation == 17U ?
+        DF_OK : DF_MEDIA_ERROR_GENERATION_MISMATCH;
+}
+
+static int media_call_status(const void *instance,
+    struct df_media_module_status_v3 *status) {
+    struct media_binding_test *test = (struct media_binding_test *)instance;
+    if (test->status.required_session_count == 0U)
+        (void)media_call_start(test, "gate_main", DF_MEDIA_SESSION_PREVIEW, 0U, 0U);
+    return media_status(instance, status);
+}
+
+static const struct df_media_module_outbound_upgrade_api_v1 media_call_outbound_api = {
+    .abi_version = DF_MEDIA_MODULE_OUTBOUND_UPGRADE_ABI_VERSION,
+    .struct_size = sizeof(struct df_media_module_outbound_upgrade_api_v1),
+    .operation = media_call_outbound_operation,
+};
+
 static const struct df_media_module_api_v3 media_call_api = {
     .abi_version = DF_MEDIA_MODULE_ABI_VERSION,
     .struct_size = sizeof(struct df_media_module_api_v3),
     .start = media_call_start,
     .command = media_call_command,
-    .status = media_status,
+    .status = media_call_status,
 };
 
 void test_runtime_ubus_station_call_binds_control_and_media_owners(void) {
@@ -454,6 +478,7 @@ void test_runtime_ubus_station_call_binds_control_and_media_owners(void) {
     struct df_media_session_status_v3 snapshot[1];
     struct df_runtime_media_module module = {
         .api = &media_call_api, .instance = &media,
+        .outbound_upgrade_api = &media_call_outbound_api,
         .session_snapshot = snapshot, .session_snapshot_capacity = 1U,
         .available = true,
     };
@@ -488,6 +513,7 @@ void test_runtime_ubus_station_hangup_maps_media_to_control_generation(void) {
     struct df_media_session_status_v3 snapshot[1];
     struct df_runtime_media_module module = {
         .api = &media_call_api, .instance = &media,
+        .outbound_upgrade_api = &media_call_outbound_api,
         .session_snapshot = snapshot, .session_snapshot_capacity = 1U,
         .available = true,
     };
@@ -522,6 +548,7 @@ void test_runtime_ubus_station_call_failure_is_retryable(void) {
     struct df_media_session_status_v3 snapshot[1];
     struct df_runtime_media_module module = {
         .api = &media_call_api, .instance = &media,
+        .outbound_upgrade_api = &media_call_outbound_api,
         .session_snapshot = snapshot, .session_snapshot_capacity = 1U,
         .available = true,
     };
@@ -556,6 +583,7 @@ void test_runtime_ubus_station_call_operation_id_overflow_is_safe(void) {
     struct df_media_session_status_v3 snapshot[1];
     struct df_runtime_media_module module = {
         .api = &media_call_api, .instance = &media,
+        .outbound_upgrade_api = &media_call_outbound_api,
         .session_snapshot = snapshot, .session_snapshot_capacity = 1U,
         .available = true,
     };
