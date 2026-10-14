@@ -96,6 +96,25 @@ static void admit(struct call_fixture *f) {
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_call_station(&f->ubus,
         f->ubus.runtime_id, "gate_main", &generation));
     TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_PREPARING, f->ubus.station_call.stage);
+    /* A stale condition must leave the real preparing owner/media untouched. */
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH,
+        df_runtime_ubus_hangup_station_operation(&f->ubus, f->ubus.runtime_id,
+            "gate_main", 0, true, f->ubus.station_call.operation_id + 1));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH,
+        df_runtime_ubus_hangup_station_operation(&f->ubus, f->ubus.runtime_id,
+            "gate_side", 0, true, f->ubus.station_call.operation_id));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_MEDIA_ERROR_RUNTIME_MISMATCH,
+        df_runtime_ubus_hangup_station_operation(&f->ubus, "2222222222222222",
+            "gate_main", 0, true, f->ubus.station_call.operation_id));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_STATION_NOT_FOUND,
+        df_runtime_ubus_hangup_station(&f->ubus, f->ubus.runtime_id, "unknown", 0));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_ubus_hangup_station(&f->ubus, f->ubus.runtime_id, "bad!", 0));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_runtime_ubus_hangup_station(&f->ubus, f->ubus.runtime_id,
+            "gate_main", generation + 1));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_PREPARING, f->ubus.station_call.stage);
+    TEST_ASSERT_INT_EQ(1, media(f)->active);
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&f->media, f->ubus.last_now_ms));
 }
 static void receive(struct call_fixture *f, uint8_t opcode, const uint8_t *payload,
@@ -336,6 +355,9 @@ void test_runtime_station_call_real_control_lifecycle(void) {
     TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_ENDED, f.ubus.station_call.stage);
     TEST_ASSERT_INT_EQ(0, ((struct df_media_session_manager *)f.media.instance)->active_count);
     TEST_ASSERT_INT_EQ(1, f.hangups);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_hangup_station_operation(&f.ubus,
+        f.ubus.runtime_id, "gate_main", 0, true, f.ubus.station_call.operation_id));
+    TEST_ASSERT_INT_EQ(1, f.hangups);
     TEST_ASSERT_INT_EQ(0, f.control.handshake.active);
     df_runtime_media_module_stop(&f.media);
 }
@@ -470,7 +492,7 @@ void test_runtime_station_call_deadlines_and_identity(void) {
         &f.ubus, "2222222222222222", "gate_main", 0));
     TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_STATION_NOT_FOUND, df_runtime_ubus_hangup_station(
         &f.ubus, f.ubus.runtime_id, "absent", 0));
-    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_hangup_station(&f.ubus,
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH, df_runtime_ubus_hangup_station(&f.ubus,
         f.ubus.runtime_id, "gate_main", 999));
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_hangup_station(&f.ubus,
         f.ubus.runtime_id, "gate_side", 0));
@@ -510,6 +532,15 @@ void test_runtime_station_call_incoming_and_limits(void) {
         TEST_ASSERT_INT_EQ(1, media(&f)->generation != old_media);
         TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL, media(&f)->purpose);
         TEST_ASSERT_INT_EQ(0, media(&f)->outbound_handoff);
+        TEST_ASSERT_INT_EQ(DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH,
+            df_runtime_ubus_hangup_station_operation(&f.ubus, f.ubus.runtime_id,
+                "gate_main", old_media, true, f.ubus.station_call.operation_id));
+        TEST_ASSERT_INT_EQ(DF_GVS_RINGING, f.session.state);
+        TEST_ASSERT_INT_EQ(1, media(&f)->active);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+            df_runtime_ubus_hangup_station(&f.ubus, f.ubus.runtime_id,
+                "gate_main", old_media));
+        TEST_ASSERT_INT_EQ(DF_GVS_RINGING, f.session.state);
         TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_hangup_station(&f.ubus,
             f.ubus.runtime_id, "gate_main", media(&f)->generation));
         step(&f, 105); step(&f, 1105);

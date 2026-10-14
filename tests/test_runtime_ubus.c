@@ -9,6 +9,7 @@
 #include "gvs_audio_playout.h"
 #include "test.h"
 
+
 struct diagnostic_recording {
     char text[4096];
     size_t length;
@@ -47,11 +48,150 @@ static void diagnostic_close(void *context, void *cookie) {
     recording->closed_results++;
     if (recording->depth > 0) recording->depth--;
 }
+static int diagnostic_native_status(struct df_gvs_call_control_status *status, void *context) {
+    *status = *(const struct df_gvs_call_control_status *)context;
+    return DF_OK;
+}
 
 void test_runtime_ubus_diagnostic_emitter(void) {
     struct diagnostic_recording recording = {0};
     struct df_runtime_diagnostic_sink sink = {&recording, diagnostic_string,
         diagnostic_number, diagnostic_open, diagnostic_close};
+    {
+        struct df_station station = {.id = "gate_main", .enabled = true};
+        struct df_station_registry registry = {.items = &station, .count = 1};
+        struct df_runtime_ubus owner = {.started = true, .runtime_id = "1111111111111111",
+            .station_registry = &registry, .last_now_ms = 200,
+            .station_call = {.operation_id = UINT64_MAX, .station_id = "gate_main",
+                .media_generation = 7, .stage = DF_RUNTIME_STATION_CALL_PREPARING,
+                .started_ms = 100, .deadline_ms = 30100}};
+        struct df_gvs_call_control_status native = {.session_state = DF_GVS_IDLE};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
+            "operation_id=18446744073709551615;station_id=\"gate_main\";stage=\"preparing\";"
+            "media_generation=7;call_generation=0;timer=\"startup\";remaining_ms=29900;error=\"none\";"));
+        owner.station_call.stage = DF_RUNTIME_STATION_CALL_CALLING;
+        owner.station_call.control_generation = 41;
+        native.session_generation = 41;
+        native.timer = DF_GVS_CALL_TIMER_CONFIRMATION;
+        native.remaining_ms = 900;
+        recording = (struct diagnostic_recording){0};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "call_generation=41;timer=\"confirmation\";remaining_ms=900;") != NULL);
+        owner.station_call.stage = DF_RUNTIME_STATION_CALL_TALKING;
+        native.timer = DF_GVS_CALL_TIMER_SESSION;
+        native.remaining_ms = 12000;
+        recording = (struct diagnostic_recording){0};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "timer=\"session\";remaining_ms=12000;") != NULL);
+        owner.station_call.stage = DF_RUNTIME_STATION_CALL_FAILED;
+        owner.station_call.fault = DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT;
+        recording = (struct diagnostic_recording){0};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "timer=\"none\";remaining_ms=0;error=\"ack_timeout\";") != NULL);
+        owner.station_call.stage = (enum df_runtime_station_call_stage)999;
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        static const char *const stages[] = {"idle", "preparing", "calling", "talking", "ending", "ended", "failed"};
+        for (unsigned i = 0; i < sizeof(stages) / sizeof(stages[0]); i++) {
+            owner.station_call.stage = (enum df_runtime_station_call_stage)i;
+            owner.station_call.operation_id = i ? UINT64_MAX : 0;
+            strcpy(owner.station_call.station_id, i ? "gate_main" : "");
+            owner.station_call.media_generation = i ? 7 : 0;
+            owner.station_call.control_generation = i > 1 ? 41 : 0;
+            owner.station_call.fault = DF_GVS_CALL_FAULT_NONE;
+            recording = (struct diagnostic_recording){0};
+            TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+            char expected[256];
+            snprintf(expected, sizeof(expected), "stage=\"%s\";", stages[i]);
+            TEST_ASSERT_INT_EQ(1, strstr(recording.text, expected) != NULL);
+            if (i == 0 || i >= 5)
+                TEST_ASSERT_INT_EQ(1, strstr(recording.text, "timer=\"none\";remaining_ms=0;") != NULL);
+            recording = (struct diagnostic_recording){0};
+            TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_reply(&owner, "gate_main", 7, &sink));
+            snprintf(expected, sizeof(expected),
+                "queued=%u;generation=7;runtime_id=\"1111111111111111\";station_id=\"gate_main\";operation_id=%llu;state=\"%s\";",
+                i > 0 && i < 5, (unsigned long long)(i ? UINT64_MAX : 0), stages[i]);
+            TEST_ASSERT_INT_EQ(0, strcmp(recording.text, expected));
+        }
+        owner.started = false;
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_emit_station_reply(&owner, "gate_main", 7, &sink));
+        owner.started = true;
+        owner.station_call.stage = DF_RUNTIME_STATION_CALL_CALLING;
+        native.session_generation = 42;
+        recording = (struct diagnostic_recording){0};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "timer=\"none\";remaining_ms=0;") != NULL);
+        native.session_generation = 41;
+        native.timer = (enum df_gvs_call_timer)999;
+        recording = (struct diagnostic_recording){0};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "timer=\"none\";remaining_ms=0;") != NULL);
+        struct { int error; enum df_gvs_call_fault fault; const char *name; } errors[] = {
+            {DF_OK, DF_GVS_CALL_FAULT_NONE, "none"},
+            {DF_MEDIA_ERROR_CAPACITY_BUSY, DF_GVS_CALL_FAULT_NONE, "busy"},
+            {DF_MEDIA_ERROR_STATION_NOT_FOUND, DF_GVS_CALL_FAULT_NONE, "station_unavailable"},
+            {DF_MEDIA_ERROR_STATION_DISABLED, DF_GVS_CALL_FAULT_NONE, "station_unavailable"},
+            {DF_MEDIA_ERROR_ROUTE_UNAVAILABLE, DF_GVS_CALL_FAULT_NONE, "station_unavailable"},
+            {DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED, DF_GVS_CALL_FAULT_NONE, "ack_timeout"},
+            {DF_ERR_IO, DF_GVS_CALL_FAULT_DISPATCH_FAILED, "dispatch_failed"},
+            {DF_ERR_IO, DF_GVS_CALL_FAULT_DISPATCH_TIMEOUT, "dispatch_timeout"},
+            {DF_ERR_IO, DF_GVS_CALL_FAULT_CONFIRMATION_REJECTED, "ack_timeout"},
+            {DF_ERR_IO, DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT, "ack_timeout"},
+            {DF_MEDIA_ERROR_ENCODER_FAILED, DF_GVS_CALL_FAULT_NONE, "media_failed"},
+            {DF_MEDIA_ERROR_VIDEO_STALLED, DF_GVS_CALL_FAULT_NONE, "media_failed"},
+            {DF_MEDIA_ERROR_RECONNECT_FRAME, DF_GVS_CALL_FAULT_NONE, "media_failed"},
+            {DF_MEDIA_ERROR_SESSION_PREEMPTED, DF_GVS_CALL_FAULT_NONE, "preempted"},
+            {DF_ERR_IO, DF_GVS_CALL_FAULT_PREEMPTED, "preempted"},
+            {DF_OK, DF_GVS_CALL_FAULT_CANCELLED, "cancelled"},
+            {DF_ERR_IO, DF_GVS_CALL_FAULT_RUNTIME_RESET, "runtime_reset"},
+            {123456, (enum df_gvs_call_fault)999, "unknown"},
+        };
+        owner.station_call.stage = DF_RUNTIME_STATION_CALL_FAILED;
+        for (unsigned i = 0; i < sizeof(errors) / sizeof(errors[0]); i++) {
+            owner.station_call.error = errors[i].error;
+            owner.station_call.fault = errors[i].fault;
+            recording = (struct diagnostic_recording){0};
+            TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+            char expected[64];
+            snprintf(expected, sizeof(expected), "error=\"%s\";", errors[i].name);
+            TEST_ASSERT_INT_EQ(1, strstr(recording.text, expected) != NULL);
+        }
+        /* An old outbound terminal cannot label the current incoming owner. */
+        struct df_gvs_session incoming = {.state = DF_GVS_TALKING, .generation = 42};
+        memcpy(incoming.peer, station.logical_address, 6);
+        owner.access_session = &incoming;
+        owner.access_station_registry = &registry;
+        owner.provide_call_status = diagnostic_native_status;
+        owner.call_context = &native;
+        native.session_state = DF_GVS_TALKING;
+        native.session_generation = 42;
+        recording = (struct diagnostic_recording){0};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_reply(&owner, "gate_main", 8, &sink));
+        TEST_ASSERT_INT_EQ(0, strcmp(recording.text,
+            "queued=1;generation=8;runtime_id=\"1111111111111111\";station_id=\"gate_main\";operation_id=0;state=\"talking\";"));
+        native.command_type = DF_GVS_CALL_COMMAND_HANGUP;
+        recording = (struct diagnostic_recording){0};
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_emit_station_reply(&owner, "gate_main", 8, &sink));
+        TEST_ASSERT_INT_EQ(1, strstr(recording.text, "operation_id=0;state=\"ending\";") != NULL);
+        owner.station_call.stage = DF_RUNTIME_STATION_CALL_PREPARING;
+        strcpy(owner.station_call.station_id, "secret!");
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_emit_station_call(&owner, &native, &sink));
+        struct df_runtime_station_field fields[] = {{"runtime_id", DF_STATION_FIELD_STRING, "1111111111111111", 0},
+            {"station_id", DF_STATION_FIELD_STRING, "gate_main", 0},
+            {"operation_id", DF_STATION_FIELD_UINT64, NULL, UINT64_MAX}};
+        struct df_runtime_station_request request;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_parse_station_request(fields, 3, true, &request));
+        TEST_ASSERT_INT_EQ(1, request.has_operation && request.operation_id == UINT64_MAX);
+        fields[2].type = DF_STATION_FIELD_STRING;
+        fields[2].string = "1";
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_parse_station_request(fields, 3, true, &request));
+        fields[2] = fields[1];
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_parse_station_request(fields, 3, true, &request));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_parse_station_request(fields, 2, false, &request));
+        fields[1].string = "gate!";
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_parse_station_request(fields, 2, false, &request));
+        recording = (struct diagnostic_recording){0};
+    }
     struct df_media_session_status_v3 session = {
         .station_id = "gate_main", .generation = 8,
         .stream_name = "secret_sensitive_stream"};

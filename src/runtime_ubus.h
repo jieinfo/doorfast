@@ -24,6 +24,7 @@
 #define DF_RUNTIME_UBUS_LOG_MESSAGE_MAX 160U
 #define DF_RUNTIME_UBUS_MEDIA_PATH_MAX 256U
 #define DF_RUNTIME_MEDIA_ERROR_RUNTIME_MISMATCH 200
+#define DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH 201
 #define DF_RUNTIME_STATION_ADDRESS_TEXT_SIZE 18U
 #define DF_RUNTIME_STATION_IPV4_TEXT_SIZE 16U
 #define DF_RUNTIME_STATION_ROUTE_SOURCE_SIZE 11U
@@ -131,6 +132,30 @@ struct df_runtime_diagnostic_sink {
 void df_runtime_ubus_emit_call_diagnostics(const struct df_runtime_ubus *,
     const struct df_gvs_call_control_status *,
     const struct df_runtime_diagnostic_sink *);
+int df_runtime_ubus_emit_station_call(const struct df_runtime_ubus *,
+    const struct df_gvs_call_control_status *, const struct df_runtime_diagnostic_sink *);
+int df_runtime_ubus_emit_station_reply(struct df_runtime_ubus *, const char *,
+    uint64_t, const struct df_runtime_diagnostic_sink *);
+/* A transport-independent strict field parser used by the blobmsg adapter. */
+enum df_runtime_station_field_type { DF_STATION_FIELD_INVALID,
+    DF_STATION_FIELD_STRING, DF_STATION_FIELD_UINT64 };
+struct df_runtime_station_field {
+    const char *name;
+    enum df_runtime_station_field_type type;
+    const char *string;
+    uint64_t number;
+};
+struct df_runtime_station_request {
+    const char *runtime_id;
+    const char *station_id;
+    uint64_t generation;
+    uint64_t operation_id;
+    bool has_operation;
+};
+int df_runtime_ubus_parse_station_request(const struct df_runtime_station_field *,
+    size_t, bool, struct df_runtime_station_request *);
+int df_runtime_ubus_hangup_station_operation(struct df_runtime_ubus *,
+    const char *, const char *, uint64_t, bool, uint64_t);
 void df_runtime_ubus_emit_media_diagnostics(const struct df_runtime_media_status *,
     const struct df_media_session_status_v3 *,
     const struct df_runtime_diagnostic_sink *);
