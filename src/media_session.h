@@ -36,6 +36,9 @@ struct df_media_session {
     bool active;
     bool viewer_active;
     bool queue_initialized;
+    bool preview_confirmation_current;
+    bool outbound_handoff;
+    uint64_t preview_confirmation_generation;
     uint64_t started_ms;
     uint64_t frames_received;
     uint64_t last_frame_ms;
@@ -85,6 +88,8 @@ void df_media_session_mark_source_lost(struct df_media_session *,
 int df_media_session_stop_pipeline(struct df_media_session *);
 int df_media_session_upgrade_to_call(struct df_media_session *,
     uint64_t generation, uint64_t call_generation, uint64_t now_ms);
+int df_media_session_promote_preview_to_call(struct df_media_session *,
+    uint64_t call_generation, uint64_t now_ms);
 void df_media_session_diagnostics(const struct df_media_session *, uint64_t,
     struct df_media_session_diagnostics_v2 *);
 

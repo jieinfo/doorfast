@@ -13,6 +13,7 @@
 struct df_runtime_media_module {
     void *handle;
     const struct df_media_module_api_v3 *api;
+    const struct df_media_module_outbound_upgrade_api_v1 *outbound_upgrade_api;
     const struct df_media_module_diagnostics_api_v1 *diagnostics_api;
     const struct df_media_module_diagnostics_api_v2 *diagnostics_api_v2;
     void *instance;
@@ -25,6 +26,13 @@ struct df_runtime_media_module {
 
 int df_runtime_media_module_validate_api_v3(
     const struct df_media_module_api_v3 *);
+int df_runtime_media_module_set_outbound_api(struct df_runtime_media_module *,
+    const struct df_media_module_outbound_upgrade_api_v1 *);
+int df_runtime_media_module_outbound_operation(struct df_runtime_media_module *,
+    enum df_media_outbound_operation, const struct df_media_session_key *,
+    uint64_t control_generation, uint64_t now_ms);
+int df_runtime_media_module_call_key(struct df_runtime_media_module *,
+    const struct df_media_session_key *, uint64_t now_ms);
 
 int df_runtime_media_module_start(struct df_runtime_media_module *,
     const struct df_media_module_config_v3 *,

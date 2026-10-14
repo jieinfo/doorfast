@@ -353,6 +353,21 @@ int df_media_session_upgrade_to_call(struct df_media_session *session,
     return DF_OK;
 }
 
+int df_media_session_promote_preview_to_call(struct df_media_session *session,
+    uint64_t call_generation, uint64_t now_ms) {
+    if (session == NULL || !session->active ||
+        session->purpose != DF_MEDIA_SESSION_PREVIEW ||
+        !session->preview_confirmation_current ||
+        now_ms < session->monitor.last_now_ms)
+        return DF_ERR_INVALID;
+    session->purpose = DF_MEDIA_SESSION_CALL;
+    session->outbound_handoff = true;
+    session->call_generation = call_generation;
+    session->failure_reason = DF_MEDIA_FAILURE_NONE;
+    session->pending_end_reason = DF_MEDIA_END_NONE;
+    return DF_OK;
+}
+
 int df_media_session_tick_pipeline(struct df_media_session *session,
     uint64_t now_ms) {
     int result;

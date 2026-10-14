@@ -44,6 +44,18 @@ df_runtime_media_module_resolve_diagnostics_v2(void *handle) {
     return df_runtime_media_diagnostics_v2_valid(api) ? api : NULL;
 }
 
+static const struct df_media_module_outbound_upgrade_api_v1 *
+df_runtime_media_module_resolve_outbound_upgrade(void *handle) {
+    const struct df_media_module_outbound_upgrade_api_v1 *api = NULL;
+    if (handle == NULL) return NULL;
+    *(void **)(&api) = dlsym(handle, "df_media_module_outbound_upgrade_api_v1");
+    if (api == NULL || api->abi_version !=
+            DF_MEDIA_MODULE_OUTBOUND_UPGRADE_ABI_VERSION ||
+        api->struct_size != sizeof(*api) || api->operation == NULL)
+        return NULL;
+    return api;
+}
+
 int df_runtime_media_module_start_with_api(struct df_runtime_media_module *module,
     const struct df_media_module_api_v3 *api,
     const struct df_media_module_config_v3 *config,
@@ -57,6 +69,8 @@ int df_runtime_media_module_start_with_api(struct df_runtime_media_module *modul
     memset(module, 0, sizeof(*module));
     module->handle = handle;
     module->api = api;
+    if (api == &df_media_module_api_v3)
+        module->outbound_upgrade_api = &df_media_module_outbound_upgrade_api_v1;
     module->instance = api->create(config, callbacks);
     if (module->instance == NULL) {
         module->api = NULL;
@@ -104,6 +118,8 @@ int df_runtime_media_module_start(struct df_runtime_media_module *module,
             df_runtime_media_module_resolve_diagnostics(handle);
         module->diagnostics_api_v2 =
             df_runtime_media_module_resolve_diagnostics_v2(handle);
+        module->outbound_upgrade_api =
+            df_runtime_media_module_resolve_outbound_upgrade(handle);
     }
     return result;
 }
@@ -163,9 +179,13 @@ int df_runtime_media_module_call(struct df_runtime_media_module *module,
         station_id == NULL || station_id[0] == '\0' ||
         module->session_snapshot == NULL || module->session_snapshot_capacity == 0U)
         return DF_ERR_INVALID;
-    result = module->api->start(module->instance, station_id,
-        DF_MEDIA_SESSION_CALL, 0U, now_ms);
-    if (result != DF_OK) return result;
+    if (module->outbound_upgrade_api == NULL && module->handle != NULL)
+        return DF_ERR_INVALID;
+    if (module->outbound_upgrade_api == NULL) {
+        result = module->api->start(module->instance, station_id,
+            DF_MEDIA_SESSION_CALL, 0U, now_ms);
+        if (result != DF_OK) return result;
+    }
     status.sessions = module->session_snapshot;
     status.session_count = module->session_snapshot_capacity;
     result = module->api->status(module->instance, &status);
@@ -173,13 +193,48 @@ int df_runtime_media_module_call(struct df_runtime_media_module *module,
         return DF_ERR_IO;
     for (index = 0U; index < status.session_count; index++) {
         if (status.sessions[index].active &&
-            status.sessions[index].purpose == DF_MEDIA_SESSION_CALL &&
             strcmp(status.sessions[index].station_id, station_id) == 0) {
-            *generation = status.sessions[index].generation;
-            return *generation == 0U ? DF_ERR_IO : DF_OK;
+            struct df_media_session_key key = {.station_id = station_id,
+                .generation = status.sessions[index].generation};
+            result = module->outbound_upgrade_api == NULL ? DF_OK :
+                df_runtime_media_module_call_key(module, &key, now_ms);
+            if (result == DF_OK) *generation = key.generation;
+            return result;
         }
     }
     return DF_ERR_IO;
+}
+
+int df_runtime_media_module_set_outbound_api(struct df_runtime_media_module *module,
+    const struct df_media_module_outbound_upgrade_api_v1 *api) {
+    if (module == NULL) return DF_ERR_INVALID;
+    module->outbound_upgrade_api = NULL;
+    if (api == NULL || api->abi_version !=
+            DF_MEDIA_MODULE_OUTBOUND_UPGRADE_ABI_VERSION ||
+        api->struct_size != sizeof(*api) || api->operation == NULL)
+        return DF_ERR_INVALID;
+    module->outbound_upgrade_api = api;
+    return DF_OK;
+}
+
+int df_runtime_media_module_outbound_operation(struct df_runtime_media_module *module,
+    enum df_media_outbound_operation operation,
+    const struct df_media_session_key *key, uint64_t control_generation,
+    uint64_t now_ms) {
+    if (df_runtime_media_module_available(module) != DF_OK ||
+        module->outbound_upgrade_api == NULL || key == NULL)
+        return DF_ERR_INVALID;
+    return module->outbound_upgrade_api->operation(module->instance, operation,
+        key, control_generation, now_ms);
+}
+
+int df_runtime_media_module_call_key(struct df_runtime_media_module *module,
+    const struct df_media_session_key *key, uint64_t now_ms) {
+    int result = df_runtime_media_module_outbound_operation(module,
+        DF_MEDIA_OUTBOUND_CHECK, key, 0U, now_ms);
+    if (result != DF_OK) return result;
+    return module->api->start(module->instance, key->station_id,
+        DF_MEDIA_SESSION_CALL, 0U, now_ms);
 }
 
 int df_runtime_media_module_incoming_call(

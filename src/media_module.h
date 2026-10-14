@@ -60,6 +60,7 @@ enum df_media_error_v3 {
     DF_MEDIA_ERROR_SESSION_PREEMPTED,
     DF_MEDIA_ERROR_VIDEO_STALLED,
     DF_MEDIA_ERROR_RECONNECT_FRAME,
+    DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
 };
 
 struct df_media_station_config_v3 {
@@ -274,6 +275,22 @@ struct df_media_module_api_v3 {
 };
 
 extern const struct df_media_module_api_v3 df_media_module_api_v3;
+
+#define DF_MEDIA_MODULE_OUTBOUND_UPGRADE_ABI_VERSION 1U
+enum df_media_outbound_operation {
+    DF_MEDIA_OUTBOUND_CHECK = 1,
+    DF_MEDIA_OUTBOUND_ROLLBACK,
+    DF_MEDIA_OUTBOUND_RELEASE,
+    DF_MEDIA_OUTBOUND_BIND_CONTROL,
+};
+struct df_media_module_outbound_upgrade_api_v1 {
+    uint32_t abi_version;
+    size_t struct_size;
+    int (*operation)(void *, enum df_media_outbound_operation,
+                     const struct df_media_session_key *, uint64_t, uint64_t);
+};
+extern const struct df_media_module_outbound_upgrade_api_v1
+    df_media_module_outbound_upgrade_api_v1;
 
 int df_media_module_config_v3_validate(
     const struct df_media_module_config_v3 *,

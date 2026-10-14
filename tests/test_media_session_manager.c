@@ -113,7 +113,7 @@ static void manager_stop_resources(struct df_media_session *session,
 static void manager_fixture(struct df_media_module_config_v3 *config,
     struct df_media_module_callbacks_v3 *callbacks,
     struct manager_trace *trace) {
-    static const struct df_media_station_config_v3 stations[] = {
+    static struct df_media_station_config_v3 stations[] = {
         {.id = "gate_main", .stream_name = "doorfast_gate_main",
          .enabled = true, .logical_address = {0U, 0U, 0U, 0U, 0U, 'm'}},
         {.id = "gate_side", .stream_name = "doorfast_gate_side",
@@ -480,6 +480,67 @@ void test_media_session_manager_outbound_call_lock(void) {
     df_media_session_manager_destroy(&manager);
 }
 
+void test_media_session_manager_outbound_call_requires_current_preview_confirmation(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    const struct df_media_session *session;
+    struct df_media_station_config_v3 stations[4];
+    struct df_gvs_frame confirmation = {0};
+    static const uint8_t confirmation_payload[] = {0x1eU, 0x00U, 0x01U};
+    uint64_t preview_generation = 0U;
+    uint64_t call_generation = 0U;
+
+    manager_fixture(&config, &callbacks, &trace);
+    config.local[0] = 0x61U;
+    config.min_free_kib = 0U;
+    memcpy(stations, config.stations, sizeof(stations));
+    stations[0].ipv4 = 0x01020304U;
+    memcpy(stations[0].logical_address,
+        (const uint8_t[]){0x32U, 2U, 1U, 0U, 2U, 0U}, 6U);
+    config.stations = stations;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &preview_generation));
+    session = df_media_session_manager_find(&manager, "gate_main");
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_VIEWER,
+        &(struct df_media_session_key){.station_id = "gate_main",
+            .generation = preview_generation}, true, 101U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
+        df_media_module_api_v3.start(&manager, "gate_main",
+            DF_MEDIA_SESSION_CALL, 0U, 102U));
+    TEST_ASSERT_INT_EQ(0, call_generation);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW, session->purpose);
+    TEST_ASSERT_INT_EQ(preview_generation, session->generation);
+    TEST_ASSERT_INT_EQ(1, session->viewer_active ? 1 : 0);
+
+    confirmation.family = 0x03U;
+    confirmation.opcode = 0x84U;
+    memcpy(confirmation.source, session->station, sizeof(confirmation.source));
+    memcpy(confirmation.destination, config.local,
+        sizeof(confirmation.destination));
+    confirmation.payload = confirmation_payload;
+    confirmation.payload_length = sizeof(confirmation_payload);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(
+        &manager, &confirmation, session->station_ipv4, 103U));
+    TEST_ASSERT_INT_EQ(1, session->preview_confirmation_current ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, session->monitor.state);
+    TEST_ASSERT_INT_EQ(0, session->monitor.retry_after_stop ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, session->monitor.retry_waiting ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, session->monitor.first_frame_deadline_ms != 0U ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+        "gate_main", DF_MEDIA_SESSION_CALL, 0U, 104U));
+    call_generation = session->generation;
+    TEST_ASSERT_INT_EQ(preview_generation, call_generation);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL, session->purpose);
+    TEST_ASSERT_INT_EQ(preview_generation, session->generation);
+    TEST_ASSERT_INT_EQ(1, session->viewer_active ? 1 : 0);
+    df_media_session_manager_destroy(&manager);
+}
+
 void test_media_module_api_starts_outbound_call_without_incoming_generation(void) {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
@@ -493,12 +554,11 @@ void test_media_module_api_starts_outbound_call_without_incoming_generation(void
         df_media_session_manager_init(&manager, &config, &callbacks));
     status.sessions = entries;
     status.session_count = sizeof(entries) / sizeof(entries[0]);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
+        df_media_module_api_v3.start(
         &manager, "gate_main", DF_MEDIA_SESSION_CALL, 0U, 100U));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
-    TEST_ASSERT_INT_EQ(1, status.session_count > 0U ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL, entries[0].purpose);
-    TEST_ASSERT_INT_EQ(1, entries[0].active ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, status.session_count);
     df_media_session_manager_destroy(&manager);
 }
 

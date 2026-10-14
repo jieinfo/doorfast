@@ -75,6 +75,9 @@ int df_media_session_manager_receive_control(struct df_media_session_manager *,
     const struct df_gvs_frame *, uint32_t source_ipv4, uint64_t now_ms);
 int df_media_session_manager_incoming_call(struct df_media_session_manager *,
     const char *station_id, uint64_t call_generation, uint64_t now_ms);
+int df_media_session_manager_outbound_operation(struct df_media_session_manager *,
+    enum df_media_outbound_operation, const struct df_media_session_key *,
+    uint64_t control_generation, uint64_t now_ms);
 const struct df_media_session *df_media_session_manager_find(
     const struct df_media_session_manager *, const char *station_id);
 size_t df_media_session_manager_active(
