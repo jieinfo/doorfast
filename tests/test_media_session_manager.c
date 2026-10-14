@@ -27,6 +27,13 @@ void test_media_video_reject_reason_names(void) {
         df_media_video_reject_reason_name(DF_MEDIA_VIDEO_REJECT_ENCODER)));
 }
 
+/* The production handoff must keep the real monitor's media watchdog alive,
+ * restore an unsent bound preview, and never carry handoff flags into incoming. */
+void test_media_session_manager_outbound_watchdogs_and_incoming_replacement(void);
+void test_media_session_manager_outbound_bound_rollback_preserves_pipeline(void);
+void test_media_session_manager_outbound_negative_gates(void);
+
+
 /* Loss of the real first-frame/recovery boundary or reuse of a prior public
  * generation must fail these observations, while control timing stays real. */
 void test_media_session_manager_observability(void);
@@ -480,6 +487,68 @@ void test_media_session_manager_outbound_call_lock(void) {
     df_media_session_manager_destroy(&manager);
 }
 
+void test_media_session_manager_outbound_call_requires_current_preview_confirmation(void) {
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    const struct df_media_session *session;
+    struct df_media_station_config_v3 stations[4];
+    struct df_gvs_frame confirmation = {0};
+    static const uint8_t confirmation_payload[] = {0x1eU, 0x00U, 0x01U};
+    uint64_t preview_generation = 0U;
+    uint64_t call_generation = 0U;
+
+    manager_fixture(&config, &callbacks, &trace);
+    config.local[0] = 0x61U;
+    config.min_free_kib = 0U;
+    memcpy(stations, config.stations, sizeof(stations));
+    stations[0].ipv4 = 0x01020304U;
+    memcpy(stations[0].logical_address,
+        (const uint8_t[]){0x32U, 2U, 1U, 0U, 2U, 0U}, 6U);
+    config.stations = stations;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(&manager, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+        "gate_main", DF_MEDIA_SESSION_PREVIEW, 100U, &preview_generation));
+    session = df_media_session_manager_find(&manager, "gate_main");
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 100U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_VIEWER,
+        &(struct df_media_session_key){.station_id = "gate_main",
+            .generation = preview_generation}, true, 101U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
+        df_media_module_api_v3.start(&manager, "gate_main",
+            DF_MEDIA_SESSION_CALL, 0U, 102U));
+    TEST_ASSERT_INT_EQ(0, call_generation);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW, session->purpose);
+    TEST_ASSERT_INT_EQ(preview_generation, session->generation);
+    TEST_ASSERT_INT_EQ(1, session->viewer_active ? 1 : 0);
+
+    confirmation.family = 0x03U;
+    confirmation.opcode = 0x84U;
+    memcpy(confirmation.source, session->station, sizeof(confirmation.source));
+    memcpy(confirmation.destination, config.local,
+        sizeof(confirmation.destination));
+    confirmation.payload = confirmation_payload;
+    confirmation.payload_length = sizeof(confirmation_payload);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(
+        &manager, &confirmation, session->station_ipv4, 103U));
+    TEST_ASSERT_INT_EQ(1, session->preview_confirmation_current ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, session->monitor.state);
+    TEST_ASSERT_INT_EQ(0, session->monitor.retry_after_stop ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, session->monitor.retry_waiting ? 1 : 0);
+    TEST_ASSERT_INT_EQ(1, session->monitor.first_frame_deadline_ms != 0U ? 1 : 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+        "gate_main", DF_MEDIA_SESSION_CALL, 0U, 104U));
+    call_generation = session->generation;
+    TEST_ASSERT_INT_EQ(preview_generation, call_generation);
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL, session->purpose);
+    TEST_ASSERT_INT_EQ(preview_generation, session->generation);
+    TEST_ASSERT_INT_EQ(1, session->viewer_active ? 1 : 0);
+    df_media_session_manager_destroy(&manager);
+}
+
 void test_media_module_api_starts_outbound_call_without_incoming_generation(void) {
     struct df_media_module_config_v3 config;
     struct df_media_module_callbacks_v3 callbacks;
@@ -493,12 +562,11 @@ void test_media_module_api_starts_outbound_call_without_incoming_generation(void
         df_media_session_manager_init(&manager, &config, &callbacks));
     status.sessions = entries;
     status.session_count = sizeof(entries) / sizeof(entries[0]);
-    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
+        df_media_module_api_v3.start(
         &manager, "gate_main", DF_MEDIA_SESSION_CALL, 0U, 100U));
     TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
-    TEST_ASSERT_INT_EQ(1, status.session_count > 0U ? 1 : 0);
-    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_CALL, entries[0].purpose);
-    TEST_ASSERT_INT_EQ(1, entries[0].active ? 1 : 0);
+    TEST_ASSERT_INT_EQ(0, status.session_count);
     df_media_session_manager_destroy(&manager);
 }
 
@@ -3269,4 +3337,346 @@ cleanup:
     }
     (void)unlink(ffmpeg_program);
     (void)rmdir(capture_directory);
+}
+
+static void outbound_fixture(struct df_media_session_manager *manager,
+    struct manager_trace *trace, struct df_media_session_key *key) {
+    static const struct df_media_station_config_v3 stations[] = {
+        {.id = "gate_main", .stream_name = "doorfast_gate_main", .enabled = true,
+         .logical_address = {0x32U, 2U, 1U, 0U, 2U, 0U}, .ipv4 = 0x01020304U},
+        {.id = "gate_side", .stream_name = "doorfast_gate_side", .enabled = true,
+         .logical_address = {0x32U, 2U, 1U, 0U, 3U, 0U}, .ipv4 = 0x01020305U},
+    };
+    struct df_media_module_config_v3 config;
+    struct df_media_module_callbacks_v3 callbacks;
+    struct df_media_session_resource_hooks hooks = {
+        .start = manager_start_resources, .stop = manager_stop_resources,
+        .context = trace,
+    };
+    manager_fixture(&config, &callbacks, trace);
+    config.stations = stations;
+    config.station_count = 2U;
+    config.local[0] = 0x61U;
+    config.first_frame_timeout_s = 1U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_init(manager, &config, &callbacks));
+    df_media_session_manager_set_resource_hooks(manager, &hooks);
+    key->station_id = "gate_main";
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(manager,
+        key->station_id, DF_MEDIA_SESSION_PREVIEW, 100U, &key->generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(manager, 100U));
+}
+
+static int outbound_confirm(struct df_media_session_manager *manager,
+    uint64_t now_ms) {
+    static const uint8_t payload[] = {0x1eU, 0U, 1U};
+    struct df_media_session *session = &manager->sessions[0];
+    struct df_gvs_frame frame = {.family = 3U, .opcode = 0x84U,
+        .payload = payload, .payload_length = sizeof(payload)};
+    memcpy(frame.source, session->station, 6U);
+    memcpy(frame.destination, manager->config.local, 6U);
+    return df_media_session_manager_receive_control(manager, &frame,
+        session->station_ipv4, now_ms);
+}
+
+static unsigned release_stop_attempts;
+static int release_encoder_failure(struct df_media_encoder_process *encoder,
+    unsigned timeout_ms) {
+    (void)encoder; (void)timeout_ms;
+    release_stop_attempts++;
+    return DF_ERR_IO;
+}
+
+/* A failed exact release must remain visible and run again on normal ticks,
+ * even when the main runtime owner has already gone away. */
+void test_media_session_manager_release_failure_retries_exact_owner(void) {
+    for (unsigned incoming = 0; incoming < 2; incoming++) {
+        struct manager_trace trace = {.available_kib = 4096U};
+        struct df_media_session_manager manager = {0};
+        struct df_media_session_key key;
+        outbound_fixture(&manager, &trace, &key);
+        TEST_ASSERT_INT_EQ(DF_OK, outbound_confirm(&manager, 101));
+        if (incoming) {
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_incoming_call(
+                &manager, "gate_main", 41, 102));
+            key.generation = manager.sessions[0].generation;
+        } else {
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+                "gate_main", DF_MEDIA_SESSION_CALL, 0, 102));
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(
+                &manager, DF_MEDIA_OUTBOUND_BIND_CONTROL, &key, 41, 102));
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(
+                &manager, DF_MEDIA_OUTBOUND_MARK_SENT, &key, 41, 102));
+        }
+        manager.sessions[0].stop_encoder = release_encoder_failure;
+        release_stop_attempts = 0;
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED,
+            df_media_session_manager_outbound_operation(&manager, incoming ?
+                DF_MEDIA_INCOMING_RELEASE_PEER : DF_MEDIA_OUTBOUND_RELEASE_PEER,
+                &key, 41, 103));
+        struct df_media_session_status_v3 entries[2];
+        struct df_media_module_status_v3 status = {.sessions = entries, .session_count = 2};
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.status(&manager, &status));
+        TEST_ASSERT_INT_EQ(1, status.session_count);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED, entries[0].last_error);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_STOPPING, entries[0].state);
+        TEST_ASSERT_INT_EQ(0, entries[0].ready);
+        TEST_ASSERT_INT_EQ(1, manager.active_count);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_CAPACITY_BUSY,
+            df_media_session_manager_incoming_call(&manager, "gate_main", 42, 104));
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 104));
+        TEST_ASSERT_INT_EQ(1, manager.active_count);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED,
+            df_media_session_manager_outbound_operation(&manager, incoming ?
+                DF_MEDIA_INCOMING_RELEASE_PEER : DF_MEDIA_OUTBOUND_RELEASE_PEER,
+                &key, 41, 104));
+        TEST_ASSERT_INT_EQ(1, release_stop_attempts);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED,
+            df_media_session_manager_command(&manager, DF_MEDIA_MODULE_COMMAND_VIEWER,
+                &key, true, 104));
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_ENCODER_FAILED,
+            df_media_session_manager_command(&manager, DF_MEDIA_MODULE_COMMAND_STOP,
+                &key, false, 104));
+        TEST_ASSERT_INT_EQ(1, trace.control_count);
+        /* Only the external encoder boundary recovers; no new user command. */
+        manager.sessions[0].stop_encoder = NULL;
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 203));
+        TEST_ASSERT_INT_EQ(0, manager.active_count);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_END_PEER_HANGUP, manager.last_results[0].end_reason);
+        TEST_ASSERT_INT_EQ(1, trace.control_count);
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_incoming_call(
+            &manager, "gate_main", 42, 204));
+        uint64_t replacement = manager.sessions[0].generation;
+        TEST_ASSERT_INT_EQ(1, replacement != key.generation);
+        TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+            df_media_session_manager_outbound_operation(&manager, incoming ?
+                DF_MEDIA_INCOMING_RELEASE_PEER : DF_MEDIA_OUTBOUND_RELEASE_PEER,
+                &key, 41, 205));
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 206));
+        TEST_ASSERT_INT_EQ(1, manager.active_count);
+        TEST_ASSERT_INT_EQ(replacement, manager.sessions[0].generation);
+        df_media_session_manager_destroy(&manager);
+    }
+}
+
+void test_media_session_manager_outbound_watchdogs_and_incoming_replacement(void) {
+    for (unsigned scenario = 0U; scenario < 3U; scenario++) {
+        struct manager_trace trace = {.available_kib = 4096U};
+        struct df_media_session_manager manager = {0};
+        struct df_media_session_key key;
+        outbound_fixture(&manager, &trace, &key);
+        TEST_ASSERT_INT_EQ(DF_OK, outbound_confirm(&manager, 101U));
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+            "gate_main", DF_MEDIA_SESSION_CALL, 0U, 102U));
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 500U));
+        TEST_ASSERT_INT_EQ(1, trace.control_count); /* only initial 03/04 */
+        if (scenario == 1U) {
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+                DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 600U));
+            unsigned controls = trace.control_count;
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 1600U));
+            TEST_ASSERT_INT_EQ(controls, trace.control_count);
+        } else {
+            if (scenario == 2U) {
+                TEST_ASSERT_INT_EQ(DF_OK,
+                    df_media_session_manager_outbound_operation(&manager,
+                        DF_MEDIA_OUTBOUND_BIND_CONTROL, &key, 44U, 500U));
+                TEST_ASSERT_INT_EQ(DF_OK,
+                    df_media_session_manager_outbound_operation(&manager,
+                        DF_MEDIA_OUTBOUND_MARK_SENT, &key, 44U, 500U));
+                TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+                    "gate_main", DF_MEDIA_SESSION_CALL, 77U, 600U));
+                TEST_ASSERT_INT_EQ(0, manager.sessions[0].outbound_handoff);
+                TEST_ASSERT_INT_EQ(0, manager.sessions[0].outbound_command_sent);
+                TEST_ASSERT_INT_EQ(0, manager.sessions[0].outbound_preview_persistent);
+                TEST_ASSERT_INT_EQ(0, manager.sessions[0].preview_confirmation_current);
+                TEST_ASSERT_INT_EQ(0, manager.sessions[0].preview_confirmation_generation);
+                TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+                    df_media_session_manager_outbound_operation(&manager,
+                        DF_MEDIA_OUTBOUND_RELEASE, &key, 44U, 601U));
+                TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                    df_media_session_manager_outbound_operation(&manager,
+                        DF_MEDIA_OUTBOUND_RELEASE,
+                        &(struct df_media_session_key){"gate_main",
+                            manager.sessions[0].generation}, 77U, 601U));
+            }
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager,
+                scenario == 2U ? 1600U : 1101U));
+            TEST_ASSERT_INT_EQ(1, trace.control_count);
+        }
+        TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
+        TEST_ASSERT_INT_EQ(1, trace.resource_stops);
+        df_media_session_manager_destroy(&manager);
+    }
+}
+
+void test_media_session_manager_outbound_bound_rollback_preserves_pipeline(void) {
+    static const uint8_t jpeg[] = {0xffU, 0xd8U, 0xffU, 0xe0U, 0U, 4U, 0U, 0U,
+        0xffU, 0xc0U, 0U, 8U, 8U, 1U, 0xe0U, 2U, 0x80U, 0U, 0xffU, 0xd9U};
+    struct manager_trace trace = {.available_kib = 4096U};
+    struct df_media_session_manager manager = {0};
+    struct df_media_session_key key, stale;
+    struct df_media_session *session;
+    outbound_fixture(&manager, &trace, &key);
+    TEST_ASSERT_INT_EQ(DF_OK, outbound_confirm(&manager, 101U));
+    session = &manager.sessions[0];
+    /* Only the external encoder process is replaced: real JPEG admission,
+     * publication, frame queue, monitor, and viewer paths remain in use. */
+    session->encoder.input_fd = open("/dev/null", O_WRONLY);
+    session->encoder.input_owned = true;
+    session->encoder.running = true;
+    session->encoder.generation = key.generation;
+    TEST_ASSERT_INT_EQ(1, session->encoder.input_fd >= 0);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_push_jpeg(&manager,
+        session->station, manager.config.local, session->station_ipv4,
+        jpeg, sizeof(jpeg), 640U, 480U, 102U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_command(&manager,
+        DF_MEDIA_MODULE_COMMAND_VIEWER, &key, true, 103U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_frame_queue_push(&session->queue,
+        jpeg, sizeof(jpeg), session->publication_generation, 103U));
+    struct df_media_encoder_process encoder = session->encoder;
+    struct df_media_frame_queue queue = session->queue;
+    uint64_t publication = session->publication_generation;
+    trace.available_kib = 0U;
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_RESOURCE_EXHAUSTED,
+        df_media_module_api_v3.start(&manager, "gate_main",
+            DF_MEDIA_SESSION_CALL, 0U, 104U));
+    TEST_ASSERT_INT_EQ(0, memcmp(&encoder, &session->encoder, sizeof(encoder)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&queue, &session->queue, sizeof(queue)));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW, session->purpose);
+    TEST_ASSERT_INT_EQ(1, session->viewer_active);
+    TEST_ASSERT_INT_EQ(0, trace.resource_stops);
+    trace.available_kib = 4096U;
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+        "gate_main", DF_MEDIA_SESSION_CALL, 0U, 104U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+        "gate_main", DF_MEDIA_SESSION_CALL, 0U, 104U));
+    TEST_ASSERT_INT_EQ(0, memcmp(&encoder, &session->encoder, sizeof(encoder)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&queue, &session->queue, sizeof(queue)));
+    TEST_ASSERT_INT_EQ(publication, session->publication_generation);
+    TEST_ASSERT_INT_EQ(key.generation, session->generation);
+    TEST_ASSERT_INT_EQ(1, session->viewer_active);
+    TEST_ASSERT_INT_EQ(1, trace.resource_starts);
+    TEST_ASSERT_INT_EQ(0, trace.resource_stops);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_BIND_CONTROL, &key, 900U, 105U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_BIND_CONTROL, &key, 900U, 105U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_media_session_manager_outbound_operation(&manager,
+            DF_MEDIA_OUTBOUND_BIND_CONTROL, &key, 901U, 105U));
+    stale = key; stale.generation++;
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_media_session_manager_outbound_operation(&manager,
+            DF_MEDIA_OUTBOUND_ROLLBACK, &stale, 900U, 106U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_media_session_manager_outbound_operation(&manager,
+            DF_MEDIA_OUTBOUND_ROLLBACK, &key, 901U, 106U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_ROLLBACK, &key, 900U, 106U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW, session->purpose);
+    TEST_ASSERT_INT_EQ(0, session->call_generation);
+    TEST_ASSERT_INT_EQ(0, memcmp(&encoder, &session->encoder, sizeof(encoder)));
+    TEST_ASSERT_INT_EQ(0, memcmp(&queue, &session->queue, sizeof(queue)));
+    TEST_ASSERT_INT_EQ(1, session->viewer_active);
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+        "gate_main", DF_MEDIA_SESSION_CALL, 0U, 107U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_BIND_CONTROL, &key, 902U, 108U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_media_session_manager_outbound_operation(&manager,
+            DF_MEDIA_OUTBOUND_MARK_SENT, &key, 901U, 109U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_MARK_SENT, &key, 902U, 109U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 300U));
+    TEST_ASSERT_INT_EQ(1, trace.control_count); /* live publisher, no 03/51 */
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_ROLLBACK, &key, 902U, 301U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_media_session_manager_outbound_operation(&manager,
+            DF_MEDIA_OUTBOUND_RELEASE, &key, 901U, 301U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_outbound_operation(&manager,
+        DF_MEDIA_OUTBOUND_RELEASE, &key, 902U, 301U));
+    TEST_ASSERT_INT_EQ(0, df_media_session_manager_active(&manager));
+    TEST_ASSERT_INT_EQ(1, trace.resource_stops);
+    TEST_ASSERT_INT_EQ(1, trace.control_count);
+    df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_outbound_negative_gates(void) {
+    for (unsigned scenario = 0U; scenario < 13U; scenario++) {
+        struct manager_trace trace = {.available_kib = 4096U};
+        struct df_media_session_manager manager = {0};
+        struct df_media_session_key key;
+        static const uint8_t ack[] = {0x1eU, 0U, 1U};
+        struct df_gvs_frame frame = {.family = 3U, .opcode = 0x84U,
+            .payload = ack, .payload_length = sizeof(ack)};
+        uint64_t check_time = 102U;
+        int expected = DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED;
+        outbound_fixture(&manager, &trace, &key);
+        struct df_media_session *session = &manager.sessions[0];
+        memcpy(frame.source, session->station, 6U);
+        memcpy(frame.destination, manager.config.local, 6U);
+        if (scenario < 4U) {
+            if (scenario == 1U) frame.payload_length = 2U;
+            if (scenario == 2U) frame.source[4]++;
+            if (scenario != 0U) TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                df_media_session_manager_receive_control(&manager, &frame,
+                    session->station_ipv4 + (scenario == 3U ? 1U : 0U), 101U));
+        } else {
+            TEST_ASSERT_INT_EQ(DF_OK, outbound_confirm(&manager,
+                scenario == 4U ? 1101U : 101U));
+            if (scenario == 4U) check_time = 1102U; /* expired request ACK */
+            if (scenario == 5U) {
+                check_time = 1101U; /* exact first-frame expiry boundary */
+            }
+            if (scenario == 6U) {
+                TEST_ASSERT_INT_EQ(DF_OK,
+                    df_gvs_monitor_request_retry(&session->monitor, 102U));
+            }
+            if (scenario == 7U) {
+                key.generation++;
+                expected = DF_MEDIA_ERROR_GENERATION_MISMATCH;
+            }
+            if (scenario == 8U) {
+                TEST_ASSERT_INT_EQ(DF_OK, df_media_module_api_v3.start(&manager,
+                    "gate_side", DF_MEDIA_SESSION_CALL, 77U, 102U));
+                expected = DF_MEDIA_ERROR_CAPACITY_BUSY;
+            }
+            if (scenario == 9U) {
+                trace.available_kib = 0U;
+                expected = DF_MEDIA_ERROR_RESOURCE_EXHAUSTED;
+            }
+            if (scenario == 10U) {
+                manager.stations[0].ipv4++;
+                expected = DF_MEDIA_ERROR_ROUTE_UNAVAILABLE;
+            }
+            if (scenario == 11U) {
+                key.station_id = "missing";
+                expected = DF_MEDIA_ERROR_STATION_NOT_FOUND;
+            }
+            if (scenario == 12U) {
+                frame.destination[0]++;
+                TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                    df_media_session_manager_receive_control(&manager, &frame,
+                        session->station_ipv4, 102U));
+                /* Replace the accepted preview with its real next attempt,
+                 * keeping historical diagnostics but closing current gate. */
+                TEST_ASSERT_INT_EQ(DF_OK,
+                    df_gvs_monitor_request_retry(&session->monitor, 102U));
+                TEST_ASSERT_INT_EQ(DF_OK,
+                    df_media_session_manager_tick(&manager, 102U));
+                TEST_ASSERT_INT_EQ(DF_OK,
+                    df_media_session_manager_tick(&manager, 1102U));
+                check_time = 1103U;
+            }
+        }
+        TEST_ASSERT_INT_EQ(expected, df_media_session_manager_outbound_operation(
+            &manager, DF_MEDIA_OUTBOUND_CHECK, &key, 0U, check_time));
+        TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW, session->purpose);
+        TEST_ASSERT_INT_EQ(1, session->generation);
+        TEST_ASSERT_INT_EQ(0, trace.resource_stops);
+        TEST_ASSERT_INT_EQ(scenario == 12U ? 2U : 1U, trace.control_count);
+        df_media_session_manager_destroy(&manager);
+    }
 }

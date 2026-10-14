@@ -1,4 +1,5 @@
 #include "runtime_service.h"
+#include "runtime_station_call.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -55,6 +56,10 @@ static const struct df_runtime_media_paths df_runtime_media_paths = {
     DF_RUNTIME_AUDIO_SNAPSHOT, DF_RUNTIME_AUDIO_CHUNKS,
     DF_RUNTIME_VIDEO_SNAPSHOT,
 };
+
+uint64_t df_runtime_control_generation_next(uint64_t current) {
+    return current == UINT64_MAX ? 0U : current + 1U;
+}
 
 #define DF_RUNTIME_PREVIEW_ROUTE_MAX_AGE_MS 60000U
 
@@ -541,26 +546,6 @@ int df_runtime_sync_configure(struct df_gvs_runtime_sync *sync,
     return DF_OK;
 }
 
-struct df_runtime_call_binding {
-    struct df_gvs_call_control *control;
-    struct df_gvs_session *session;
-    struct df_gvs_deadline *deadline;
-    const uint8_t *identity;
-    const struct df_station_registry *stations;
-};
-
-static const struct df_station *df_runtime_call_station_find(
-    const struct df_station_registry *registry, const char *station_id) {
-    size_t index;
-
-    if (registry == NULL || station_id == NULL) return NULL;
-    for (index = 0U; index < registry->count; index++) {
-        if (strcmp(registry->items[index].id, station_id) == 0)
-            return &registry->items[index];
-    }
-    return NULL;
-}
-
 static int df_runtime_call_status_provider(
     struct df_gvs_call_control_status *status, void *context) {
     struct df_runtime_call_binding *binding = context;
@@ -572,14 +557,19 @@ static int df_runtime_call_status_provider(
         binding->control, binding->session, binding->deadline, status);
 }
 
-static int df_runtime_call_submit(
+int df_runtime_call_submit(
     const struct df_runtime_call_request *request, uint64_t now_ms,
     void *context) {
     struct df_runtime_call_binding *binding = context;
 
-    if (request == NULL || binding == NULL) {
+    if (request == NULL || binding == NULL || binding->control == NULL ||
+        binding->session == NULL || binding->deadline == NULL || binding->identity == NULL) {
         return DF_ERR_INVALID;
     }
+    if (binding->ubus != NULL &&
+        (!df_runtime_id_is_valid(request->runtime_id) ||
+         strcmp(request->runtime_id, binding->ubus->runtime_id) != 0))
+        return DF_ERR_INVALID;
     if (request->type == DF_GVS_CALL_COMMAND_ANSWER) {
         return df_gvs_call_control_submit_answer(
             binding->control, binding->session, request->session_generation,
@@ -587,25 +577,17 @@ static int df_runtime_call_submit(
             request->secondary_media_port, request->duration_seconds, now_ms);
     }
     if (request->type == DF_GVS_CALL_COMMAND_CALL) {
-        const struct df_station *station = df_runtime_call_station_find(
-            binding->stations, request->station_id);
-        struct df_gvs_session station_session;
-
-        if (station == NULL) return DF_ERR_INVALID;
-        station_session = *binding->session;
-        station_session.state = DF_GVS_PREVIEW;
-        station_session.generation = request->session_generation;
-        memcpy(station_session.peer, station->logical_address,
-            sizeof(station_session.peer));
-        return df_gvs_call_control_submit_call(
-            binding->control, &station_session, request->session_generation,
-            binding->identity, request->primary_media_port,
-            request->secondary_media_port, request->duration_seconds, now_ms);
+        return df_runtime_station_call_install(binding, request, now_ms);
     }
     if (request->type == DF_GVS_CALL_COMMAND_HANGUP) {
-        return df_gvs_call_control_submit_hangup(
-            binding->control, binding->session, request->session_generation,
-            binding->identity, request->reason, now_ms);
+        if (binding->ubus != NULL && df_runtime_station_call_active(binding->ubus) &&
+            request->session_generation == binding->ubus->station_call.control_generation &&
+            request->session_generation == binding->session->generation)
+            return df_runtime_station_call_hangup(binding->ubus,
+                binding->ubus->station_call.station_id,
+                binding->ubus->station_call.media_generation);
+        return df_runtime_call_hangup(binding, request->session_generation,
+            request->reason, now_ms);
     }
     return DF_ERR_INVALID;
 }
@@ -679,6 +661,20 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
         struct df_gvs_deadline next_deadline = *deadline;
         struct df_gvs_call_control_result next_result;
 
+        /* A valid incoming frame may take over an outbound preparation. Test
+         * it on the candidate first; malformed/foreign traffic cannot cancel. */
+        bool outbound_candidate = ubus != NULL &&
+            (ubus->station_call.stage == DF_RUNTIME_STATION_CALL_PREPARING ||
+             ubus->station_call.stage == DF_RUNTIME_STATION_CALL_CALLING);
+        if (outbound_candidate && stations != NULL &&
+            df_runtime_station_by_address(stations, frame.source) != NULL &&
+            (next_session.state == DF_GVS_IDLE ||
+             next_session.generation == ubus->station_call.control_generation)) {
+            bool ended;
+            (void)df_gvs_session_abort(&next_session, &ended);
+            df_gvs_deadline_cancel(&next_deadline);
+        }
+
         if (df_gvs_call_control_receive(&next_control, data, length, local,
                 &next_session, &next_deadline, now_ms, &next_result) != DF_OK) {
             return DF_ERR_INVALID;
@@ -694,6 +690,9 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
             for (index = 0U; index < stations->count; index++) {
                 if (memcmp(stations->items[index].logical_address,
                         frame.source, sizeof(frame.source)) == 0) {
+                    if (outbound_candidate &&
+                        strcmp(ubus->station_call.station_id, stations->items[index].id) != 0)
+                        df_runtime_station_call_preempt(ubus, now_ms);
                     if (media != NULL && media->available) {
                         *media_result = df_runtime_media_module_incoming_call(
                             media, stations->items[index].id,
@@ -747,6 +746,7 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
         *session = next_session;
         *deadline = next_deadline;
         *result = next_result;
+        (void)df_runtime_station_call_step(ubus, now_ms);
         return DF_OK;
     }
     if (media != NULL && media->available && frame.family == 0x03U &&
@@ -756,8 +756,12 @@ int df_runtime_receive_control_with_media(struct df_runtime_media_module *media,
         (void)df_runtime_media_module_receive_control(media, &frame,
             source_ipv4, now_ms);
     }
-    return df_gvs_call_control_receive(control, data, length, local, session,
+    int status = df_gvs_call_control_receive(control, data, length, local, session,
         deadline, now_ms, result);
+    (void)df_runtime_station_call_step(ubus, now_ms);
+    if (ubus != NULL && ubus->submit_call == df_runtime_call_submit && ubus->call_context != NULL)
+        df_runtime_call_release_ended(ubus->call_context, now_ms);
+    return status;
 }
 
 static int df_runtime_media_emit_control(const uint8_t destination[6],
@@ -973,6 +977,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     char derived_multicast_group[DF_GVS_IPV4_TEXT_SIZE];
     const char *effective_multicast_group;
     struct df_runtime_call_binding call_binding = {
+        .ubus = &ubus,
         .control = &call_control,
         .session = &session,
         .deadline = &deadline,
@@ -1347,8 +1352,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         }
         {
             struct df_gvs_call_control_result tick_result;
-            if (df_gvs_call_control_step(&call_control, &session, identity,
-                                         &deadline, now_ms, &tick_result) != DF_OK) {
+            if (df_runtime_call_step(&call_binding, now_ms, &tick_result) != DF_OK) {
                 status = DF_ERR_IO;
                 goto done;
             }
@@ -1430,8 +1434,8 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
                 &previous_session, &session);
             {
                 struct df_gvs_call_control_result call_result;
-                if (df_gvs_call_control_step(
-                        &call_control, &session, identity, &deadline,
+                df_runtime_station_call_shutdown(&ubus, now_ms);
+                if (df_runtime_call_step(&call_binding,
                         now_ms, &call_result) != DF_OK) {
                     status = DF_ERR_IO;
                     goto done;
@@ -1828,6 +1832,7 @@ iteration_end:
     status = DF_OK;
 
 done:
+    df_runtime_station_call_shutdown(&ubus, df_monotonic_ms());
     (void)printf(
         "doorfast: event=media_udp_stats audio_received=%llu "
         "video_received=%llu truncated=%llu receive_errors=%llu\n",

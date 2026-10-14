@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include <string.h>
+#include <dlfcn.h>
 
 #include "media_module.h"
 #include "runtime_media_module.h"
+#include "media_session_manager.h"
 #include "test.h"
 
 struct runtime_fake {
@@ -334,4 +336,155 @@ void test_runtime_module_request_start_calls_loaded_module(void) {
     module.available = false;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_request_start(
         &module, "gate_main", 44U, &generation));
+}
+
+void test_runtime_media_outbound_extension_fails_closed(void) {
+    const struct df_media_module_api_v3 api = runtime_valid_api();
+    struct df_media_session_status_v3 snapshot[1];
+    struct df_runtime_media_module module = {.api = &api,
+        .instance = &runtime_fake_instance, .available = true,
+        .session_snapshot = snapshot, .session_snapshot_capacity = 1U};
+    struct df_media_session_key key = {"gate_main", 21U};
+    struct df_media_module_outbound_upgrade_api_v1 extension =
+        df_media_module_outbound_upgrade_api_v1;
+    uint64_t generation = 99U;
+    memset(&runtime_fake_instance, 0, sizeof(runtime_fake_instance));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_call(&module, "gate_main", 100U, &generation));
+    TEST_ASSERT_INT_EQ(0, generation);
+    TEST_ASSERT_INT_EQ(0, runtime_fake_instance.start_calls);
+    /* The dynamically loaded old-module case must also never call old CALL. */
+    int handle = 0;
+    module.handle = &handle;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_call(&module, "gate_main", 100U, &generation));
+    TEST_ASSERT_INT_EQ(0, runtime_fake_instance.start_calls);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_call_key(&module, &key, 100U));
+    extension.abi_version++;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_set_outbound_api(&module, &extension));
+    extension = df_media_module_outbound_upgrade_api_v1;
+    extension.struct_size--;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_set_outbound_api(&module, &extension));
+    extension = df_media_module_outbound_upgrade_api_v1;
+    extension.operation = NULL;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_set_outbound_api(&module, &extension));
+    TEST_ASSERT_INT_EQ(1, module.outbound_upgrade_api == NULL);
+    struct df_media_module_lifecycle_api_v2 lifecycle = df_media_module_lifecycle_api_v2;
+    lifecycle.abi_version = 1;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_set_lifecycle_api(&module, &lifecycle));
+    lifecycle = df_media_module_lifecycle_api_v2;
+    lifecycle.struct_size--;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_set_lifecycle_api(&module, &lifecycle));
+    lifecycle = df_media_module_lifecycle_api_v2;
+    lifecycle.operation = NULL;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_set_lifecycle_api(&module, &lifecycle));
+    TEST_ASSERT_INT_EQ(1, module.lifecycle_api == NULL);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_media_module_outbound_upgrade_api_v1.operation(
+        NULL, DF_MEDIA_INCOMING_RELEASE_LOCAL, &key, 41, 100));
+
+    /* Exercise the same dlopen API/instance boundary as runtime startup with
+     * an actual legacy v3 library, rather than inferring support from v3. */
+    struct df_runtime_media_module legacy = {0};
+    const struct df_media_module_api_v3 *legacy_api = NULL;
+    unsigned *legacy_calls = NULL;
+    legacy.handle = dlopen("build/media-v3-legacy.so", RTLD_NOW | RTLD_LOCAL);
+    TEST_ASSERT_INT_EQ(1, legacy.handle != NULL);
+    if (legacy.handle == NULL) return;
+    *(void **)(&legacy_api) = dlsym(legacy.handle, "df_media_module_api_v3");
+    *(void **)(&legacy_calls) = dlsym(legacy.handle, "df_test_legacy_call_count");
+    TEST_ASSERT_INT_EQ(1, legacy_api != NULL && legacy_calls != NULL);
+    if (legacy_api == NULL || legacy_calls == NULL) {
+        (void)dlclose(legacy.handle);
+        return;
+    }
+    struct df_media_module_config_v3 config = {.station_count = 1U};
+    struct df_media_module_callbacks_v3 callbacks = {0};
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_start_with_api(&legacy,
+        legacy_api, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(1,
+        dlsym(legacy.handle, "df_media_module_outbound_upgrade_api_v1") == NULL);
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_call(&legacy,
+        "gate_main", 100U, &generation));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_call_key(&legacy, &key, 100U));
+    TEST_ASSERT_INT_EQ(0, *legacy_calls);
+    df_runtime_media_module_stop(&legacy);
+}
+
+static int outbound_runtime_emit(const uint8_t destination[6], uint32_t ipv4,
+    const uint8_t source[6], uint8_t family, uint8_t opcode,
+    const uint8_t *payload, size_t length, void *context) {
+    (void)destination; (void)ipv4; (void)source; (void)payload; (void)length;
+    TEST_ASSERT_INT_EQ(3, family);
+    TEST_ASSERT_INT_EQ(4, opcode);
+    (*(unsigned *)context)++;
+    return DF_OK;
+}
+
+static int outbound_runtime_route(const uint8_t peer[6], uint64_t now_ms,
+    uint32_t *ipv4, void *context) {
+    (void)peer; (void)now_ms; (void)context;
+    *ipv4 = 0x01020304U;
+    return DF_OK;
+}
+
+static int outbound_runtime_memory(uint64_t *available, void *context) {
+    (void)context;
+    *available = 4096U;
+    return DF_OK;
+}
+
+void test_runtime_media_outbound_uses_real_manager(void) {
+    static const struct df_media_station_config_v3 station = {
+        .id = "gate_main", .stream_name = "doorfast_gate_main", .enabled = true,
+        .logical_address = {0x32U, 2U, 1U, 0U, 2U, 0U}, .ipv4 = 0x01020304U};
+    const struct df_media_module_config_v3 config = {.enabled = true,
+        .local = {0x61U, 2U, 1U, 1U, 1U, 1U}, .stations = &station,
+        .station_count = 1U, .max_encoders = 1U, .fps = 10U};
+    unsigned sends = 0U;
+    const struct df_media_module_callbacks_v3 callbacks = {
+        .emit_control = outbound_runtime_emit, .resolve_route = outbound_runtime_route,
+        .available_memory = outbound_runtime_memory,
+        .context = &sends};
+    struct df_runtime_media_module module = {0};
+    struct df_media_session_key key = {.station_id = "gate_main"};
+    uint64_t generation;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_start_with_api(&module,
+        &df_media_module_api_v3, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(1, module.outbound_upgrade_api == NULL);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_set_outbound_api(&module,
+        &df_media_module_outbound_upgrade_api_v1));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_request_start(&module,
+        "gate_main", 100U, &key.generation));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&module, 100U));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
+        df_runtime_media_module_call(&module, "gate_main", 101U, &generation));
+    static const uint8_t ack[] = {0x1eU, 0U, 1U};
+    struct df_gvs_frame frame = {.family = 3U, .opcode = 0x84U,
+        .payload = ack, .payload_length = sizeof(ack)};
+    memcpy(frame.source, station.logical_address, 6U);
+    memcpy(frame.destination, config.local, 6U);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_receive_control(&module,
+        &frame, station.ipv4, 102U));
+    struct df_media_session_key stale = key; stale.generation++;
+    TEST_ASSERT_INT_EQ(DF_MEDIA_ERROR_GENERATION_MISMATCH,
+        df_runtime_media_module_call_key(&module, &stale, 103U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_call_key(&module, &key, 103U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_call(&module,
+        "gate_main", 104U, &generation));
+    TEST_ASSERT_INT_EQ(key.generation, generation);
+    TEST_ASSERT_INT_EQ(1, sends);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_outbound_operation(&module,
+        DF_MEDIA_OUTBOUND_BIND_CONTROL, &key, 44U, 105U));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_outbound_operation(&module,
+        DF_MEDIA_OUTBOUND_ROLLBACK, &key, 44U, 106U));
+    const struct df_media_session *session =
+        df_media_session_manager_find(module.instance, "gate_main");
+    TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_PREVIEW, session->purpose);
+    TEST_ASSERT_INT_EQ(key.generation, session->generation);
+    df_runtime_media_module_stop(&module);
 }

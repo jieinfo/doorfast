@@ -389,20 +389,20 @@ void test_gvs_call_control_reports_confirmation_timeout_once(void) {
         &control, &session, local, &deadline,
         DF_GVS_CALL_CONFIRM_TIMEOUT_MS, &result));
     TEST_ASSERT_INT_EQ(1, result.runtime.acknowledgement_expired);
-    TEST_ASSERT_INT_EQ(DF_GVS_TALKING, session.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED, session.state);
     {
         struct df_gvs_call_control_status status;
         TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status(
             &control, &session, &status));
-        TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_NONE, status.end_reason);
+        TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_LOCAL_HANGUP, status.end_reason);
         TEST_ASSERT_INT_EQ(DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT,
             status.fault);
         TEST_ASSERT_INT_EQ(DF_GVS_CALL_TIMER_NONE, status.timer);
         TEST_ASSERT_INT_EQ(0, (int)status.remaining_ms);
         TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status_with_deadline(
             &control, &session, &deadline, &status));
-        TEST_ASSERT_INT_EQ(DF_GVS_CALL_TIMER_SESSION, status.timer);
-        TEST_ASSERT_INT_EQ(1000, (int)status.remaining_ms);
+        TEST_ASSERT_INT_EQ(DF_GVS_CALL_TIMER_NONE, status.timer);
+        TEST_ASSERT_INT_EQ(0, (int)status.remaining_ms);
     }
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_step(
         &control, &session, local, &deadline,
@@ -434,13 +434,13 @@ void test_gvs_call_control_records_local_hangup_snapshot(void) {
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_receive(
         &control, packet, length, local, &session, &deadline, 10, &result));
     TEST_ASSERT_INT_EQ(1, result.runtime.acknowledgement_confirmed);
-    TEST_ASSERT_INT_EQ(DF_GVS_TALKING, session.state);
-    TEST_ASSERT_INT_EQ(1, deadline.armed);
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED, session.state);
+    TEST_ASSERT_INT_EQ(0, deadline.armed);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_status_with_deadline(
         &control, &session, &deadline, &status));
-    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_NONE, status.end_reason);
-    TEST_ASSERT_INT_EQ(DF_GVS_CALL_TIMER_SESSION, status.timer);
-    TEST_ASSERT_INT_EQ(90, (int)status.remaining_ms);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_END_LOCAL_HANGUP, status.end_reason);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_TIMER_NONE, status.timer);
+    TEST_ASSERT_INT_EQ(0, (int)status.remaining_ms);
     length = control_reply(packet, session.peer, local, 0x02,
         (const uint8_t[]){1}, 1);
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_receive(

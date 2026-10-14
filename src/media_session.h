@@ -32,10 +32,17 @@ struct df_media_session {
     enum df_media_error_v3 last_error;
     enum df_media_failure_reason failure_reason;
     enum df_media_end_reason pending_end_reason;
+    enum df_media_outbound_operation pending_release;
+    uint64_t release_retry_ms;
     bool reserved;
     bool active;
     bool viewer_active;
     bool queue_initialized;
+    bool preview_confirmation_current;
+    bool outbound_handoff;
+    bool outbound_command_sent;
+    bool outbound_preview_persistent;
+    uint64_t preview_confirmation_generation;
     uint64_t started_ms;
     uint64_t frames_received;
     uint64_t last_frame_ms;
@@ -51,6 +58,7 @@ struct df_media_session {
     struct df_gvs_monitor monitor;
     struct df_media_frame_queue queue;
     struct df_media_encoder_process encoder;
+    int (*stop_encoder)(struct df_media_encoder_process *, unsigned timeout_ms);
     void (*stop_resources)(struct df_media_session *, void *context);
     void *resource_context;
 };
@@ -85,6 +93,8 @@ void df_media_session_mark_source_lost(struct df_media_session *,
 int df_media_session_stop_pipeline(struct df_media_session *);
 int df_media_session_upgrade_to_call(struct df_media_session *,
     uint64_t generation, uint64_t call_generation, uint64_t now_ms);
+int df_media_session_promote_preview_to_call(struct df_media_session *,
+    uint64_t call_generation, uint64_t now_ms);
 void df_media_session_diagnostics(const struct df_media_session *, uint64_t,
     struct df_media_session_diagnostics_v2 *);
 

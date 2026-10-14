@@ -60,6 +60,7 @@ enum df_media_error_v3 {
     DF_MEDIA_ERROR_SESSION_PREEMPTED,
     DF_MEDIA_ERROR_VIDEO_STALLED,
     DF_MEDIA_ERROR_RECONNECT_FRAME,
+    DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED,
 };
 
 struct df_media_station_config_v3 {
@@ -274,6 +275,55 @@ struct df_media_module_api_v3 {
 };
 
 extern const struct df_media_module_api_v3 df_media_module_api_v3;
+
+#define DF_MEDIA_MODULE_OUTBOUND_UPGRADE_ABI_VERSION 1U
+enum df_media_outbound_operation {
+    DF_MEDIA_OUTBOUND_CHECK = 1,
+    DF_MEDIA_OUTBOUND_ROLLBACK,
+    DF_MEDIA_OUTBOUND_RELEASE,
+    DF_MEDIA_OUTBOUND_BIND_CONTROL,
+    DF_MEDIA_OUTBOUND_MARK_SENT,
+    DF_MEDIA_OUTBOUND_RELEASE_PEER,
+    DF_MEDIA_OUTBOUND_RELEASE_SESSION,
+    DF_MEDIA_OUTBOUND_RELEASE_CONFIRMATION,
+    DF_MEDIA_OUTBOUND_RELEASE_PREEMPTED,
+    DF_MEDIA_OUTBOUND_RELEASE_RUNTIME,
+    DF_MEDIA_OUTBOUND_RELEASE_UNKNOWN,
+    DF_MEDIA_INCOMING_RELEASE_LOCAL,
+    DF_MEDIA_INCOMING_RELEASE_PEER,
+    DF_MEDIA_INCOMING_RELEASE_SESSION,
+    DF_MEDIA_INCOMING_RELEASE_RUNTIME,
+    DF_MEDIA_INCOMING_RELEASE_UNKNOWN,
+};
+/* CHECK validates exact public media key and current preview eligibility.
+ * BIND_CONTROL installs the runtime's distinct control generation.
+ * The runtime must MARK_SENT immediately after its first successful CALL send.
+ * ROLLBACK and RELEASE require control_generation to match the binding (zero
+ * only while unbound); ROLLBACK is allowed only before MARK_SENT. RELEASE
+ * relinquishes media resources without sending a formal hangup. */
+/* Appended RELEASE_* variants retain the same exact-key/binding checks and
+ * record the actual terminal reason. INCOMING_RELEASE_* only accepts a CALL
+ * with the matching nonzero incoming control generation and no outbound
+ * handoff; an old owner's cleanup cannot release a replacement. */
+struct df_media_module_outbound_upgrade_api_v1 {
+    uint32_t abi_version;
+    size_t struct_size;
+    int (*operation)(void *, enum df_media_outbound_operation,
+                     const struct df_media_session_key *, uint64_t, uint64_t);
+};
+extern const struct df_media_module_outbound_upgrade_api_v1
+    df_media_module_outbound_upgrade_api_v1;
+
+/* v1 guarantees operations 1–5 only. v2 additionally guarantees exact local
+ * incoming/reasoned release and persistent cleanup/error recovery on ticks. */
+#define DF_MEDIA_MODULE_LIFECYCLE_ABI_VERSION 2U
+struct df_media_module_lifecycle_api_v2 {
+    uint32_t abi_version;
+    size_t struct_size;
+    int (*operation)(void *, enum df_media_outbound_operation,
+                     const struct df_media_session_key *, uint64_t, uint64_t);
+};
+extern const struct df_media_module_lifecycle_api_v2 df_media_module_lifecycle_api_v2;
 
 int df_media_module_config_v3_validate(
     const struct df_media_module_config_v3 *,

@@ -70,11 +70,13 @@ monitor_json_content_type() {
 }
 
 monitor_validate_keys() {
-  local expected="$1"
-  printf '%s\n' "$MONITOR_COMPACT" | awk -v expected="$expected" '
+  local expected="$1" optional="${2:-}"
+  printf '%s\n' "$MONITOR_COMPACT" | awk -v expected="$expected" -v optional="$optional" '
     BEGIN {
       count = split(expected, names, ",")
       for (i = 1; i <= count; i++) allowed[names[i]] = 1
+      optional_count = split(optional, optional_names, ",")
+      for (i = 1; i <= optional_count; i++) allowed[optional_names[i]] = 1
     }
     {
       if (substr($0, 1, 1) != "{" ||
@@ -102,7 +104,7 @@ monitor_validate_keys() {
               (length(value) != 16 || value !~ /^[0-9a-f]+$/)) exit 1
           if (key == "station_id" &&
               (length(value) > 32 || value !~ /^[a-z][a-z0-9_]*$/)) exit 1
-        } else if (key == "generation") {
+        } else if (key == "generation" || key == "operation_id") {
           if (match(rest, /^[0-9]+/) != 1) exit 1
           rest = substr(rest, RLENGTH + 1)
         } else if (key == "active") {
@@ -116,7 +118,27 @@ monitor_validate_keys() {
         rest = substr(rest, 2)
         if (length(rest) == 0) exit 1
       }
-      if (found != count) exit 1
+      for (i = 1; i <= count; i++) if (!seen[names[i]]) exit 1
+    }
+  '
+}
+
+# Reject escaped key spellings before station/global routing. JSON decoders
+# normalize them, while literal key matching would otherwise miss identities.
+monitor_plain_keys() {
+  printf '%s\n' "$MONITOR_COMPACT" | awk '
+    {
+      for (i = 1; i <= length($0); i++) {
+        if (substr($0, i, 1) != "\"") continue
+        escaped = 0
+        closed = 0
+        for (i++; i <= length($0); i++) {
+          character = substr($0, i, 1)
+          if (character == "\\") { escaped = 1; i++; continue }
+          if (character == "\"") { closed = 1; break }
+        }
+        if (!closed || (escaped && substr($0, i + 1, 1) == ":")) exit 1
+      }
     }
   '
 }
@@ -141,7 +163,7 @@ monitor_identity_fields() {
 
 monitor_error_status() {
   case "$1" in
-    runtime_mismatch|generation_mismatch|capacity_busy) printf '%s' '409 Conflict' ;;
+    runtime_mismatch|generation_mismatch|operation_mismatch|capacity_busy) printf '%s' '409 Conflict' ;;
     station_not_found) printf '%s' '404 Not Found' ;;
     resource_exhausted|encoder_failed|service_unavailable) printf '%s' '503 Service Unavailable' ;;
     invalid_request) printf '%s' '400 Bad Request' ;;
@@ -731,22 +753,36 @@ case "$path" in
 esac
 
 body=''
-if [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then
-  body="$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
-fi
 if [ "$path" = /api/v1/call ] || [ "$path" = /api/v1/hangup ]; then
   [ "${REQUEST_METHOD:-GET}" = POST ] || { http_error '405 Method Not Allowed' 'method not allowed' POST; exit 0; }
-  case "${CONTENT_TYPE:-}" in application/json|application/json';'*) ;; *) http_error '415 Unsupported Media Type' 'application/json required'; exit 0;; esac
-  runtime_id="$(json_field "$body" '@.runtime_id' || true)"
-  station_id="$(json_field "$body" '@.station_id' || true)"
-  if [ "$path" = /api/v1/hangup ] && [ -z "$station_id" ]; then
+  monitor_json_content_type || { http_error '415 Unsupported Media Type' 'application/json required'; exit 0; }
+  monitor_body || { http_error '400 Bad Request' 'invalid request'; exit 0; }
+  monitor_plain_keys || { http_error '400 Bad Request' 'invalid request'; exit 0; }
+  body="$MONITOR_BODY"
+  # Global hangup keeps the legacy runtime/control-generation request shape.
+  if [ "$path" = /api/v1/hangup ] && ! printf '%s' "$MONITOR_COMPACT" | grep -q '"station_id"\|"operation_id"'; then
     case "$body" in *generation*|*reason*) : ;; *) http_error '400 Bad Request' 'invalid request'; exit 0;; esac
   else
-  [ "${#runtime_id}" -eq 16 ] && case "$runtime_id" in *[!0-9a-f]*) false;; esac || { http_error '400 Bad Request' 'invalid request'; exit 0; }
-  [ -n "$station_id" ] && [ "${#station_id}" -le 32 ] || { http_error '400 Bad Request' 'invalid request'; exit 0; }
-  case "$station_id" in [!a-z]*|*[!a-z0-9_]*) http_error '400 Bad Request' 'invalid request'; exit 0;; esac
+    optional=''
+    [ "$path" != /api/v1/hangup ] || optional='generation,operation_id'
+    monitor_validate_keys 'runtime_id,station_id' "$optional" && monitor_identity_fields || {
+      http_error '400 Bad Request' 'invalid request'; exit 0;
+    }
     body="{\"runtime_id\":\"$runtime_id\",\"station_id\":\"$station_id\"}"
+    for field in generation operation_id; do
+      if printf '%s' "$MONITOR_COMPACT" | grep -q "\"$field\":"; then
+        # Strict flat-object validation above already proved a unique digit
+        # token. Preserve it exactly instead of converting uint64 via JSON.
+        value="${MONITOR_BODY#*\"$field\"}"
+        value="$(printf '%s' "$value" | tr '\r\n' '  ' | sed -n \
+          's/^[[:space:]]*:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*[,}].*/\1/p')"
+        uint64_nonzero "$value" || { http_error '400 Bad Request' 'invalid request'; exit 0; }
+        body="${body%\}},\"$field\":$value}"
+      fi
+    done
   fi
+elif [ "${CONTENT_LENGTH:-0}" -gt 0 ] 2>/dev/null; then
+  body="$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
 fi
 case "$path" in
   /api/v1/status|/api/v1/unlock|/api/v1/answer|/api/v1/hangup|/api/v1/call|/api/v1/call_elevator) ;;

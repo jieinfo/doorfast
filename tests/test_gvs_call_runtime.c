@@ -132,7 +132,7 @@ void test_gvs_call_runtime_swallows_wrong_answer(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_RINGING,s.state);
 }
 
-void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void) {
+void test_gvs_call_runtime_confirms_hangup_reply_and_ends_session(void) {
     const uint8_t local[6]={0x61,2,1,1,1,1};
     struct df_gvs_session s={.state=DF_GVS_TALKING,.generation=9,
         .peer={0x32,2,1,0,1,0}};
@@ -149,7 +149,8 @@ void test_gvs_call_runtime_confirms_hangup_reply_without_ending_session(void) {
     TEST_ASSERT_INT_EQ(DF_OK,df_gvs_call_runtime_receive(
         &ack,packet,n,local,&s,&deadline,20,&result));
     TEST_ASSERT_INT_EQ(1,result.acknowledgement_confirmed);
-    TEST_ASSERT_INT_EQ(DF_GVS_TALKING,s.state);
+    TEST_ASSERT_INT_EQ(DF_GVS_ENDED,s.state);
+    TEST_ASSERT_INT_EQ(1,result.local_hangup);
 }
 
 void test_gvs_call_runtime_cancels_ack_after_preemption(void) {

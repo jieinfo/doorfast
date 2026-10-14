@@ -17,7 +17,107 @@
 #include "g711_alaw.h"
 #include "runtime_service.h"
 #include "runtime_ubus.h"
+#include "media_session_manager.h"
+#include "runtime_station_call.h"
 #include "test.h"
+
+static int station_call_status(struct df_gvs_call_control_status *status, void *ctx) {
+    struct df_runtime_call_binding *b = ctx;
+    return df_gvs_call_control_status_with_deadline(b->control, b->session,
+        b->deadline, status);
+}
+
+static int station_call_emit(const uint8_t to[6], uint32_t ip,
+    const uint8_t from[6], uint8_t family, uint8_t opcode,
+    const uint8_t *payload, size_t size, void *ctx) {
+    unsigned *sends = ctx;
+    (void)to; (void)ip; (void)from; (void)family; (void)payload; (void)size;
+    if (opcode == 4U) (*sends)++;
+    return DF_OK;
+}
+static int station_call_route(const uint8_t peer[6], uint64_t now,
+    uint32_t *ip, void *ctx) {
+    (void)peer; (void)now; (void)ctx; *ip = 0x01020304U; return DF_OK;
+}
+static int station_call_memory(uint64_t *memory, void *ctx) {
+    (void)ctx; *memory = 4096U; return DF_OK;
+}
+
+/* Catches direct CALL allocation and a fabricated control owner at admission. */
+void test_runtime_station_call_admission_prepares_real_preview(void) {
+    static const uint8_t local[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_station station = {.id = "gate_main", .enabled = true,
+        .logical_address = {0x32, 2, 1, 0, 2, 0}};
+    struct df_station_registry registry = {.items = &station, .count = 1};
+    struct df_media_station_config_v3 media_station = {.id = "gate_main",
+        .stream_name = "doorfast_gate_main", .enabled = true,
+        .logical_address = {0x32, 2, 1, 0, 2, 0}, .ipv4 = 0x01020304U};
+    struct df_media_module_config_v3 config = {.enabled = true,
+        .local = {0x61, 2, 1, 1, 1, 1}, .stations = &media_station,
+        .station_count = 1, .max_encoders = 1, .fps = 10};
+    unsigned sends = 0;
+    struct df_media_module_callbacks_v3 callbacks = {.emit_control = station_call_emit,
+        .resolve_route = station_call_route, .available_memory = station_call_memory,
+        .context = &sends};
+    struct df_runtime_media_module media = {0};
+    struct df_gvs_call_control control;
+    struct df_gvs_session session = {.generation = 40};
+    struct df_gvs_deadline deadline = {0};
+    struct df_runtime_call_binding binding = {.control = &control, .session = &session,
+        .deadline = &deadline, .identity = local, .stations = &registry};
+    struct df_runtime_ubus ubus = {.started = true, .active_host = true,
+        .runtime_id = "1111111111111111", .last_now_ms = 100,
+        .provide_call_status = station_call_status, .submit_call = df_runtime_call_submit,
+        .call_context = &binding, .media = &media};
+    uint64_t generation = 0;
+    binding.ubus = &ubus;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(&control, 0,
+        df_gvs_placeholder_header_fields, NULL));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_start_with_api(&media,
+        &df_media_module_api_v3, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_set_outbound_api(&media,
+        &df_media_module_outbound_upgrade_api_v1));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_set_lifecycle_api(&media,
+        &df_media_module_lifecycle_api_v2));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_call_station(&ubus,
+        ubus.runtime_id, "gate_main", &generation));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_STATION_CALL_PREPARING, ubus.station_call.stage);
+    TEST_ASSERT_INT_EQ(1, generation > 0);
+    TEST_ASSERT_INT_EQ(0, ubus.station_call.control_generation);
+    TEST_ASSERT_INT_EQ(DF_GVS_IDLE, session.state);
+    TEST_ASSERT_INT_EQ(40, session.generation);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_EMPTY, control.dispatch.state);
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_tick(&media, 100));
+    TEST_ASSERT_INT_EQ(1, sends);
+    df_runtime_media_module_stop(&media);
+}
+
+void test_runtime_call_submit_rejects_unowned_generation(void) {
+    const uint8_t identity[6] = {0x61, 2, 1, 1, 1, 1};
+    struct df_station station = {
+        .id = "gate_main", .logical_address = {0x32, 2, 1, 0, 2, 0},
+    };
+    const struct df_station_registry stations = {.items = &station, .count = 1U};
+    struct df_gvs_call_control control;
+    struct df_gvs_session session = {0};
+    struct df_gvs_deadline deadline = {0};
+    struct df_runtime_call_binding binding = {0};
+    struct df_runtime_call_request request = {
+        .type = DF_GVS_CALL_COMMAND_CALL, .session_generation = 9U,
+        .primary_media_port = 8303, .secondary_media_port = 8302,
+        .duration_seconds = 120,
+    };
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_call_control_init(&control, 0U,
+        df_gvs_placeholder_header_fields, NULL));
+    (void)snprintf(request.station_id, sizeof(request.station_id), "%s", "gate_main");
+    binding.control = &control; binding.session = &session;
+    binding.deadline = &deadline; binding.identity = identity;
+    binding.stations = &stations;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_call_submit(&request, 0U, &binding));
+    TEST_ASSERT_INT_EQ(DF_GVS_IDLE, session.state);
+    TEST_ASSERT_INT_EQ(0, (int)session.generation);
+    TEST_ASSERT_INT_EQ(DF_GVS_CALL_EMPTY, control.dispatch.state);
+}
 
 struct runtime_audio_sink {
     struct df_gvs_audio_chunk chunk;

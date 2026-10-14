@@ -1,4 +1,6 @@
 #include "runtime_ubus.h"
+#include "runtime_service.h"
+#include "runtime_station_call.h"
 #include "deployment_health.h"
 
 #include <arpa/inet.h>
@@ -8,6 +10,138 @@
 #include <unistd.h>
 
 #define DF_RUNTIME_STATION_ROUTE_MAX_AGE_MS 60000U
+
+static bool df_runtime_station_id_valid(const char *id) {
+    if (id == NULL || id[0] < 'a' || id[0] > 'z' || strlen(id) > 32) return false;
+    for (const char *p = id; *p; ++p)
+        if (!(*p >= 'a' && *p <= 'z') && !(*p >= '0' && *p <= '9') && *p != '_') return false;
+    return true;
+}
+static const struct df_station_registry *df_runtime_call_registry(const struct df_runtime_ubus *u) {
+    if (u->station_registry != NULL) return u->station_registry;
+    if (u->access_station_registry != NULL) return u->access_station_registry;
+    if (u->submit_call == df_runtime_call_submit && u->call_context != NULL)
+        return ((const struct df_runtime_call_binding *)u->call_context)->stations;
+    return NULL;
+}
+static const char *df_runtime_station_stage(enum df_runtime_station_call_stage stage) {
+    static const char *const names[] = {"idle", "preparing", "calling", "talking", "ending", "ended", "failed"};
+    return (unsigned)stage < sizeof(names) / sizeof(names[0]) ? names[stage] : NULL;
+}
+static const char *df_runtime_station_error(const struct df_runtime_station_call_operation *op) {
+    switch (op->fault) {
+    case DF_GVS_CALL_FAULT_DISPATCH_FAILED: return "dispatch_failed";
+    case DF_GVS_CALL_FAULT_DISPATCH_TIMEOUT: return "dispatch_timeout";
+    case DF_GVS_CALL_FAULT_CONFIRMATION_REJECTED:
+    case DF_GVS_CALL_FAULT_CONFIRMATION_TIMEOUT: return "ack_timeout";
+    case DF_GVS_CALL_FAULT_PREEMPTED: return "preempted";
+    case DF_GVS_CALL_FAULT_CANCELLED: return "cancelled";
+    case DF_GVS_CALL_FAULT_RUNTIME_RESET: return "runtime_reset";
+    default: break;
+    }
+    switch (op->error) {
+    case DF_OK: return op->fault == DF_GVS_CALL_FAULT_NONE ? "none" : "unknown";
+    case DF_MEDIA_ERROR_CAPACITY_BUSY: return "busy";
+    case DF_MEDIA_ERROR_STATION_NOT_FOUND:
+    case DF_MEDIA_ERROR_STATION_DISABLED:
+    case DF_MEDIA_ERROR_ROUTE_UNAVAILABLE: return "station_unavailable";
+    case DF_MEDIA_ERROR_SESSION_PREEMPTED: return "preempted";
+    case DF_MEDIA_ERROR_PREVIEW_UNCONFIRMED: return "ack_timeout";
+    case DF_MEDIA_ERROR_ENCODER_FAILED:
+    case DF_MEDIA_ERROR_VIDEO_STALLED:
+    case DF_MEDIA_ERROR_RECONNECT_FRAME: return "media_failed";
+    default: return "unknown";
+    }
+}
+int df_runtime_ubus_emit_station_call(const struct df_runtime_ubus *u,
+    const struct df_gvs_call_control_status *native, const struct df_runtime_diagnostic_sink *sink) {
+    const struct df_runtime_station_call_operation *op;
+    const char *stage, *timer = "none";
+    uint64_t remaining = 0;
+    if (u == NULL || !u->started || !df_runtime_id_is_valid(u->runtime_id) || native == NULL ||
+        sink == NULL || sink->string == NULL || sink->number == NULL) return DF_ERR_INVALID;
+    op = &u->station_call;
+    stage = df_runtime_station_stage(op->stage);
+    if (stage == NULL || (op->operation_id == 0 && (op->stage != DF_RUNTIME_STATION_CALL_IDLE ||
+        op->station_id[0] || op->media_generation || op->control_generation)) ||
+        (op->operation_id != 0 && (op->stage == DF_RUNTIME_STATION_CALL_IDLE ||
+        !df_runtime_station_id_valid(op->station_id) ||
+        df_station_registry_find(df_runtime_call_registry(u), op->station_id) == NULL)) ||
+        (op->stage == DF_RUNTIME_STATION_CALL_PREPARING && op->control_generation != 0)) return DF_ERR_INVALID;
+    if (op->stage == DF_RUNTIME_STATION_CALL_PREPARING) {
+        timer = "startup";
+        remaining = op->deadline_ms > u->last_now_ms ? op->deadline_ms - u->last_now_ms : 0;
+    } else if (op->stage >= DF_RUNTIME_STATION_CALL_CALLING && op->stage <= DF_RUNTIME_STATION_CALL_ENDING &&
+        op->control_generation != 0 && native->session_generation == op->control_generation) {
+        if (native->timer == DF_GVS_CALL_TIMER_CONFIRMATION) timer = "confirmation";
+        else if (native->timer == DF_GVS_CALL_TIMER_SESSION) timer = "session";
+        if (strcmp(timer, "none") != 0) remaining = native->remaining_ms;
+    }
+    sink->number(sink->context, "operation_id", op->operation_id);
+    sink->string(sink->context, "station_id", op->operation_id ? op->station_id : "");
+    sink->string(sink->context, "stage", stage);
+    sink->number(sink->context, "media_generation", op->media_generation);
+    sink->number(sink->context, "call_generation", op->control_generation);
+    sink->string(sink->context, "timer", timer);
+    sink->number(sink->context, "remaining_ms", remaining);
+    sink->string(sink->context, "error", df_runtime_station_error(op));
+    return DF_OK;
+}
+int df_runtime_ubus_parse_station_request(const struct df_runtime_station_field *fields,
+    size_t count, bool hangup, struct df_runtime_station_request *out) {
+    struct df_runtime_station_request next = {0};
+    unsigned seen = 0;
+    if (fields == NULL || out == NULL) return DF_ERR_INVALID;
+    for (size_t i = 0; i < count; ++i) {
+        const struct df_runtime_station_field *f = &fields[i];
+        unsigned bit;
+        if (f->name == NULL) return DF_ERR_INVALID;
+        if (strcmp(f->name, "runtime_id") == 0 && f->type == DF_STATION_FIELD_STRING &&
+            df_runtime_id_is_valid(f->string)) { bit = 1; next.runtime_id = f->string; }
+        else if (strcmp(f->name, "station_id") == 0 && f->type == DF_STATION_FIELD_STRING &&
+            df_runtime_station_id_valid(f->string)) { bit = 2; next.station_id = f->string; }
+        else if (hangup && strcmp(f->name, "generation") == 0 && f->type == DF_STATION_FIELD_UINT64 &&
+            f->number != 0) { bit = 4; next.generation = f->number; }
+        else if (hangup && strcmp(f->name, "operation_id") == 0 && f->type == DF_STATION_FIELD_UINT64 &&
+            f->number != 0) { bit = 8; next.operation_id = f->number; next.has_operation = true; }
+        else return DF_ERR_INVALID;
+        if (seen & bit) return DF_ERR_INVALID;
+        seen |= bit;
+    }
+    if ((seen & 3) != 3) return DF_ERR_INVALID;
+    *out = next;
+    return DF_OK;
+}
+int df_runtime_ubus_emit_station_reply(struct df_runtime_ubus *u, const char *station,
+    uint64_t generation, const struct df_runtime_diagnostic_sink *sink) {
+    const char *state = "idle";
+    uint64_t operation = 0;
+    struct df_gvs_call_control_status native;
+    if (u == NULL || !u->started || !df_runtime_id_is_valid(u->runtime_id) || !df_runtime_station_id_valid(station) ||
+        df_station_registry_find(df_runtime_call_registry(u), station) == NULL || sink == NULL ||
+        sink->string == NULL || sink->number == NULL) return DF_ERR_INVALID;
+    if (u->station_call.operation_id && strcmp(u->station_call.station_id, station) == 0) {
+        state = df_runtime_station_stage(u->station_call.stage);
+        operation = u->station_call.operation_id;
+    }
+    /* A matching incoming call takes precedence over an old outbound terminal. */
+    if (df_runtime_ubus_read_call_status(u, &native) == DF_OK &&
+        df_runtime_ubus_call_station_id(u, &native) != NULL &&
+        strcmp(df_runtime_ubus_call_station_id(u, &native), station) == 0 &&
+        native.session_generation != u->station_call.control_generation) {
+        operation = 0;
+        state = native.command_type == DF_GVS_CALL_COMMAND_HANGUP ? "ending" :
+            native.session_state == DF_GVS_TALKING ? "talking" : "calling";
+    }
+    if (state == NULL) return DF_ERR_INVALID;
+    sink->number(sink->context, "queued", strcmp(state, "idle") != 0 && strcmp(state, "ended") != 0 && strcmp(state, "failed") != 0);
+    sink->number(sink->context, "generation", generation);
+    sink->string(sink->context, "runtime_id", u->runtime_id);
+    sink->string(sink->context, "station_id", station);
+    sink->number(sink->context, "operation_id", operation);
+    sink->string(sink->context, "state", state);
+    return DF_OK;
+}
 
 void df_runtime_ubus_emit_call_diagnostics(const struct df_runtime_ubus *service,
     const struct df_gvs_call_control_status *status,
@@ -399,6 +533,11 @@ static void df_ubus_diagnostic_number(void *context, const char *key,
     uint64_t value) {
     blobmsg_add_u64(context, key, value);
 }
+static void df_ubus_station_reply_number(void *context, const char *key,
+    uint64_t value) {
+    if (strcmp(key, "queued") == 0) blobmsg_add_u8(context, key, value != 0);
+    else blobmsg_add_u64(context, key, value);
+}
 static void *df_ubus_diagnostic_open(void *context) {
     return blobmsg_open_table(context, NULL);
 }
@@ -602,6 +741,15 @@ static int df_runtime_ubus_status_handler(
     blobmsg_add_string(&platform->response, "handshake_dispatch",
         df_gvs_call_dispatch_state_name(call_status.handshake_dispatch));
     blobmsg_close_table(&platform->response, call_table);
+    {
+        void *table = blobmsg_open_table(&platform->response, "station_call");
+        struct df_runtime_diagnostic_sink sink = df_ubus_diagnostic_sink(&platform->response);
+        if (df_runtime_ubus_emit_station_call(platform->owner, &call_status, &sink) != DF_OK) {
+            blob_buf_free(&platform->response);
+            return UBUS_STATUS_UNKNOWN_ERROR;
+        }
+        blobmsg_close_table(&platform->response, table);
+    }
     if (df_runtime_ubus_read_audio_status(platform->owner, &audio_status) == DF_OK) {
         void *audio_table = blobmsg_open_table(&platform->response, "audio");
         blobmsg_add_u32(&platform->response, "pcm_stream_version",
@@ -924,6 +1072,7 @@ enum {
     DF_UBUS_HANGUP_GENERATION,
     DF_UBUS_HANGUP_REASON,
     DF_UBUS_HANGUP_STATION_ID,
+    DF_UBUS_HANGUP_OPERATION_ID,
     __DF_UBUS_HANGUP_MAX,
 };
 
@@ -936,6 +1085,8 @@ static const struct blobmsg_policy df_runtime_ubus_hangup_policy[] = {
         .name = "reason", .type = BLOBMSG_TYPE_INT32},
     [DF_UBUS_HANGUP_STATION_ID] = {
         .name = "station_id", .type = BLOBMSG_TYPE_STRING},
+    [DF_UBUS_HANGUP_OPERATION_ID] = {
+        .name = "operation_id", .type = BLOBMSG_TYPE_UNSPEC},
 };
 
 enum { DF_UBUS_CALL_RUNTIME_ID, DF_UBUS_CALL_STATION_ID, __DF_UBUS_CALL_MAX };
@@ -1045,6 +1196,45 @@ static int df_runtime_ubus_answer_handler(
     return df_runtime_ubus_submit_reply(context, request, platform, &call);
 }
 
+static bool df_ubus_has_station_field(struct blob_attr *message) {
+    struct blob_attr *attr;
+    size_t remaining;
+    blobmsg_for_each_attr(attr, message, remaining)
+        if (strcmp(blobmsg_name(attr), "station_id") == 0 ||
+            strcmp(blobmsg_name(attr), "operation_id") == 0) return true;
+    return false;
+}
+static int df_ubus_parse_station_request(struct blob_attr *message, bool hangup,
+    struct df_runtime_station_request *request) {
+    struct df_runtime_station_field fields[4];
+    struct blob_attr *attr;
+    size_t count = 0, remaining;
+    if (message == NULL) return DF_ERR_INVALID;
+    blobmsg_for_each_attr(attr, message, remaining) {
+        if (count == sizeof(fields) / sizeof(fields[0])) return DF_ERR_INVALID;
+        struct df_runtime_station_field *f = &fields[count++];
+        *f = (struct df_runtime_station_field){.name = blobmsg_name(attr)};
+        if (blobmsg_type(attr) == BLOBMSG_TYPE_STRING) {
+            f->type = DF_STATION_FIELD_STRING;
+            f->string = blobmsg_get_string(attr);
+        } else if (df_runtime_ubus_get_generation(attr, &f->number)) {
+            f->type = DF_STATION_FIELD_UINT64;
+        }
+    }
+    return df_runtime_ubus_parse_station_request(fields, count, hangup, request);
+}
+static int df_ubus_station_reply(struct ubus_context *context,
+    struct ubus_request_data *request, struct df_runtime_ubus_platform *platform,
+    const char *station, uint64_t generation) {
+    blob_buf_init(&platform->response, 0);
+    struct df_runtime_diagnostic_sink sink = df_ubus_diagnostic_sink(&platform->response);
+    sink.number = df_ubus_station_reply_number;
+    int result = df_runtime_ubus_emit_station_reply(platform->owner, station, generation, &sink);
+    if (result == DF_OK) result = ubus_send_reply(context, request, platform->response.head);
+    blob_buf_free(&platform->response);
+    return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+}
+
 static int df_runtime_ubus_hangup_handler(
     struct ubus_context *context, struct ubus_object *object,
     struct ubus_request_data *request, const char *method,
@@ -1056,53 +1246,26 @@ static int df_runtime_ubus_hangup_handler(
         .type = DF_GVS_CALL_COMMAND_HANGUP,
     };
     uint32_t reason = 0U;
-    const char *station_id;
-    int send_result;
 
     (void)method;
     if (message == NULL) {
         return UBUS_STATUS_INVALID_ARGUMENT;
     }
+    if (df_ubus_has_station_field(message)) {
+        struct df_runtime_station_request station;
+        int result = df_ubus_parse_station_request(message, true, &station);
+        if (result == DF_OK)
+            result = df_runtime_ubus_hangup_station_operation(platform->owner,
+                station.runtime_id, station.station_id, station.generation,
+                station.has_operation, station.operation_id);
+        if (result != DF_OK)
+            return df_runtime_ubus_send_media_error(context, request, platform, result);
+        return df_ubus_station_reply(context, request, platform, station.station_id, station.generation);
+    }
     blobmsg_parse(df_runtime_ubus_hangup_policy, __DF_UBUS_HANGUP_MAX,
                   fields, blob_data(message), blob_len(message));
     if (fields[DF_UBUS_HANGUP_RUNTIME_ID] == NULL) {
         return UBUS_STATUS_INVALID_ARGUMENT;
-    }
-    station_id = fields[DF_UBUS_HANGUP_STATION_ID] != NULL ?
-        blobmsg_get_string(fields[DF_UBUS_HANGUP_STATION_ID]) : NULL;
-    if (station_id != NULL && fields[DF_UBUS_HANGUP_GENERATION] == NULL) {
-        struct df_runtime_media_status media = {0};
-        size_t index;
-        if (df_runtime_ubus_read_media_status(platform->owner, &media) != DF_OK)
-            return df_runtime_ubus_send_media_error(context, request, platform,
-                DF_ERR_IO);
-        for (index = 0U; index < media.session_count; index++) {
-            const struct df_media_session_status_v3 *session = &media.sessions[index];
-            if (strcmp(session->station_id, station_id) == 0 && session->active &&
-                session->purpose == DF_MEDIA_SESSION_CALL) {
-                int result = df_runtime_ubus_hangup_station(platform->owner,
-                    blobmsg_get_string(fields[DF_UBUS_HANGUP_RUNTIME_ID]),
-                    station_id, session->generation);
-                if (result != DF_OK)
-                    return df_runtime_ubus_send_media_error(context, request,
-                        platform, result);
-                blob_buf_init(&platform->response, 0);
-                blobmsg_add_u8(&platform->response, "queued", 1);
-                blobmsg_add_u64(&platform->response, "generation",
-                    session->generation);
-                result = ubus_send_reply(context, request,
-                    platform->response.head);
-                blob_buf_free(&platform->response);
-                return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
-            }
-        }
-        blob_buf_init(&platform->response, 0);
-        blobmsg_add_u8(&platform->response, "queued", 0);
-        blobmsg_add_string(&platform->response, "state", "idle");
-        blobmsg_add_string(&platform->response, "station_id", station_id);
-        send_result = ubus_send_reply(context, request, platform->response.head);
-        blob_buf_free(&platform->response);
-        return send_result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
     }
     if (fields[DF_UBUS_HANGUP_GENERATION] == NULL && fields[DF_UBUS_HANGUP_REASON] == NULL) {
         return UBUS_STATUS_INVALID_ARGUMENT;
@@ -1131,29 +1294,18 @@ static int df_runtime_ubus_call_handler(struct ubus_context *context,
     const char *method, struct blob_attr *message) {
     struct df_runtime_ubus_platform *platform = container_of(object,
         struct df_runtime_ubus_platform, object);
-    struct blob_attr *fields[__DF_UBUS_CALL_MAX] = {0};
+    struct df_runtime_station_request station;
     uint64_t generation = 0U;
-    const char *runtime_id, *station_id;
     int result;
     (void)method;
-    if (message == NULL) return UBUS_STATUS_INVALID_ARGUMENT;
-    blobmsg_parse(df_runtime_ubus_call_policy, __DF_UBUS_CALL_MAX, fields,
-                  blob_data(message), blob_len(message));
-    if (fields[DF_UBUS_CALL_RUNTIME_ID] == NULL || fields[DF_UBUS_CALL_STATION_ID] == NULL)
-        return UBUS_STATUS_INVALID_ARGUMENT;
-    runtime_id = blobmsg_get_string(fields[DF_UBUS_CALL_RUNTIME_ID]);
-    station_id = blobmsg_get_string(fields[DF_UBUS_CALL_STATION_ID]);
-    result = df_runtime_ubus_call_station(platform->owner, runtime_id, station_id, &generation);
+    result = df_ubus_parse_station_request(message, false, &station);
+    if (result == DF_OK)
+        result = df_runtime_ubus_call_station(platform->owner, station.runtime_id, station.station_id, &generation);
     if (result != DF_OK) {
         return df_runtime_ubus_send_media_error(context, request, platform,
             result);
     }
-    blob_buf_init(&platform->response, 0);
-    blobmsg_add_u8(&platform->response, "queued", 1);
-    blobmsg_add_u64(&platform->response, "generation", generation);
-    result = ubus_send_reply(context, request, platform->response.head);
-    blob_buf_free(&platform->response);
-    return result == 0 ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
+    return df_ubus_station_reply(context, request, platform, station.station_id, generation);
 }
 
 enum {
@@ -1340,6 +1492,7 @@ static int df_runtime_ubus_send_media_status(
 static const char *df_runtime_ubus_media_error_code(int result) {
     switch (result) {
     case DF_RUNTIME_MEDIA_ERROR_RUNTIME_MISMATCH: return "runtime_mismatch";
+    case DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH: return "operation_mismatch";
     case DF_MEDIA_ERROR_STATION_NOT_FOUND: return "station_not_found";
     case DF_MEDIA_ERROR_STATION_DISABLED: return "station_disabled";
     case DF_MEDIA_ERROR_ROUTE_UNAVAILABLE: return "route_unavailable";
@@ -1359,6 +1512,8 @@ static const char *df_runtime_ubus_media_error_message(int result) {
     switch (result) {
     case DF_RUNTIME_MEDIA_ERROR_RUNTIME_MISMATCH:
         return "The runtime identity no longer matches";
+    case DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH:
+        return "The station call operation no longer matches";
     case DF_MEDIA_ERROR_STATION_NOT_FOUND:
         return "The requested station was not found";
     case DF_MEDIA_ERROR_STATION_DISABLED:
@@ -1922,6 +2077,10 @@ int df_runtime_ubus_monitor_start(struct df_runtime_ubus *service,
         return DF_ERR_INVALID;
     result = df_runtime_media_module_request_start(
         service->media, station_id, service->last_now_ms, generation);
+    if (result == DF_OK && df_runtime_station_call_active(service) &&
+        strcmp(service->station_call.station_id, station_id) == 0 &&
+        *generation == service->station_call.media_generation)
+        service->station_call.owns_preview = false;
     if (result == DF_OK &&
         strcmp(service->manual_unlock_station_id, station_id) == 0 &&
         *generation == service->manual_unlock_media_generation)
@@ -1937,6 +2096,20 @@ int df_runtime_ubus_monitor_stop(struct df_runtime_ubus *service,
     int result = df_runtime_ubus_media_identity(service, runtime_id, station_id);
 
     if (result != DF_OK) return result;
+    if (df_runtime_station_call_active(service) &&
+        strcmp(service->station_call.station_id, station_id) == 0 &&
+        service->station_call.media_generation == generation)
+        return DF_MEDIA_ERROR_CAPACITY_BUSY;
+    struct df_media_module_status_v3 snapshot = {
+        .sessions = service->media->session_snapshot,
+        .session_count = service->media->session_snapshot_capacity};
+    if (df_runtime_media_module_status(service->media, &snapshot) != DF_OK)
+        return DF_ERR_IO;
+    for (size_t i = 0; i < snapshot.session_count; ++i)
+        if (snapshot.sessions[i].active && snapshot.sessions[i].generation == generation &&
+            strcmp(snapshot.sessions[i].station_id, station_id) == 0 &&
+            snapshot.sessions[i].purpose == DF_MEDIA_SESSION_CALL)
+            return DF_MEDIA_ERROR_CAPACITY_BUSY;
     return df_runtime_media_module_command(service->media,
         DF_MEDIA_MODULE_COMMAND_STOP, &key, false, service->last_now_ms);
 }
@@ -1953,6 +2126,10 @@ int df_runtime_ubus_monitor_viewer(struct df_runtime_ubus *service,
     result = df_runtime_media_module_command(service->media,
         DF_MEDIA_MODULE_COMMAND_VIEWER, &key, active,
         service->last_now_ms);
+    if (result == DF_OK && active && df_runtime_station_call_active(service) &&
+        strcmp(service->station_call.station_id, station_id) == 0 &&
+        generation == service->station_call.media_generation)
+        service->station_call.owns_preview = false;
     if (result == DF_OK && active &&
         strcmp(service->manual_unlock_station_id, station_id) == 0 &&
         generation == service->manual_unlock_media_generation)
@@ -1964,43 +2141,72 @@ int df_runtime_ubus_call_station(struct df_runtime_ubus *service,
     const char *runtime_id, const char *station_id, uint64_t *generation) {
     int result = df_runtime_ubus_media_identity(service, runtime_id, station_id);
     if (generation == NULL) return DF_ERR_INVALID;
-    *generation = 0U;
+    *generation = 0;
     if (result != DF_OK) return result;
-    if (service->submit_call == NULL) return DF_ERR_IO;
-    result = df_runtime_media_module_call(service->media, station_id,
-        service->last_now_ms, generation);
-    if (result == DF_OK) {
-        struct df_runtime_call_request request = {.type = DF_GVS_CALL_COMMAND_CALL,
-            .session_generation = *generation, .primary_media_port = 8303,
-            .secondary_media_port = 8302, .duration_seconds = 120};
-        (void)snprintf(request.runtime_id, sizeof(request.runtime_id), "%s", service->runtime_id);
-        (void)snprintf(request.station_id, sizeof(request.station_id), "%s", station_id);
-        result = service->submit_call(&request, service->last_now_ms, service->call_context);
-    }
-    return result;
+    if (!df_runtime_station_id_valid(station_id)) return DF_ERR_INVALID;
+    return df_runtime_station_call_admit(service, station_id, generation);
 }
 
 int df_runtime_ubus_hangup_station(struct df_runtime_ubus *service,
     const char *runtime_id, const char *station_id, uint64_t generation) {
-    const struct df_media_session_key key = {
-        .station_id = station_id, .generation = generation,
-    };
+    return df_runtime_ubus_hangup_station_operation(service, runtime_id,
+        station_id, generation, false, 0);
+}
+
+int df_runtime_ubus_hangup_station_operation(struct df_runtime_ubus *service,
+    const char *runtime_id, const char *station_id, uint64_t generation,
+    bool has_operation, uint64_t operation_id) {
     int result = df_runtime_ubus_media_identity(service, runtime_id, station_id);
-    if (result != DF_OK || generation == 0U || service->submit_call == NULL)
+    if (result != DF_OK) return result;
+    if (!df_runtime_station_id_valid(station_id) || (has_operation && operation_id == 0))
         return DF_ERR_INVALID;
-    {
-        struct df_runtime_call_request request = {.type = DF_GVS_CALL_COMMAND_HANGUP,
-            .session_generation = generation, .reason = 1U};
-        (void)snprintf(request.runtime_id, sizeof(request.runtime_id), "%s", service->runtime_id);
-        (void)snprintf(request.station_id, sizeof(request.station_id), "%s", station_id);
-        result = service->submit_call(&request, service->last_now_ms, service->call_context);
-        int enqueue_result = result;
-        result = df_runtime_media_module_command(service->media,
-            DF_MEDIA_MODULE_COMMAND_STOP, &key, false, service->last_now_ms);
-        if (enqueue_result != DF_OK) return enqueue_result;
-        if (result != DF_OK) return result;
+    if (df_station_registry_find(df_runtime_call_registry(service), station_id) == NULL)
+        return DF_MEDIA_ERROR_STATION_NOT_FOUND;
+    if (generation != 0 && df_runtime_station_call_active(service) &&
+        strcmp(service->station_call.station_id, station_id) == 0 &&
+        generation != service->station_call.media_generation)
+        return DF_MEDIA_ERROR_GENERATION_MISMATCH;
+    if (has_operation) {
+        const struct df_runtime_station_call_operation *op = &service->station_call;
+        if (op->operation_id != operation_id || strcmp(op->station_id, station_id) != 0)
+            return DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH;
+        /* Do not let a terminal outbound identity terminate a newer incoming owner. */
+        const struct df_runtime_call_binding *b = service->submit_call == df_runtime_call_submit ?
+            service->call_context : NULL;
+        const struct df_station *station = b == NULL ? NULL :
+            df_station_registry_find(b->stations, station_id);
+        if (!df_runtime_station_call_active(service) && b != NULL && b->session != NULL &&
+            station != NULL && memcmp(b->session->peer, station->logical_address, 6) == 0 &&
+            b->session->state != DF_GVS_IDLE && b->session->state != DF_GVS_ENDED)
+            return DF_RUNTIME_CALL_ERROR_OPERATION_MISMATCH;
+        if (generation != 0 && generation != op->media_generation)
+            return DF_MEDIA_ERROR_GENERATION_MISMATCH;
+        generation = op->media_generation;
     }
-    return DF_OK;
+    if (generation != 0 && !df_runtime_station_call_active(service) &&
+        service->submit_call == df_runtime_call_submit && service->call_context != NULL) {
+        const struct df_runtime_call_binding *b = service->call_context;
+        const struct df_station *station = df_station_registry_find(b->stations, station_id);
+        if (b->session != NULL && station != NULL &&
+            (b->session->state == DF_GVS_RINGING || b->session->state == DF_GVS_TALKING) &&
+            memcmp(b->session->peer, station->logical_address, 6) == 0) {
+            struct df_runtime_media_module *media = service->media;
+            struct df_media_module_status_v3 status = {
+                .sessions = media->session_snapshot,
+                .session_count = media->session_snapshot_capacity};
+            if (df_runtime_media_module_status(media, &status) != DF_OK ||
+                status.required_session_count > media->session_snapshot_capacity ||
+                status.session_count > media->session_snapshot_capacity)
+                return DF_ERR_IO;
+            bool matches = false;
+            for (size_t i = 0; i < status.session_count; ++i)
+                if (status.sessions[i].active && status.sessions[i].purpose == DF_MEDIA_SESSION_CALL &&
+                    strcmp(status.sessions[i].station_id, station_id) == 0 &&
+                    status.sessions[i].generation == generation) matches = true;
+            if (!matches) return DF_MEDIA_ERROR_GENERATION_MISMATCH;
+        }
+    }
+    return df_runtime_station_call_hangup(service, station_id, generation);
 }
 
 static int df_runtime_ubus_read_credential_status(
