@@ -62,13 +62,16 @@ static int serializes_only_vendor_short_query(void) {
 }
 static int owner_changes_never_send(void) {
     struct tq_probe p; struct tq_owner s; struct sink out={0};
-    CHECK(prepare(&p)==0);
-    for (unsigned i=0;i<7;i++) {
+    for (unsigned i=0;i<9;i++) {
+        CHECK(prepare(&p)==0);
         s=owner();
         switch(i) { case 0:s.runtime[0]='2';break; case 1:s.station[0]='x';break;
         case 2:s.operation++;break;case 3:s.generation++;break;case 4:s.native_generation++;break;
-        case 5:strcpy(s.stage,"ended");break;case 6:strcpy(s.native_state,"ringing");strcpy(s.native_station,"other");break; }
+        case 5:strcpy(s.stage,"ended");break;case 6:strcpy(s.native_state,"ringing");break;
+        case 7:strcpy(s.native_station,"other");break;
+        case 8:strcpy(s.stage,"calling");strcpy(s.native_state,"preview");strcpy(s.native_station,"other");break; }
         CHECK(!tq_may_send(&p,&s,1301)); CHECK(tq_send(&p,&s,1301,emit,&out)!=0);
+        CHECK(p.cancelled); s=owner(); CHECK(tq_send(&p,&s,1302,emit,&out)!=0);
     }
     CHECK(out.calls==0); return 0;
 }
@@ -119,8 +122,17 @@ static int conflicts_and_unrelated_calls_latch_cancel(void) {
     CHECK(tq_observe(&p,b,packet(b,3),1001,0,&s)==0); CHECK(!p.call_seen);
     return 0;
 }
+static int empty_preview_identity_binds_then_talking_can_send(void) {
+    struct tq_probe p; struct tq_config c=config(); struct tq_owner s=owner(); uint8_t b[128]; struct sink out={0};
+    tq_init(&p,&c); strcpy(s.stage,"calling"); strcpy(s.native_state,"preview"); s.native_station[0]=0;
+    CHECK(tq_observe(&p,b,packet(b,3),1000,0,&s)==1);
+    CHECK(tq_observe(&p,b,packet(b,0x83),1300,0,&s)==1);
+    CHECK(!tq_may_send(&p,&s,1301)); CHECK(!p.cancelled);
+    s=owner(); CHECK(tq_send(&p,&s,1302,emit,&out)==0); CHECK(out.calls==1); return 0;
+}
 int main(void) {
     int failed=serializes_only_vendor_short_query()+owner_changes_never_send()+ack_order_age_and_duplicates()
-        +wrong_ack_and_fragment_rejected()+hangup_cancels_query()+default_off_and_bounded_attempts()+conflicts_and_unrelated_calls_latch_cancel();
-    printf("time-query probe: 7 checks, %d failures\n",failed); return failed?1:0;
+        +wrong_ack_and_fragment_rejected()+hangup_cancels_query()+default_off_and_bounded_attempts()+conflicts_and_unrelated_calls_latch_cancel()
+        +empty_preview_identity_binds_then_talking_can_send();
+    printf("time-query probe: 8 checks, %d failures\n",failed); return failed?1:0;
 }

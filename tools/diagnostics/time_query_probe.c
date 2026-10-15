@@ -11,6 +11,12 @@ static bool same_operation(const struct tq_probe *p, const struct tq_owner *s) {
         strcmp(s->station,p->config.station)==0 && s->operation==p->config.operation &&
         s->generation>0 && s->generation==s->native_generation;
 }
+static bool native_owned(const struct tq_probe *p, const struct tq_owner *s) {
+    /* The real status serializer leaves native station empty in PREVIEW. */
+    return (strcmp(s->native_state,"preview")==0 &&
+            (s->native_station[0]==0 || strcmp(s->native_station,p->config.station)==0)) ||
+        (strcmp(s->native_state,"talking")==0 && strcmp(s->native_station,p->config.station)==0);
+}
 
 bool tq_check_owner(struct tq_probe *p, const struct tq_owner *s) {
     bool valid=false;
@@ -19,16 +25,14 @@ bool tq_check_owner(struct tq_probe *p, const struct tq_owner *s) {
         if (p->call_seen) {
             valid=same_operation(p,s) && s->generation==p->generation &&
                 (strcmp(s->stage,"calling")==0 || strcmp(s->stage,"talking")==0) &&
-                (strcmp(s->native_state,"preview")==0 ||
-                 (strcmp(s->native_state,"talking")==0 && strcmp(s->native_station,p->config.station)==0));
+                native_owned(p,s);
         } else if (s->operation<p->config.operation && s->operation+1==p->config.operation) {
             valid=s->media_empty && (strcmp(s->stage,"idle")==0 || strcmp(s->stage,"ended")==0 || strcmp(s->stage,"failed")==0) &&
                 (strcmp(s->native_state,"idle")==0 || strcmp(s->native_state,"ended")==0);
         } else if (s->operation==p->config.operation && strcmp(s->station,p->config.station)==0) {
             valid=(strcmp(s->stage,"preparing")==0 || strcmp(s->stage,"calling")==0 || strcmp(s->stage,"talking")==0) &&
                 (strcmp(s->native_state,"idle")==0 || strcmp(s->native_state,"ended")==0 ||
-                 (same_operation(p,s) && (strcmp(s->native_state,"preview")==0 ||
-                  (strcmp(s->native_state,"talking")==0 && strcmp(s->native_station,p->config.station)==0))));
+                 (same_operation(p,s) && native_owned(p,s)));
         }
     }
     if (!valid) p->cancelled=true;
