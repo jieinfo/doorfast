@@ -12,9 +12,10 @@ set -- "$sdk_dir"/staging_dir/target-*/usr/include
 target_include=$1
 target_lib=$target_include/../lib
 mkdir -p "$(dirname -- "$output")"
+# libubox uses GNU extensions internally; keep strict warnings for our sources.
 STAGING_DIR="$sdk_dir/staging_dir" "$compiler" -D_DEFAULT_SOURCE -DDF_WITH_UBUS \
     -std=c17 -O2 -Wall -Wextra -Werror -pedantic \
-    -I"$repo_dir/src" -I"$target_include" -L"$target_lib" -Wl,-rpath-link,"$target_lib" \
+    -I"$repo_dir/src" -isystem "$target_include" -L"$target_lib" -Wl,-rpath-link,"$target_lib" \
     "$repo_dir/tools/diagnostics/time_query_probe_main.c" \
     "$repo_dir/tools/diagnostics/time_query_probe.c" \
     "$repo_dir/src/gvs_frame.c" "$repo_dir/src/gvs_packet.c" \

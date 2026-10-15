@@ -67,6 +67,12 @@ class TimeQueryCliTests(unittest.TestCase):
             args = result.stdout.splitlines()
             self.assertEqual(args[0], str(sdk / "staging_dir"))
             self.assertIn("-DDF_WITH_UBUS", args)
+            # SDK headers contain GNU extensions; project sources stay strict.
+            self.assertIn("-isystem", args)
+            self.assertEqual(args[args.index("-isystem") + 1],
+                             str(sdk / "staging_dir/target-fixture/usr/include"))
+            for flag in ("-std=c17", "-Wall", "-Wextra", "-Werror", "-pedantic"):
+                self.assertIn(flag, args)
             self.assertIn(str(ROOT / "tools/diagnostics/time_query_probe_main.c"), args)
             self.assertFalse(any("runtime_service.c" in a for a in args))
             self.assertFalse((sdk / "usr/sbin/doorfast").exists())
