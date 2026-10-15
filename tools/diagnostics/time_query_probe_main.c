@@ -78,7 +78,9 @@ static int logical(const char *s,uint8_t output[6]) {
         char pair[3]={s[i*2],s[i*2+1],0},*end;
         unsigned long n;
         if (strspn(pair,"0123456789abcdefABCDEF")!=2) return -1;
-        n=strtoul(pair,&end,16); if(*end) return -1; output[i]=(uint8_t)n;
+        n=strtoul(pair,&end,16);
+        if(*end) return -1;
+        output[i]=(uint8_t)n;
     }
     return 0;
 }
@@ -88,23 +90,43 @@ static int arguments(int argc,char **argv,struct tq_config *c,const char **inter
     for(int i=1;i<argc;i++) {
         const char *key=argv[i],*value;
         unsigned bit;
-        if(strcmp(key,"--send-vendor-time-query")==0) { if(c->send)return -1; c->send=true; continue; }
+        if(strcmp(key,"--send-vendor-time-query")==0) {
+            if(c->send) return -1;
+            c->send=true;
+            continue;
+        }
         if(i+1>=argc)return -1;
         value=argv[++i];
-        if(strcmp(key,"--interface")==0) { bit=1; if(!*value || strlen(value)>15)return -1; *interface=value; }
-        else if(strcmp(key,"--runtime-id")==0) { bit=2; if(!df_runtime_id_is_valid(value))return -1; memcpy(c->runtime,value,17); }
-        else if(strcmp(key,"--station-id")==0) {
-            bit=4; if(!*value || strlen(value)>=sizeof(c->station) || strspn(value,"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=strlen(value))return -1;
+        if(strcmp(key,"--interface")==0) {
+            bit=1;
+            if(!*value || strlen(value)>15) return -1;
+            *interface=value;
+        } else if(strcmp(key,"--runtime-id")==0) {
+            bit=2;
+            if(!df_runtime_id_is_valid(value)) return -1;
+            memcpy(c->runtime,value,17);
+        } else if(strcmp(key,"--station-id")==0) {
+            bit=4;
+            if(!*value || strlen(value)>=sizeof(c->station) || strspn(value,"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=strlen(value)) return -1;
             strcpy(c->station,value);
         } else if(strcmp(key,"--operation-id")==0) {
             char *end; bit=8; errno=0;
             if(!*value || strspn(value,"0123456789")!=strlen(value))return -1;
-            c->operation=strtoull(value,&end,10); if(errno || *end || !c->operation)return -1;
-        } else if(strcmp(key,"--local-ip")==0) { bit=16; if(inet_pton(AF_INET,value,&c->local_ip)!=1)return -1; }
-        else if(strcmp(key,"--peer-ip")==0) { bit=32; if(inet_pton(AF_INET,value,&c->peer_ip)!=1)return -1; }
-        else if(strcmp(key,"--local-address")==0) { bit=64; if(logical(value,c->local)!=0)return -1; }
-        else if(strcmp(key,"--peer-address")==0) { bit=128; if(logical(value,c->peer)!=0)return -1; }
-        else return -1;
+            c->operation=strtoull(value,&end,10);
+            if(errno || *end || !c->operation) return -1;
+        } else if(strcmp(key,"--local-ip")==0) {
+            bit=16;
+            if(inet_pton(AF_INET,value,&c->local_ip)!=1) return -1;
+        } else if(strcmp(key,"--peer-ip")==0) {
+            bit=32;
+            if(inet_pton(AF_INET,value,&c->peer_ip)!=1) return -1;
+        } else if(strcmp(key,"--local-address")==0) {
+            bit=64;
+            if(logical(value,c->local)!=0) return -1;
+        } else if(strcmp(key,"--peer-address")==0) {
+            bit=128;
+            if(logical(value,c->peer)!=0) return -1;
+        } else return -1;
         if(seen&bit)return -1;
         seen|=bit;
     }

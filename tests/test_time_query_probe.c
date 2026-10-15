@@ -89,7 +89,12 @@ static int wrong_ack_and_fragment_rejected(void) {
     tq_init(&p,&c); CHECK(tq_observe(&p,b,packet(b,3),1000,0,&s)==1);
     for(unsigned i=0;i<6;i++) {
         n=packet(b,0x83);
-        if(i==0)b[52]^=1; if(i==1)b[26]^=1; if(i==2)b[86]^=1; if(i==3)b[35]^=1; if(i==4)b[20]=0x20; if(i==5)b[90]=0;
+        if(i==0) b[52]^=1;
+        if(i==1) b[26]^=1;
+        if(i==2) b[86]^=1;
+        if(i==3) b[35]^=1;
+        if(i==4) b[20]=0x20;
+        if(i==5) b[90]=0;
         CHECK(tq_observe(&p,b,n,1300,0,&s)==0); CHECK(!p.ack_seen);
     }
     return 0;
