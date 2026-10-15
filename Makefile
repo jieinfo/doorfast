@@ -143,6 +143,17 @@ build/doorfast-tests build/doorfast: src/gvs_call_dispatch.h
 
 .PHONY: test doorfast peer-sim peer-udp-inject pcm-submit pcm-http-test clean
 
+TIME_QUERY_CORE := tools/diagnostics/time_query_probe.c src/gvs_frame.c src/gvs_packet.c src/gvs_serialize.c src/gvs_vendor_header.c
+time-query-probe: build/doorfast-time-query-probe
+build/doorfast-time-query-probe: tools/diagnostics/time_query_probe_main.c tools/diagnostics/time_query_probe.h $(TIME_QUERY_CORE) src/runtime_id.c | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tools/diagnostics/time_query_probe_main.c $(TIME_QUERY_CORE) src/runtime_id.c -o $@ $(PCAP_LIBS)
+build/time-query-probe-tests: tests/test_time_query_probe.c tools/diagnostics/time_query_probe.h $(TIME_QUERY_CORE) | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_time_query_probe.c $(TIME_QUERY_CORE) -o $@
+time-query-probe-test: build/time-query-probe-tests build/doorfast-time-query-probe
+	build/time-query-probe-tests
+	python3 -B -m unittest tests/test_time_query_probe_cli.py
+.PHONY: time-query-probe time-query-probe-test
+
 RECORDER_SOURCES := src/recorder_main.c src/evidence_recorder.c src/pcap_ring.c src/evidence_classifier.c src/capture.c src/gvs_packet.c src/gvs_frame.c src/event.c src/deployment_config.c src/deployment_preflight.c src/deployment_snapshot.c src/runtime_config.c src/station_registry.c src/config.c src/gvs_identity.c src/gvs_station.c
 recorder: build/doorfast-recorder
 RECORDER_SOURCES += src/recorder_selftest.c
