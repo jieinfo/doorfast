@@ -43,6 +43,13 @@ runtime/station/operation/control keys. The final IO boundary rechecks time.
 No old PCAP or saved opaque header fields are reused: the outgoing Ethernet
 route is learned from this call, and new header random/transform bytes are made.
 
+Ownership is polled every 50ms (each status request has a 20ms timeout) and
+rechecked on candidate control packets and before sends. Any observed conflict
+or read failure permanently cancels this process. Inbound `03/01` addressed to
+this indoor identity also cancels it even from a different peer; only that
+control header is inspected, with no caller payload parsed, copied or logged.
+An ended unrelated call cannot restore a cancelled probe.
+
 The probe lifetime is at most 35 seconds of observation, with bounded ubus
 status requests; SIGINT/SIGTERM cancel it. Initial ubus connection/object lookup
 occurs before `ready`, and may fail or take longer than the short status timeout.

@@ -30,7 +30,7 @@ static size_t packet(uint8_t b[128], unsigned opcode) {
     memcpy(b+42, magic, 10);
     memcpy(b+52, incoming ? c.local : c.peer, 6); memcpy(b+58, incoming ? c.peer : c.local, 6);
     b[80]=3; b[81]=(uint8_t)opcode; b[82]=(uint8_t)payload;
-    if (payload==7) { b[84]=incoming?0:2; b[85]=0x20; b[86]=0x6f; b[87]=0x20; b[88]=0x6e; b[90]=incoming?30:120; }
+    if (payload==7) { b[84]=incoming?0:2; b[85]=0x20; b[86]=0x6f; b[87]=0; b[88]=0x20; b[89]=0x6e; b[90]=incoming?30:120; }
     return 84+payload;
 }
 static int prepare(struct tq_probe *p) {
@@ -84,9 +84,9 @@ static int ack_order_age_and_duplicates(void) {
 static int wrong_ack_and_fragment_rejected(void) {
     struct tq_probe p; struct tq_config c=config(); struct tq_owner s=owner(); uint8_t b[128]; size_t n;
     tq_init(&p,&c); CHECK(tq_observe(&p,b,packet(b,3),1000,0,&s)==1);
-    for(unsigned i=0;i<5;i++) {
+    for(unsigned i=0;i<6;i++) {
         n=packet(b,0x83);
-        if(i==0)b[52]^=1; if(i==1)b[26]^=1; if(i==2)b[86]^=1; if(i==3)b[35]^=1; if(i==4)b[20]=0x20;
+        if(i==0)b[52]^=1; if(i==1)b[26]^=1; if(i==2)b[86]^=1; if(i==3)b[35]^=1; if(i==4)b[20]=0x20; if(i==5)b[90]=0;
         CHECK(tq_observe(&p,b,n,1300,0,&s)==0); CHECK(!p.ack_seen);
     }
     return 0;
@@ -103,8 +103,24 @@ static int default_off_and_bounded_attempts(void) {
     CHECK(tq_send(&p,&s,1301,emit,&out)!=0); CHECK(tq_send(&p,&s,1302,emit,&out)!=0);
     CHECK(tq_send(&p,&s,1303,emit,&out)!=0); CHECK(out.calls==2 && p.attempts==2 && p.sent==0); return 0;
 }
+static int conflicts_and_unrelated_calls_latch_cancel(void) {
+    struct tq_probe p; struct tq_owner s=owner(),bad; struct tq_config c=config(); uint8_t b[128]; struct sink out={0};
+    CHECK(prepare(&p)==0); bad=s; bad.operation++;
+    CHECK(!tq_check_owner(&p,&bad)); CHECK(p.cancelled);
+    CHECK(!tq_check_owner(&p,&s)); CHECK(tq_send(&p,&s,1301,emit,&out)!=0); CHECK(out.calls==0);
+    tq_init(&p,&c); bad=s; bad.operation--; strcpy(bad.stage,"ended"); strcpy(bad.native_state,"ended"); bad.media_empty=true;
+    CHECK(tq_check_owner(&p,&bad));
+    CHECK(tq_observe(&p,b,packet(b,3),1000,0,&s)==1);
+    bad=s; strcpy(bad.runtime,"2222222222222222");
+    CHECK(tq_observe(&p,b,packet(b,0x83),1300,0,&bad)==0); CHECK(p.cancelled);
+    CHECK(tq_observe(&p,b,packet(b,0x83),1301,0,&s)==0); CHECK(!p.ack_seen);
+    tq_init(&p,&c); (void)packet(b,1); b[26]^=8; /* Different peer; only its destination header is relevant. */
+    CHECK(tq_observe(&p,b,84,1000,0,&s)==1); CHECK(p.cancelled);
+    CHECK(tq_observe(&p,b,packet(b,3),1001,0,&s)==0); CHECK(!p.call_seen);
+    return 0;
+}
 int main(void) {
     int failed=serializes_only_vendor_short_query()+owner_changes_never_send()+ack_order_age_and_duplicates()
-        +wrong_ack_and_fragment_rejected()+hangup_cancels_query()+default_off_and_bounded_attempts();
-    printf("time-query probe: 6 checks, %d failures\n",failed); return failed?1:0;
+        +wrong_ack_and_fragment_rejected()+hangup_cancels_query()+default_off_and_bounded_attempts()+conflicts_and_unrelated_calls_latch_cancel();
+    printf("time-query probe: 7 checks, %d failures\n",failed); return failed?1:0;
 }

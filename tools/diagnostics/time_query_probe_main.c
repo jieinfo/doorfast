@@ -132,9 +132,9 @@ int main(int argc,char **argv) {
     struct bpf_program filter;
     pcap_t *pcap=NULL;
     const char *interface;
-    char error[PCAP_ERRBUF_SIZE],expression[256],local[INET_ADDRSTRLEN],peer[INET_ADDRSTRLEN];
+    char error[PCAP_ERRBUF_SIZE],expression[512],local[INET_ADDRSTRLEN],peer[INET_ADDRSTRLEN];
     int result=1;
-    uint64_t start;
+    uint64_t start,next_owner_check;
     if(argc==2 && strcmp(argv[1],"--help")==0) {
         puts("usage: doorfast-time-query-probe --interface IFACE --runtime-id HEX16 --station-id ID --operation-id NEXT "
              "--local-ip IPv4 --peer-ip IPv4 --local-address HEX12 --peer-address HEX12 [--send-vendor-time-query]\n"
@@ -153,22 +153,27 @@ int main(int argc,char **argv) {
         pcap_set_timeout(pcap,1)!=0 || pcap_set_immediate_mode(pcap,1)!=0 || pcap_activate(pcap)!=0 ||
         pcap_datalink(pcap)!=DLT_EN10MB || pcap_setnonblock(pcap,1,error)!=0) goto done;
     if(!inet_ntop(AF_INET,&config.local_ip,local,sizeof(local)) || !inet_ntop(AF_INET,&config.peer_ip,peer,sizeof(peer))) goto done;
-    (void)snprintf(expression,sizeof(expression),"udp src port 8300 and udp dst port 8300 and host %s and host %s and udp[46] = 3 and (udp[47] = 1 or udp[47] = 2 or udp[47] = 3 or udp[47] = 131)",local,peer);
+    (void)snprintf(expression,sizeof(expression),"udp src port 8300 and udp dst port 8300 and host %s and udp[46] = 3 and ((host %s and (udp[47] = 2 or udp[47] = 3 or udp[47] = 131)) or (dst host %s and udp[47] = 1))",local,peer,local);
     if(pcap_compile(pcap,&filter,expression,1,PCAP_NETMASK_UNKNOWN)!=0) goto done;
     if(pcap_setfilter(pcap,&filter)!=0) { pcap_freecode(&filter); goto done; }
     pcap_freecode(&filter);
-    tq_init(&probe,&config); start=milliseconds(CLOCK_MONOTONIC);
+    tq_init(&probe,&config); start=milliseconds(CLOCK_MONOTONIC); next_owner_check=start;
     printf("{\"event\":\"ready\",\"send_enabled\":%s,\"operation_id\":%"PRIu64"}\n",config.send?"true":"false",config.operation); fflush(stdout);
     while(!interrupted && milliseconds(CLOCK_MONOTONIC)-start<35000) {
         struct pcap_pkthdr *header;
         const u_char *bytes;
-        int got=pcap_next_ex(pcap,&header,&bytes);
+        int got;
+        if(milliseconds(CLOCK_MONOTONIC)>=next_owner_check) {
+            if(read_owner(&reader,&owner)!=0 || !tq_check_owner(&probe,&owner)) { probe.cancelled=true; break; }
+            next_owner_check=milliseconds(CLOCK_MONOTONIC)+50;
+        }
+        got=pcap_next_ex(pcap,&header,&bytes);
         if(got<0) break;
         if(got==1) {
             uint64_t wall=milliseconds(CLOCK_REALTIME),stamp=(uint64_t)header->ts.tv_sec*1000+(uint64_t)header->ts.tv_usec/1000;
             if(wall>=stamp && wall-stamp<=100) {
                 uint64_t captured_at=milliseconds(CLOCK_MONOTONIC)-(wall-stamp);
-                if(read_owner(&reader,&owner)!=0) break;
+                if(read_owner(&reader,&owner)!=0 || !tq_check_owner(&probe,&owner)) { probe.cancelled=true; break; }
                 uint64_t now=milliseconds(CLOCK_MONOTONIC);
                 if(now>=captured_at && now-captured_at<=100)
                     (void)tq_observe(&probe,bytes,header->caplen,now,(unsigned)(now-captured_at),&owner);
@@ -179,7 +184,7 @@ int main(int argc,char **argv) {
             struct transport transport={pcap,&probe};
             if(!config.send) { result=0; break; }
             while(!interrupted && probe.attempts<2 && milliseconds(CLOCK_MONOTONIC)-probe.ack_ms<=100) {
-                if(read_owner(&reader,&owner)!=0) break;
+                if(read_owner(&reader,&owner)!=0 || !tq_check_owner(&probe,&owner)) { probe.cancelled=true; break; }
                 uint64_t now=milliseconds(CLOCK_MONOTONIC);
                 if(tq_may_send(&probe,&owner,now)) {
                     if(tq_send(&probe,&owner,now,inject,&transport)!=0) break;

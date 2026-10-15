@@ -25,6 +25,7 @@ struct tq_probe {
 };
 typedef int (*tq_emit_fn)(const uint8_t *, size_t, void *);
 void tq_init(struct tq_probe *, const struct tq_config *);
+bool tq_check_owner(struct tq_probe *, const struct tq_owner *);
 /* Input is an Ethernet packet, never a UDP socket binding or saved replay. */
 int tq_observe(struct tq_probe *, const uint8_t *, size_t, uint64_t now_ms,
                unsigned age_ms, const struct tq_owner *);

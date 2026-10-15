@@ -12,17 +12,50 @@ static bool same_operation(const struct tq_probe *p, const struct tq_owner *s) {
         s->generation>0 && s->generation==s->native_generation;
 }
 
+bool tq_check_owner(struct tq_probe *p, const struct tq_owner *s) {
+    bool valid=false;
+    if (p==NULL || p->cancelled) return false;
+    if (s && strcmp(s->runtime,p->config.runtime)==0) {
+        if (p->call_seen) {
+            valid=same_operation(p,s) && s->generation==p->generation &&
+                (strcmp(s->stage,"calling")==0 || strcmp(s->stage,"talking")==0) &&
+                (strcmp(s->native_state,"preview")==0 ||
+                 (strcmp(s->native_state,"talking")==0 && strcmp(s->native_station,p->config.station)==0));
+        } else if (s->operation<p->config.operation && s->operation+1==p->config.operation) {
+            valid=s->media_empty && (strcmp(s->stage,"idle")==0 || strcmp(s->stage,"ended")==0 || strcmp(s->stage,"failed")==0) &&
+                (strcmp(s->native_state,"idle")==0 || strcmp(s->native_state,"ended")==0);
+        } else if (s->operation==p->config.operation && strcmp(s->station,p->config.station)==0) {
+            valid=(strcmp(s->stage,"preparing")==0 || strcmp(s->stage,"calling")==0 || strcmp(s->stage,"talking")==0) &&
+                (strcmp(s->native_state,"idle")==0 || strcmp(s->native_state,"ended")==0 ||
+                 (same_operation(p,s) && (strcmp(s->native_state,"preview")==0 ||
+                  (strcmp(s->native_state,"talking")==0 && strcmp(s->native_station,p->config.station)==0))));
+        }
+    }
+    if (!valid) p->cancelled=true;
+    return valid;
+}
+
 int tq_observe(struct tq_probe *p, const uint8_t *b, size_t n, uint64_t now,
                unsigned age, const struct tq_owner *s) {
     struct df_udp_prefix u;
     struct df_gvs_frame f;
     struct df_event e;
+    static const uint8_t magic[10]={'G','V','S','G','V','S',0xa5,0xa5,0xa5,0xa5};
     bool outgoing;
     if (p==NULL || b==NULL || p->cancelled || age>100 || age>now ||
         n<42 || b[12]!=8 || b[13]!=0 || b[14]!=0x45 ||
         (b[20]&0x3f)!=0 || b[21]!=0 ||
-        df_gvs_inspect_udp_prefix(b,n,&u)!=1 || !u.payload_complete ||
-        u.source_port!=8300 || u.destination_port!=8300 ||
+        df_gvs_inspect_udp_prefix(b,n,&u)!=1 || u.source_port!=8300 || u.destination_port!=8300)
+        return 0;
+    if (!tq_check_owner(p,s)) return 0;
+    /* Only an incoming control header addressed to this indoor identity is
+     * needed to abort. Never parse or retain the caller's identity payload. */
+    if (u.destination_ipv4==p->config.local_ip && u.captured_payload_length>=42 &&
+        memcmp(b+u.payload_offset,magic,10)==0 && memcmp(b+u.payload_offset+10,p->config.local,6)==0 &&
+        b[u.payload_offset+38]==3 && b[u.payload_offset+39]==1) {
+        p->cancelled=true; return 1;
+    }
+    if (!u.payload_complete ||
         df_gvs_frame_parse(b+u.payload_offset,u.declared_payload_length,&f,&e)!=0 || f.family!=3)
         return 0;
     outgoing=u.source_ipv4==p->config.local_ip && u.destination_ipv4==p->config.peer_ip;
@@ -31,7 +64,7 @@ int tq_observe(struct tq_probe *p, const uint8_t *b, size_t n, uint64_t now,
         memcmp(f.destination,outgoing?p->config.peer:p->config.local,6)!=0) return 0;
     if (f.opcode==2 || (!outgoing && f.opcode==1)) { p->cancelled=true; return 1; }
     if (f.payload_length!=7 || f.payload[1]!=0x20 || f.payload[2]!=0x6f ||
-        f.payload[3]!=0x20 || f.payload[4]!=0x6e || f.payload[5]!=0) return 0;
+        f.payload[3]!=0 || f.payload[4]!=0x20 || f.payload[5]!=0x6e || f.payload[6]==0) return 0;
     if (outgoing && f.opcode==3 && f.payload[0]==2 && f.payload[6]==120 && !p->call_seen) {
         if (!same_operation(p,s) || (strcmp(s->stage,"calling")!=0 && strcmp(s->stage,"talking")!=0)) {
             p->cancelled=true; return 0;
@@ -55,7 +88,7 @@ static void be16(uint8_t *p,unsigned v) { p[0]=(uint8_t)(v>>8); p[1]=(uint8_t)v;
 int tq_send(struct tq_probe *p, const struct tq_owner *s, uint64_t now,
             tq_emit_fn emit, void *context) {
     uint8_t b[84]; size_t length=0; unsigned checksum=0;
-    if (!tq_may_send(p,s,now) || emit==NULL) return -1;
+    if (p==NULL || !tq_check_owner(p,s) || !tq_may_send(p,s,now) || emit==NULL) return -1;
     p->attempts++; /* A failed send consumes its slot, too. */
     memcpy(b,p->ethernet_ip_udp,42);
     if (df_gvs_control_serialize(b+42,42,&length,p->config.peer,p->config.local,3,0x56,NULL,0,

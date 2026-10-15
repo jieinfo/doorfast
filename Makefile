@@ -149,8 +149,11 @@ build/doorfast-time-query-probe: tools/diagnostics/time_query_probe_main.c tools
 	$(CC) $(CPPFLAGS) $(CFLAGS) tools/diagnostics/time_query_probe_main.c $(TIME_QUERY_CORE) src/runtime_id.c -o $@ $(PCAP_LIBS)
 build/time-query-probe-tests: tests/test_time_query_probe.c tools/diagnostics/time_query_probe.h $(TIME_QUERY_CORE) | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_time_query_probe.c $(TIME_QUERY_CORE) -o $@
-time-query-probe-test: build/time-query-probe-tests build/doorfast-time-query-probe
+build/time-query-probe-io-tests: tests/test_time_query_probe_io.c tools/diagnostics/time_query_probe_main.c tools/diagnostics/time_query_probe.h $(TIME_QUERY_CORE) src/runtime_id.c | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_time_query_probe_io.c $(TIME_QUERY_CORE) src/runtime_id.c -o $@ $(PCAP_LIBS)
+time-query-probe-test: build/time-query-probe-tests build/time-query-probe-io-tests build/doorfast-time-query-probe
 	build/time-query-probe-tests
+	build/time-query-probe-io-tests
 	python3 -B -m unittest tests/test_time_query_probe_cli.py
 .PHONY: time-query-probe time-query-probe-test
 
