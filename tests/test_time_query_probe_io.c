@@ -14,11 +14,17 @@ int main(int argc,char **argv) {
     uint8_t bytes[84]={0};
     struct tq_probe p={0};
     struct transport t={NULL,&p};
-    if(argc==2 && (strcmp(argv[1],"--cancel-report")==0 || strcmp(argv[1],"--read-failure-report")==0)) {
+    if(argc==2 && (strcmp(argv[1],"--cancel-report")==0 || strcmp(argv[1],"--read-failure-report")==0 ||
+        strcmp(argv[1],"--signal-report")==0 || strcmp(argv[1],"--timeout-report")==0)) {
         struct tq_config c={.runtime="1111111111111111"};
         struct tq_owner s={.runtime="2222222222222222"};
         tq_init(&p,&c);
-        if(strcmp(argv[1],"--read-failure-report")==0) {
+        if(strcmp(argv[1],"--signal-report")==0 || strcmp(argv[1],"--timeout-report")==0) {
+            bool timeout=strcmp(argv[1],"--timeout-report")==0;
+            interrupted=0; p.ack_ms=milliseconds(CLOCK_MONOTONIC);
+            stop(timeout?SIGALRM:SIGINT); stop(timeout?SIGINT:SIGALRM);
+            if(inject(bytes,sizeof(bytes),&t)!=-1 || writes!=0) return 1;
+        } else if(strcmp(argv[1],"--read-failure-report")==0) {
             struct reader r={0};
             if(refresh_owner(&p,&r,&s)) return 1;
         } else if(tq_check_owner(&p,&s)) return 1;

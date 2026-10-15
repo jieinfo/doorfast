@@ -45,9 +45,11 @@ class TimeQueryCliTests(unittest.TestCase):
         self.assertIn("preflight_owner_unavailable_or_not_idle", result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_cancel_report_distinguishes_owner_conflict_and_observation_time(self):
+    def test_cancel_reports_preserve_first_reason_and_observation_time(self):
         for mode, reason in (("--cancel-report", "owner_conflict"),
-                             ("--read-failure-report", "status_read_failed")):
+                             ("--read-failure-report", "status_read_failed"),
+                             ("--signal-report", "interrupted"),
+                             ("--timeout-report", "observation_timeout")):
             with self.subTest(mode=mode):
                 result = subprocess.run([str(ROOT / "build/time-query-probe-io-tests"), mode],
                                         text=True, capture_output=True, timeout=3)

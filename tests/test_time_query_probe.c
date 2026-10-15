@@ -170,7 +170,7 @@ static int preparing_retry_stop_can_reach_current_call(void) {
 static int preparing_stop_exception_never_hides_real_hangup(void) {
     struct tq_probe p; struct tq_config c=config(); struct tq_owner s;
     uint8_t b[128]; size_t n; struct sink out={0};
-    for(unsigned i=0;i<12;i++) {
+    for(unsigned i=0;i<13;i++) {
         tq_init(&p,&c); s=preparing_owner(); n=local_stop(b,0);
         switch(i) {
         case 0: s.runtime[0]='2'; break;
@@ -186,6 +186,7 @@ static int preparing_stop_exception_never_hides_real_hangup(void) {
         case 9: n=local_stop(b,0); b[82]=0; b[17]--; b[39]--; n--; break;
         case 10: s.operation--; strcpy(s.stage,"ended"); s.media_empty=true; break;
         case 11: s.native_station[0]='x'; break;
+        case 12: strcpy(s.stage,"calling"); break; /* Zero generation is not PREPARING. */
         }
         (void)tq_observe(&p,b,n,900,0,&s);
         CHECK(p.cancelled && p.preparation_stops==0 && p.cancel_reason!=TQ_CANCEL_NONE);

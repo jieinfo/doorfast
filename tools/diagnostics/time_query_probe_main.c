@@ -17,7 +17,7 @@
 #endif
 
 static volatile sig_atomic_t interrupted;
-static void stop(int signal_number) { interrupted=signal_number; }
+static void stop(int signal_number) { if(!interrupted) interrupted=signal_number; }
 static uint64_t milliseconds(clockid_t clock) {
     struct timespec t;
     if (clock_gettime(clock,&t)!=0) return 0;
