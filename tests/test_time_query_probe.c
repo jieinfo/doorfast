@@ -102,7 +102,8 @@ static int wrong_ack_and_fragment_rejected(void) {
 static int hangup_cancels_query(void) {
     struct tq_probe p; struct tq_owner s=owner(); uint8_t b[128]; struct sink out={0};
     CHECK(prepare(&p)==0); CHECK(tq_observe(&p,b,packet(b,2),1301,0,&s)==1);
-    CHECK(p.cancelled); CHECK(tq_send(&p,&s,1302,emit,&out)!=0); CHECK(out.calls==0); return 0;
+    CHECK(p.cancelled && p.cancel_reason==TQ_CANCEL_PEER_HANGUP);
+    CHECK(tq_send(&p,&s,1302,emit,&out)!=0); CHECK(out.calls==0); return 0;
 }
 static int default_off_and_bounded_attempts(void) {
     struct tq_probe p; struct tq_owner s=owner(); struct sink out={.fail=true};
@@ -114,7 +115,7 @@ static int default_off_and_bounded_attempts(void) {
 static int conflicts_and_unrelated_calls_latch_cancel(void) {
     struct tq_probe p; struct tq_owner s=owner(),bad; struct tq_config c=config(); uint8_t b[128]; struct sink out={0};
     CHECK(prepare(&p)==0); bad=s; bad.operation++;
-    CHECK(!tq_check_owner(&p,&bad)); CHECK(p.cancelled);
+    CHECK(!tq_check_owner(&p,&bad)); CHECK(p.cancelled && p.cancel_reason==TQ_CANCEL_OWNER_CONFLICT);
     CHECK(!tq_check_owner(&p,&s)); CHECK(tq_send(&p,&s,1301,emit,&out)!=0); CHECK(out.calls==0);
     tq_init(&p,&c); bad=s; bad.operation--; strcpy(bad.stage,"ended"); strcpy(bad.native_state,"ended"); bad.media_empty=true;
     CHECK(tq_check_owner(&p,&bad));
@@ -123,7 +124,8 @@ static int conflicts_and_unrelated_calls_latch_cancel(void) {
     CHECK(tq_observe(&p,b,packet(b,0x83),1300,0,&bad)==0); CHECK(p.cancelled);
     CHECK(tq_observe(&p,b,packet(b,0x83),1301,0,&s)==0); CHECK(!p.ack_seen);
     tq_init(&p,&c); (void)packet(b,1); b[26]^=8; /* Different peer; only its destination header is relevant. */
-    CHECK(tq_observe(&p,b,84,1000,0,&s)==1); CHECK(p.cancelled);
+    CHECK(tq_observe(&p,b,84,1000,0,&s)==1); CHECK(p.cancelled && p.cancel_reason==TQ_CANCEL_INCOMING_CALL);
+    tq_cancel(&p,TQ_CANCEL_STATUS_READ_FAILED); CHECK(p.cancel_reason==TQ_CANCEL_INCOMING_CALL);
     CHECK(tq_observe(&p,b,packet(b,3),1001,0,&s)==0); CHECK(!p.call_seen);
     return 0;
 }
@@ -135,9 +137,84 @@ static int empty_preview_identity_binds_then_talking_can_send(void) {
     CHECK(!tq_may_send(&p,&s,1301)); CHECK(!p.cancelled);
     s=owner(); CHECK(tq_send(&p,&s,1302,emit,&out)==0); CHECK(out.calls==1); return 0;
 }
+static struct tq_owner preparing_owner(void) {
+    struct tq_owner s=owner();
+    strcpy(s.stage,"preparing"); s.generation=0;
+    strcpy(s.native_state,"ended"); s.native_station[0]=0; s.native_generation=41;
+    return s;
+}
+static size_t local_stop(uint8_t b[128],unsigned value) {
+    struct tq_config c=config();
+    size_t n=packet(b,2);
+    memcpy(b+26,&c.local_ip,4); memcpy(b+30,&c.peer_ip,4);
+    memcpy(b+52,c.peer,6); memcpy(b+58,c.local,6); b[84]=(uint8_t)value;
+    return n;
+}
+static int preparing_retry_stop_can_reach_current_call(void) {
+    struct tq_probe p; struct tq_config c=config(); struct tq_owner s=preparing_owner();
+    uint8_t b[128]; struct sink out={0};
+    tq_init(&p,&c);
+    CHECK(tq_observe(&p,b,local_stop(b,0),900,0,&s)==1);
+    CHECK(!p.cancelled && !p.call_seen && !p.ack_seen && p.preparation_stops==1);
+    CHECK(!tq_may_send(&p,&s,901));
+    CHECK(tq_observe(&p,b,local_stop(b,0),950,0,&s)==1);
+    CHECK(!p.cancelled && p.preparation_stops==2);
+    s=owner(); strcpy(s.stage,"calling"); strcpy(s.native_state,"preview"); s.native_station[0]=0;
+    CHECK(tq_observe(&p,b,packet(b,3),1000,0,&s)==1);
+    CHECK(tq_observe(&p,b,packet(b,0x83),1300,0,&s)==1);
+    s=owner(); CHECK(tq_send(&p,&s,1301,emit,&out)==0);
+    CHECK(tq_send(&p,&s,1302,emit,&out)==0);
+    CHECK(tq_send(&p,&s,1303,emit,&out)!=0);
+    CHECK(out.calls==2 && p.sent==2); return 0;
+}
+static int preparing_stop_exception_never_hides_real_hangup(void) {
+    struct tq_probe p; struct tq_config c=config(); struct tq_owner s;
+    uint8_t b[128]; size_t n; struct sink out={0};
+    for(unsigned i=0;i<12;i++) {
+        tq_init(&p,&c); s=preparing_owner(); n=local_stop(b,0);
+        switch(i) {
+        case 0: s.runtime[0]='2'; break;
+        case 1: s.operation++; break;
+        case 2: s.station[0]='x'; break;
+        case 3: strcpy(s.stage,"calling"); s.generation=42; s.native_generation=42;
+                strcpy(s.native_state,"preview"); break;
+        case 4: s=owner(); break;
+        case 5: s.generation=42; break;
+        case 6: strcpy(s.native_state,"ringing"); break;
+        case 7: b[84]=1; break;
+        case 8: n=packet(b,2); break; /* Peer 03/02 00 before CALL still cancels. */
+        case 9: n=local_stop(b,0); b[82]=0; b[17]--; b[39]--; n--; break;
+        case 10: s.operation--; strcpy(s.stage,"ended"); s.media_empty=true; break;
+        case 11: s.native_station[0]='x'; break;
+        }
+        (void)tq_observe(&p,b,n,900,0,&s);
+        CHECK(p.cancelled && p.preparation_stops==0 && p.cancel_reason!=TQ_CANCEL_NONE);
+        s=owner(); CHECK(!tq_check_owner(&p,&s));
+        CHECK(tq_send(&p,&s,901,emit,&out)!=0);
+    }
+    for(unsigned ack=0;ack<2;ack++) {
+        tq_init(&p,&c); s=owner();
+        CHECK(tq_observe(&p,b,packet(b,3),1000,0,&s)==1);
+        if(ack) CHECK(tq_observe(&p,b,packet(b,0x83),1300,0,&s)==1);
+        CHECK(tq_observe(&p,b,local_stop(b,0),1301,0,&s)==1);
+        CHECK(p.cancelled && p.cancel_reason==TQ_CANCEL_LOCAL_HANGUP);
+        CHECK(tq_send(&p,&s,1302,emit,&out)!=0);
+    }
+    CHECK(out.calls==0); return 0;
+}
+static int call_owner_mismatch_remains_first_cancel_reason(void) {
+    struct tq_probe p; struct tq_config c=config(); struct tq_owner s=preparing_owner(); uint8_t b[128];
+    tq_init(&p,&c);
+    CHECK(tq_observe(&p,b,packet(b,3),1000,0,&s)==0);
+    CHECK(p.cancelled && p.cancel_reason==TQ_CANCEL_CALL_OWNER_CONFLICT);
+    tq_cancel(&p,TQ_CANCEL_INTERRUPTED);
+    CHECK(p.cancel_reason==TQ_CANCEL_CALL_OWNER_CONFLICT);
+    CHECK(!p.call_seen && !p.ack_seen && p.sent==0); return 0;
+}
 int main(void) {
     int failed=serializes_only_vendor_short_query()+owner_changes_never_send()+ack_order_age_and_duplicates()
         +wrong_ack_and_fragment_rejected()+hangup_cancels_query()+default_off_and_bounded_attempts()+conflicts_and_unrelated_calls_latch_cancel()
-        +empty_preview_identity_binds_then_talking_can_send();
-    printf("time-query probe: 8 checks, %d failures\n",failed); return failed?1:0;
+        +empty_preview_identity_binds_then_talking_can_send()+preparing_retry_stop_can_reach_current_call()
+        +preparing_stop_exception_never_hides_real_hangup()+call_owner_mismatch_remains_first_cancel_reason();
+    printf("time-query probe: 11 checks, %d failures\n",failed); return failed?1:0;
 }

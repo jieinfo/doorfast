@@ -17,7 +17,7 @@
 #endif
 
 static volatile sig_atomic_t interrupted;
-static void stop(int signal_number) { (void)signal_number; interrupted=1; }
+static void stop(int signal_number) { interrupted=signal_number; }
 static uint64_t milliseconds(clockid_t clock) {
     struct timespec t;
     if (clock_gettime(clock,&t)!=0) return 0;
@@ -71,6 +71,13 @@ static int read_owner(struct reader *r,struct tq_owner *s) {
 struct reader { int unused; };
 static int read_owner(struct reader *r,struct tq_owner *s) { (void)r; (void)s; return -1; }
 #endif
+
+static bool refresh_owner(struct tq_probe *probe,struct reader *reader,struct tq_owner *owner) {
+    if(read_owner(reader,owner)!=0) {
+        tq_cancel(probe,TQ_CANCEL_STATUS_READ_FAILED); return false;
+    }
+    return tq_check_owner(probe,owner);
+}
 
 static int logical(const char *s,uint8_t output[6]) {
     if (strlen(s)!=12) return -1;
@@ -137,7 +144,11 @@ static int inject(const uint8_t *b,size_t n,void *context) {
     struct transport *t=context;
     uint64_t now=milliseconds(CLOCK_MONOTONIC);
     /* Recheck after random generation/serialization, immediately before IO. */
-    if (interrupted || now<t->probe->ack_ms || now-t->probe->ack_ms>100) return -1;
+    if (interrupted) {
+        tq_cancel(t->probe,interrupted==SIGALRM?TQ_CANCEL_OBSERVATION_TIMEOUT:TQ_CANCEL_INTERRUPTED);
+        return -1;
+    }
+    if (now<t->probe->ack_ms || now-t->probe->ack_ms>100) return -1;
     return pcap_inject(t->pcap,b,n)==(int)n ? 0 : -1;
 }
 static bool idle(const struct tq_owner *s,const struct tq_config *c) {
@@ -145,6 +156,13 @@ static bool idle(const struct tq_owner *s,const struct tq_config *c) {
         s->operation+1==c->operation && s->media_empty &&
         (strcmp(s->native_state,"idle")==0 || strcmp(s->native_state,"ended")==0) &&
         (strcmp(s->stage,"idle")==0 || strcmp(s->stage,"ended")==0 || strcmp(s->stage,"failed")==0);
+}
+static void report_finished(const struct tq_probe *probe,bool send,int result,uint64_t elapsed_ms) {
+    printf("{\"event\":\"finished\",\"call_seen\":%s,\"ack_seen\":%s,\"cancelled\":%s,\"attempts\":%u,\"sent\":%u,\"valid_treatment\":%s,"
+        "\"cancel_reason\":\"%s\",\"elapsed_ms\":%"PRIu64",\"preparation_stops\":%u}\n",
+        probe->call_seen?"true":"false",probe->ack_seen?"true":"false",probe->cancelled?"true":"false",probe->attempts,probe->sent,
+        send && result==0 && !probe->cancelled?"true":"false",
+        tq_cancel_reason_name(probe->cancel_reason),elapsed_ms,probe->preparation_stops);
 }
 int main(int argc,char **argv) {
     struct tq_config config;
@@ -186,16 +204,16 @@ int main(int argc,char **argv) {
         const u_char *bytes;
         int got;
         if(milliseconds(CLOCK_MONOTONIC)>=next_owner_check) {
-            if(read_owner(&reader,&owner)!=0 || !tq_check_owner(&probe,&owner)) { probe.cancelled=true; break; }
+            if(!refresh_owner(&probe,&reader,&owner)) break;
             next_owner_check=milliseconds(CLOCK_MONOTONIC)+50;
         }
         got=pcap_next_ex(pcap,&header,&bytes);
-        if(got<0) break;
+        if(got<0) { tq_cancel(&probe,TQ_CANCEL_CAPTURE_FAILED); break; }
         if(got==1) {
             uint64_t wall=milliseconds(CLOCK_REALTIME),stamp=(uint64_t)header->ts.tv_sec*1000+(uint64_t)header->ts.tv_usec/1000;
             if(wall>=stamp && wall-stamp<=100) {
                 uint64_t captured_at=milliseconds(CLOCK_MONOTONIC)-(wall-stamp);
-                if(read_owner(&reader,&owner)!=0 || !tq_check_owner(&probe,&owner)) { probe.cancelled=true; break; }
+                if(!refresh_owner(&probe,&reader,&owner)) break;
                 uint64_t now=milliseconds(CLOCK_MONOTONIC);
                 if(now>=captured_at && now-captured_at<=100)
                     (void)tq_observe(&probe,bytes,header->caplen,now,(unsigned)(now-captured_at),&owner);
@@ -206,7 +224,7 @@ int main(int argc,char **argv) {
             struct transport transport={pcap,&probe};
             if(!config.send) { result=0; break; }
             while(!interrupted && probe.attempts<2 && milliseconds(CLOCK_MONOTONIC)-probe.ack_ms<=100) {
-                if(read_owner(&reader,&owner)!=0 || !tq_check_owner(&probe,&owner)) { probe.cancelled=true; break; }
+                if(!refresh_owner(&probe,&reader,&owner)) break;
                 uint64_t now=milliseconds(CLOCK_MONOTONIC);
                 if(tq_may_send(&probe,&owner,now)) {
                     if(tq_send(&probe,&owner,now,inject,&transport)!=0) break;
@@ -217,9 +235,10 @@ int main(int argc,char **argv) {
         }
         usleep(2000);
     }
-    printf("{\"event\":\"finished\",\"call_seen\":%s,\"ack_seen\":%s,\"cancelled\":%s,\"attempts\":%u,\"sent\":%u,\"valid_treatment\":%s}\n",
-        probe.call_seen?"true":"false",probe.ack_seen?"true":"false",probe.cancelled?"true":"false",probe.attempts,probe.sent,
-        config.send && result==0?"true":"false");
+    if(interrupted) tq_cancel(&probe,interrupted==SIGALRM?TQ_CANCEL_OBSERVATION_TIMEOUT:TQ_CANCEL_INTERRUPTED);
+    else if(milliseconds(CLOCK_MONOTONIC)-start>=35000) tq_cancel(&probe,TQ_CANCEL_OBSERVATION_TIMEOUT);
+    if(probe.cancelled) result=1;
+    report_finished(&probe,config.send,result,milliseconds(CLOCK_MONOTONIC)-start);
 done:
     if(pcap) pcap_close(pcap);
 #ifdef DF_WITH_UBUS

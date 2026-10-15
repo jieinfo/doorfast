@@ -50,6 +50,15 @@ this indoor identity also cancels it even from a different peer; only that
 control header is inspected, with no caller payload parsed, copied or logged.
 An ended unrelated call cannot restore a cancelled probe.
 
+There is one narrow preparation exception: before observing any formal CALL,
+an outgoing, exact-peer `03/02 00` may be a preview busy-retry stop. It is counted
+as `preparation_stops`, not cancellation, only while the exact requested
+runtime/station/operation is still `preparing`, its call generation is zero,
+and native control is idle/ended with no named active station. It does not
+bind a generation, route or ACK, extend any deadline, or permit sending.
+Peer stops, other stop payloads, and every stop after a formal CALL still
+cancel permanently. Do not use this exception to resume a cancelled probe.
+
 The probe lifetime is at most 35 seconds of observation, with bounded ubus
 status requests; SIGINT/SIGTERM cancel it. Initial ubus connection/object lookup
 occurs before `ready`, and may fail or take longer than the short status timeout.
@@ -72,3 +81,11 @@ Record the first audio/video headers and terminal direction, plus the later
 cooldown, call duration and all configurations unchanged. Stop on runtime/owner
 conflicts or unrelated incoming calls; only clean up the exact call created by
 the driver. This probe is not evidence of full-duplex/browser audio acceptance.
+
+The `finished` event now includes a bounded `cancel_reason`, `elapsed_ms`
+(monotonic time since ready, measured when finishing), and `preparation_stops`.
+The first cancellation reason is retained: owner/call-owner conflict, status
+read failure, incoming call, local/peer hangup, capture failure, interruption
+or observation timeout. No arbitrary ubus/error text or opaque packet fields
+are logged. A later signal cannot replace an earlier conflict/read failure.
+These diagnostics describe the probe, not the door station's internal reason.

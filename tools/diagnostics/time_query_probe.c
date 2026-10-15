@@ -6,6 +6,26 @@
 #include "gvs_vendor_header.h"
 
 void tq_init(struct tq_probe *p, const struct tq_config *c) { memset(p, 0, sizeof(*p)); p->config = *c; }
+void tq_cancel(struct tq_probe *p,enum tq_cancel_reason reason) {
+    if (p!=NULL && !p->cancelled && reason!=TQ_CANCEL_NONE) {
+        p->cancelled=true; p->cancel_reason=reason;
+    }
+}
+const char *tq_cancel_reason_name(enum tq_cancel_reason reason) {
+    switch(reason) {
+    case TQ_CANCEL_NONE: return "none";
+    case TQ_CANCEL_OWNER_CONFLICT: return "owner_conflict";
+    case TQ_CANCEL_CALL_OWNER_CONFLICT: return "call_owner_conflict";
+    case TQ_CANCEL_STATUS_READ_FAILED: return "status_read_failed";
+    case TQ_CANCEL_INCOMING_CALL: return "incoming_call";
+    case TQ_CANCEL_LOCAL_HANGUP: return "local_hangup";
+    case TQ_CANCEL_PEER_HANGUP: return "peer_hangup";
+    case TQ_CANCEL_CAPTURE_FAILED: return "capture_failed";
+    case TQ_CANCEL_INTERRUPTED: return "interrupted";
+    case TQ_CANCEL_OBSERVATION_TIMEOUT: return "observation_timeout";
+    }
+    return "unknown";
+}
 static bool same_operation(const struct tq_probe *p, const struct tq_owner *s) {
     return s != NULL && strcmp(s->runtime,p->config.runtime)==0 &&
         strcmp(s->station,p->config.station)==0 && s->operation==p->config.operation &&
@@ -35,7 +55,7 @@ bool tq_check_owner(struct tq_probe *p, const struct tq_owner *s) {
                  (same_operation(p,s) && native_owned(p,s)));
         }
     }
-    if (!valid) p->cancelled=true;
+    if (!valid) tq_cancel(p,TQ_CANCEL_OWNER_CONFLICT);
     return valid;
 }
 
@@ -57,7 +77,7 @@ int tq_observe(struct tq_probe *p, const uint8_t *b, size_t n, uint64_t now,
     if (u.destination_ipv4==p->config.local_ip && u.captured_payload_length>=42 &&
         memcmp(b+u.payload_offset,magic,10)==0 && memcmp(b+u.payload_offset+10,p->config.local,6)==0 &&
         b[u.payload_offset+38]==3 && b[u.payload_offset+39]==1) {
-        p->cancelled=true; return 1;
+        tq_cancel(p,TQ_CANCEL_INCOMING_CALL); return 1;
     }
     if (!u.payload_complete ||
         df_gvs_frame_parse(b+u.payload_offset,u.declared_payload_length,&f,&e)!=0 || f.family!=3)
@@ -66,12 +86,24 @@ int tq_observe(struct tq_probe *p, const uint8_t *b, size_t n, uint64_t now,
     if (!outgoing && !(u.source_ipv4==p->config.peer_ip && u.destination_ipv4==p->config.local_ip)) return 0;
     if (memcmp(f.source,outgoing?p->config.local:p->config.peer,6)!=0 ||
         memcmp(f.destination,outgoing?p->config.peer:p->config.local,6)!=0) return 0;
-    if (f.opcode==2 || (!outgoing && f.opcode==1)) { p->cancelled=true; return 1; }
+    if (f.opcode==2) {
+        /* Preview retries stop before the formal call exists. Never carry
+         * this exception across a CALL, an owner change or an active native
+         * session; peer stops and every other stop payload still cancel. */
+        if (outgoing && !p->call_seen && !p->ack_seen &&
+            s->operation==p->config.operation && strcmp(s->station,p->config.station)==0 &&
+            strcmp(s->stage,"preparing")==0 && s->generation==0 &&
+            (strcmp(s->native_state,"idle")==0 || strcmp(s->native_state,"ended")==0) &&
+            s->native_station[0]==0 && f.payload_length==1 && f.payload[0]==0) {
+            p->preparation_stops++; return 1;
+        }
+        tq_cancel(p,outgoing?TQ_CANCEL_LOCAL_HANGUP:TQ_CANCEL_PEER_HANGUP); return 1;
+    }
     if (f.payload_length!=7 || f.payload[1]!=0x20 || f.payload[2]!=0x6f ||
         f.payload[3]!=0 || f.payload[4]!=0x20 || f.payload[5]!=0x6e || f.payload[6]==0) return 0;
     if (outgoing && f.opcode==3 && f.payload[0]==2 && f.payload[6]==120 && !p->call_seen) {
         if (!same_operation(p,s) || (strcmp(s->stage,"calling")!=0 && strcmp(s->stage,"talking")!=0)) {
-            p->cancelled=true; return 0;
+            tq_cancel(p,TQ_CANCEL_CALL_OWNER_CONFLICT); return 0;
         }
         p->call_seen=true; p->call_ms=now-age; p->generation=s->generation;
         memcpy(p->ethernet_ip_udp,b,42); return 1;

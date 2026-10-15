@@ -1,5 +1,6 @@
 """No target traffic: exercise the real CLI and SDK artifact staging script."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -43,6 +44,22 @@ class TimeQueryCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("preflight_owner_unavailable_or_not_idle", result.stderr)
         self.assertEqual(result.stdout, "")
+
+    def test_cancel_report_distinguishes_owner_conflict_and_observation_time(self):
+        for mode, reason in (("--cancel-report", "owner_conflict"),
+                             ("--read-failure-report", "status_read_failed")):
+            with self.subTest(mode=mode):
+                result = subprocess.run([str(ROOT / "build/time-query-probe-io-tests"), mode],
+                                        text=True, capture_output=True, timeout=3)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                row = json.loads(result.stdout)
+                self.assertTrue(row["cancelled"])
+                self.assertFalse(row["valid_treatment"])
+                self.assertEqual(row["sent"], 0)
+                self.assertIn("cancel_reason", row)
+                self.assertEqual(row["cancel_reason"], reason)
+                self.assertEqual(row["elapsed_ms"], 1234)
+                self.assertEqual(row["preparation_stops"], 0)
 
     def test_missing_sdk_cannot_make_an_artifact(self):
         with tempfile.TemporaryDirectory(prefix="doorfast-sdk-missing-") as directory:
