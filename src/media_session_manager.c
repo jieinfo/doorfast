@@ -1993,8 +1993,22 @@ static int df_media_module_unlock_prepare_status_v1(const void *instance,
     status->first_request_ms = session->first_request_ms;
     status->has_first_request = session->has_first_request;
     status->confirmed_ms = session->confirmed_ms;
-    status->has_confirmed = session->preview_confirmation_current &&
-        session->preview_confirmation_generation == session->monitor.generation;
+    /* A historical ACK is diagnostic only once this attempt is stopped,
+     * expired, replaced or handed off. Do not turn JPEG readiness into ACK
+     * readiness: the runtime consumes this separately for ordinary unlock. */
+    status->has_confirmed = status->active &&
+        session->preview_confirmation_current && session->pending_release == 0 &&
+        session->preview_confirmation_generation == session->monitor.generation &&
+        session->monitor.generation == session->media_generation &&
+        !session->monitor.retry_after_stop && !session->monitor.retry_ready &&
+        !session->monitor.retry_waiting && !session->monitor.status_retry_pending &&
+        !session->monitor.peer_stop_seen &&
+        (session->monitor.state == DF_GVS_MONITOR_AWAITING_VIDEO ||
+         session->monitor.state == DF_GVS_MONITOR_PUBLISHING ||
+         session->monitor.state == DF_GVS_MONITOR_VIEWING) &&
+        (session->monitor.state != DF_GVS_MONITOR_AWAITING_VIDEO ||
+         (session->monitor.first_frame_deadline_ms != 0 &&
+          session->monitor.last_now_ms < session->monitor.first_frame_deadline_ms));
     status->busy = session->monitor.status_retry_pending;
     status->cooldown = session->monitor.retry_waiting ||
         session->monitor.cooldown_until_ms > session->monitor.last_now_ms;
