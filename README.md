@@ -276,7 +276,9 @@ CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端
 | `POST /api/v1/monitor/viewer` | 报告观看者进入或离开 |
 | `GET /api/v1/monitor/status` | 获取媒体状态 |
 
-PCM 为 little-endian signed 16-bit、单声道、8 kHz；每帧 160 样本/320 字节。session 打开后返回 `audio_session`，后续请求通过 `X-Doorfast-Audio-Session` 传递。lease 为 2 秒，每次成功提交会续期；序号必须连续，部分批次成功会返回已接受前缀和下一序号，调用方应从该位置恢复。
+PCM 为 little-endian signed 16-bit、单声道、8 kHz；每帧 160 样本/320 字节。session 打开后返回 `audio_session`，提交和关闭请求通过 `Authorization: DoorfastAudio <audio_session>` 传递。仍兼容旧的 `X-Doorfast-Audio-Session`；两种音频凭据同时提供时必须一致，否则返回 `400 invalid_request`，不会发送 PCM 或关闭 session。uhttpd 的 CGI 请求头白名单不转发自定义音频头，因此 HA 后端会同时发送两种头；升级时先更新 Doorfast，再更新 HA 集成。凭据不得放入 URL 或日志。lease 为 2 秒，每次成功提交会续期；序号必须连续，部分批次成功会返回已接受前缀和下一序号，调用方应从该位置恢复。
+
+HA 网桥 URL 中已有 HTTP Basic 凭据时，会保留旧音频头并将 `Authorization` 留给 HTTP 认证，以兼容原本转发自定义头的服务器；受 Basic 保护的 uhttpd 无法同时承载这两种凭据，本补丁不解决该部署方式的音频上行。
 
 HTTP producer 同一时间只允许一个请求在途。请求超时或失败后必须丢弃该旧请求的完整 body，既不重放已确认的前缀，也不重放未确认的后缀；先按服务返回的 `next_sequence` 对齐，再从新采集的音频继续。`runtime_id` 或 generation 改变时必须立即结束采集并清空本地缓冲。
 
