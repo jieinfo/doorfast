@@ -134,6 +134,7 @@ int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *monitor,
     uint64_t first_frame_timeout_ms;
     uint64_t cooldown_until_ms;
     bool persistent;
+    bool startup_busy_grace;
 
     if (monitor == NULL || !df_gvs_monitor_nonzero(local) ||
         df_gvs_station_validate(station) != DF_OK || station_ipv4 == 0U ||
@@ -149,9 +150,11 @@ int df_gvs_monitor_start_with_generation(struct df_gvs_monitor *monitor,
         monitor->first_frame_timeout_ms;
     cooldown_until_ms = monitor->cooldown_until_ms;
     persistent = monitor->persistent;
+    startup_busy_grace = monitor->startup_busy_grace;
     memset(monitor, 0, sizeof(*monitor));
     monitor->first_frame_timeout_ms = first_frame_timeout_ms;
     monitor->persistent = persistent;
+    monitor->startup_busy_grace = startup_busy_grace;
     monitor->state = DF_GVS_MONITOR_REQUESTING;
     memcpy(monitor->local, local, sizeof(monitor->local));
     memcpy(monitor->station, station, sizeof(monitor->station));
@@ -237,6 +240,8 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
         if (now_ms < monitor->next_action_ms) {
             return DF_OK;
         }
+        if (monitor->startup_busy_grace && !monitor->media_established &&
+            now_ms < monitor->request_not_before_ms) return DF_OK;
         if (!monitor->persistent &&
             monitor->request_attempts >= DF_GVS_MONITOR_MAX_REQUESTS) {
             df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_TIMEOUT);
@@ -252,6 +257,8 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
         memcpy(action->payload, df_gvs_monitor_request,
                sizeof(df_gvs_monitor_request));
         action->generation = monitor->generation;
+        if (monitor->request_attempts == 0U)
+            monitor->attempt_first_request_ms = now_ms;
         if (monitor->request_attempts != UINT_MAX)
             monitor->request_attempts++;
         monitor->retry_waiting = false;
@@ -259,6 +266,7 @@ int df_gvs_monitor_step(struct df_gvs_monitor *monitor, uint64_t now_ms,
             df_gvs_monitor_fail(monitor, DF_GVS_MONITOR_TIMEOUT);
         } else {
             monitor->next_action_ms = now_ms + DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
+            monitor->request_not_before_ms = monitor->next_action_ms;
             monitor->confirmation_deadline_ms = monitor->next_action_ms;
         }
         return DF_OK;
@@ -399,16 +407,23 @@ int df_gvs_monitor_receive(struct df_gvs_monitor *monitor,
     if (monitor->state == DF_GVS_MONITOR_REQUESTING &&
         !monitor->retry_waiting && frame->opcode == 0x50U) {
         if (frame->payload_length != 0U) return DF_ERR_INVALID;
+        if (monitor->startup_busy_grace && !monitor->media_established &&
+            monitor->request_attempts == 0U) return DF_ERR_INVALID;
         monitor->last_now_ms = now_ms;
         monitor->confirmation_deadline_ms = 0U;
         if (monitor->persistent && monitor->busy_rejections < UINT_MAX)
             monitor->busy_rejections++;
-        if (monitor->persistent &&
+        bool startup_grace = monitor->startup_busy_grace &&
+            !monitor->media_established;
+        if (monitor->persistent && (startup_grace ?
+            now_ms - monitor->attempt_first_request_ms >=
+                DF_GVS_MONITOR_STARTUP_BUSY_WINDOW_MS :
             monitor->busy_rejections >= (monitor->media_established ?
                 DF_GVS_MONITOR_RECOVERY_BUSY_RETRY_LIMIT :
-                DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT)) {
-            /* A busy response is not a successful retry.  Tear down the
-             * rejected attempt before asking the station again. */
+                DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT))) {
+            /* Before the first JPEG, avoid repeatedly rebuilding an attempt
+             * during a transient busy period. Recovery and unlock retain the
+             * existing count-based stop policy. */
             monitor->state = DF_GVS_MONITOR_STOPPING;
             monitor->next_action_ms = now_ms;
             monitor->first_frame_deadline_ms = 0U;

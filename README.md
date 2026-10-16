@@ -454,7 +454,9 @@ Doorfast 需要访问 Home Assistant/go2rtc 的 `8554/TCP` 来发布 RTSP；HA W
 - `media_preview_timeout`：单次预览达到总时限后进入停止状态并发送协议停止请求。
 - `media_first_frame_timeout`：门口机确认预览后等待首个 JPEG 帧的超时。
 
-`media_max_encoders` 控制同时运行的来源编码器上限，`media_incoming_call_policy` 可选择在容量已满时抢占最早的主动预览或保留现有预览并返回 `capacity_busy`。FFmpeg 子进程异常退出只会使对应会话失败并回收其资源。请求间隔 1000 ms、最多 3 次请求和停止确认超时 1000 ms 仍为固定协议常量。
+`media_max_encoders` 控制同时运行的来源编码器上限，`media_incoming_call_policy` 可选择在容量已满时抢占最早的主动预览或保留现有预览并返回 `capacity_busy`。FFmpeg 子进程异常退出只会使对应会话失败并回收其资源。请求间隔和停止确认超时均为固定的 1000 ms。
+
+普通持续预览尚未收到首个真实 JPEG 时，每次尝试从首个成功发送的 `03/04` 起容忍 12 秒忙回复；窗口届满后仍收到 `03/50` 才停止握手并重新尝试。重复忙报文不缩短窗口，快速停止确认也不压缩下一次预览请求的 1 秒间隔。这不是整个预览的 12 秒总时限。已有真实媒体后的恢复和轻量手动开锁准备仍保留原来的 6 次忙回复重建策略；用户停止后的 4 秒冷却、来电优先级不变。
 
 仓库的软件验收先通过 SSH 检查 VM 中 Doorfast 与媒体模块可用，再在 host 上编译与 `doorfast-media` APK 相同的 ABI v3 源码集合。host harness 只通过导出的 `df_media_module_api_v3` 执行 `start/tick/receive_control/push_jpeg/command`：它核对每条 preview 发出的 `03/04`，注入测试用匹配 `03/84`，启动两个独立编码器，并确认 stop 与 preview 抢占均发出 `03/02`。RTSP sink 验证 `doorfast_gate_main` 与 `doorfast_gate_side` 的并发 producer 峰值精确为 2；fake ffmpeg 只记录每个 encoder pipe 的字节数和 SHA-256，用不同 JPEG 标记验证数据没有串流，不保存原始 JPEG：
 

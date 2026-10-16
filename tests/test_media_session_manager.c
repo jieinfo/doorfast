@@ -1338,7 +1338,7 @@ void test_media_session_manager_replies_to_preview_keepalive(void) {
     df_media_session_manager_destroy(&manager);
 }
 
-void test_media_session_manager_cleans_busy_preview_after_three_rejections(void) {
+static void manager_bounds_startup_busy_by_elapsed_time(bool stop_ack) {
     static const struct df_media_station_config_v3 stations[] = {
         {.id = "gate_main", .stream_name = "doorfast_gate_main",
          .enabled = true, .logical_address = {0x32U, 2U, 1U, 0U, 2U, 0U},
@@ -1371,14 +1371,16 @@ void test_media_session_manager_cleans_busy_preview_after_three_rejections(void)
     frame.opcode = 0x50U;
     frame.payload = NULL;
     frame.payload_length = 0U;
-    for (attempt = 0U; attempt < DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT;
-         attempt++) {
+    /* Requests at 0..11 seconds must survive busy, including rejection six. */
+    for (attempt = 0U; attempt < 12U; attempt++) {
         TEST_ASSERT_INT_EQ(DF_OK,
             df_media_session_manager_tick(&manager, now_ms));
         TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
         TEST_ASSERT_INT_EQ(DF_OK,
             df_media_session_manager_receive_control(&manager, &frame,
                 stations[0].ipv4, now_ms + 1U));
+        TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+            manager.sessions[0].monitor.state);
         {
             struct df_media_session_status_v3 entry;
             struct df_media_module_status_v3 status = {
@@ -1394,6 +1396,18 @@ void test_media_session_manager_cleans_busy_preview_after_three_rejections(void)
         now_ms += DF_GVS_MONITOR_REQUEST_INTERVAL_MS;
     }
 
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            stations[0].ipv4, 12099U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+        manager.sessions[0].monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_tick(&manager, 12100U));
+    TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            stations[0].ipv4, 12100U));
+
     session = df_media_session_manager_find(&manager, "gate_main");
     TEST_ASSERT_INT_EQ(1, session != NULL);
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_STOPPING,
@@ -1406,19 +1420,129 @@ void test_media_session_manager_cleans_busy_preview_after_three_rejections(void)
     manager_assert_current_diagnostic(&manager, now_ms + 100U,
         DF_MEDIA_FAILURE_CAPACITY_BUSY, DF_MEDIA_TIMER_RECONNECT, 900U);
 
-    frame.opcode = 0x82U;
-    TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_receive_control(&manager, &frame,
-            stations[0].ipv4, now_ms + 1U));
+    if (stop_ack) {
+        frame.opcode = 0x82U;
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_receive_control(&manager, &frame,
+                stations[0].ipv4, now_ms + 1U));
+    } else {
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_tick(&manager, now_ms + 1000U));
+    }
     session = df_media_session_manager_find(&manager, "gate_main");
     TEST_ASSERT_INT_EQ(DF_MEDIA_SESSION_REQUESTING,
         session == NULL ? -1 : (int)session->state);
     TEST_ASSERT_INT_EQ(1, session != NULL &&
         session->media_generation != generation);
+    if (stop_ack) {
+        unsigned sent = trace.control_count;
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_tick(&manager, now_ms + 1U));
+        TEST_ASSERT_INT_EQ((int)sent, (int)trace.control_count);
+    }
+    /* Fast stop ACK must not accelerate the next preview request. */
     TEST_ASSERT_INT_EQ(DF_OK,
-        df_media_session_manager_tick(&manager, now_ms + 1U));
+        df_media_session_manager_tick(&manager, now_ms + 1000U));
     TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
+    /* A replacement gets a fresh 12-second window, not the original age. */
+    frame.opcode = 0x50U;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            stations[0].ipv4, now_ms + 1001U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+        manager.sessions[0].monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            stations[0].ipv4, now_ms + 12999U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+        manager.sessions[0].monitor.state);
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_media_session_manager_receive_control(&manager, &frame,
+            stations[0].ipv4, now_ms + 13000U));
+    TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING,
+        manager.sessions[0].monitor.state);
     df_media_session_manager_destroy(&manager);
+}
+
+void test_media_session_manager_bounds_startup_busy_by_elapsed_time(void) {
+    manager_bounds_startup_busy_by_elapsed_time(true);
+    manager_bounds_startup_busy_by_elapsed_time(false);
+}
+
+void test_media_session_manager_startup_busy_begins_at_sent_request(void) {
+    for (unsigned scenario = 0U; scenario < 4U; scenario++) {
+        const struct df_media_station_config_v3 station = {
+            .id = "gate_main", .stream_name = "doorfast_gate_main",
+            .enabled = true, .logical_address = {0x32,2,1,0,2,0},
+            .ipv4 = 0x01020304U,
+        };
+        struct df_media_module_config_v3 config;
+        struct df_media_module_callbacks_v3 callbacks;
+        struct manager_trace trace = {.available_kib = 4096U};
+        struct df_media_session_manager manager = {0};
+        struct df_gvs_frame busy = {.family=3, .opcode=0x50};
+        uint64_t generation;
+        uint64_t first_send = scenario == 1U || scenario == 2U ? 20000U : 0U;
+        unsigned sent;
+        manager_fixture(&config, &callbacks, &trace);
+        config.stations = &station;
+        config.station_count = config.max_encoders = 1U;
+        memcpy(config.local, (const uint8_t[]){0x61,2,1,1,1,1}, 6);
+        memcpy(busy.source, station.logical_address, 6);
+        memcpy(busy.destination, config.local, 6);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_init(&manager, &config, &callbacks));
+        if (scenario == 1U) manager.station_cooldown_until_ms[0] = first_send;
+        if (scenario == 3U) {
+            /* Keep the in-flight attempt when full preview adopts preparation,
+             * but switch its subsequent busy policy to the preview window. */
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_module_unlock_prepare_api_v1.start(
+                &manager, "gate_main", 0U, &generation));
+            TEST_ASSERT_INT_EQ(DF_OK,
+                df_media_session_manager_tick(&manager, 0U));
+        }
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_start(&manager,
+            "gate_main", DF_MEDIA_SESSION_PREVIEW, 0U, &generation));
+        if (scenario == 2U) {
+            trace.fail_control = true;
+            TEST_ASSERT_INT_EQ(DF_ERR_IO,
+                df_media_session_manager_tick(&manager, 0U));
+            trace.fail_control = false;
+        }
+        if (first_send != 0U) {
+            TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+                df_media_session_manager_receive_control(&manager, &busy,
+                    station.ipv4, first_send - 1U));
+            TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+                manager.sessions[0].monitor.state);
+        }
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_tick(&manager, first_send));
+        TEST_ASSERT_INT_EQ(0x04, trace.last_control_opcode);
+        sent = trace.control_count;
+        /* Repeated busy datagrams are not six seconds of elapsed time. */
+        for (unsigned duplicate = 0U; duplicate < 6U; duplicate++) {
+            TEST_ASSERT_INT_EQ(DF_OK,
+                df_media_session_manager_receive_control(&manager, &busy,
+                    station.ipv4, first_send + 1U));
+        }
+        TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+            manager.sessions[0].monitor.state);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_tick(&manager, first_send + 999U));
+        TEST_ASSERT_INT_EQ((int)sent, (int)trace.control_count);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_receive_control(&manager, &busy,
+                station.ipv4, first_send + 11999U));
+        TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING,
+            manager.sessions[0].monitor.state);
+        TEST_ASSERT_INT_EQ(DF_OK,
+            df_media_session_manager_receive_control(&manager, &busy,
+                station.ipv4, first_send + 12000U));
+        TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING,
+            manager.sessions[0].monitor.state);
+        df_media_session_manager_destroy(&manager);
+    }
 }
 
 void test_media_session_manager_acknowledges_short_preview_and_retries(void) {
