@@ -13,6 +13,7 @@
 #define DF_GVS_MONITOR_KEEPALIVE_INTERVAL_MS 2000U
 #define DF_GVS_MONITOR_BUSY_RETRY_LIMIT 3U
 #define DF_GVS_MONITOR_STARTUP_BUSY_RETRY_LIMIT 6U
+#define DF_GVS_MONITOR_STARTUP_BUSY_WINDOW_MS 12000U
 #define DF_GVS_MONITOR_RECOVERY_BUSY_RETRY_LIMIT 6U
 #define DF_GVS_MONITOR_MAX_REQUESTS 20U
 #define DF_GVS_MONITOR_FIRST_FRAME_TIMEOUT_MS 8000U
@@ -80,6 +81,8 @@ struct df_gvs_monitor {
     uint64_t generation;
     uint64_t last_now_ms;
     uint64_t next_action_ms;
+    uint64_t attempt_first_request_ms;
+    uint64_t request_not_before_ms;
     /* Keep the current request's confirmation window across JPEG admission. */
     uint64_t confirmation_deadline_ms;
     uint64_t cooldown_until_ms;
@@ -93,6 +96,8 @@ struct df_gvs_monitor {
     bool media_ready;
     bool media_established;
     bool persistent;
+    /* Full previews opt in; lightweight unlock preparation keeps its policy. */
+    bool startup_busy_grace;
     bool status_retry_pending;
     bool retry_after_stop;
     bool retry_ready;

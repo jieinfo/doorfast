@@ -216,6 +216,7 @@ void test_gvs_monitor_recovery_busy_uses_startup_limit(void) {
     unsigned attempt;
 
     df_gvs_monitor_init(&monitor);
+    monitor.startup_busy_grace = true;
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_set_persistent(&monitor, true));
     TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(
         &monitor, local, station, 0x01020304U, 100U));
@@ -248,6 +249,41 @@ void test_gvs_monitor_recovery_busy_uses_startup_limit(void) {
             0x50U, NULL, 0U, 0x01020304U, now_ms + 1U, &result));
     }
     TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_STOPPING, monitor.state);
+}
+
+void test_gvs_monitor_startup_busy_accepts_late_confirmation(void) {
+    const uint8_t local[6] = {0x61,2,1,1,1,1};
+    const uint8_t station[6] = {0x32,2,1,0,2,0};
+    const uint8_t ack[] = {0x1e,0,1};
+    const uint64_t origins[] = {0U, UINT64_MAX - 17000U};
+    for (size_t origin = 0U; origin < 2U; origin++) {
+        struct df_gvs_monitor monitor;
+        struct df_gvs_monitor_action action;
+        struct df_gvs_monitor_result result;
+        uint64_t now_ms = origins[origin];
+        df_gvs_monitor_init(&monitor);
+        monitor.startup_busy_grace = true;
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_set_persistent(&monitor, true));
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_start(
+            &monitor, local, station, 0x01020304U, now_ms));
+        for (unsigned attempt = 0U; attempt < 8U; attempt++) {
+            TEST_ASSERT_INT_EQ(DF_OK,
+                df_gvs_monitor_step(&monitor, now_ms, &action));
+            TEST_ASSERT_INT_EQ(0x04, action.opcode);
+            TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local,
+                0x50, NULL, 0U, 0x01020304U, now_ms + 1U, &result));
+            TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_REQUESTING, monitor.state);
+            now_ms += 1000U;
+        }
+        TEST_ASSERT_INT_EQ(DF_OK, df_gvs_monitor_step(&monitor, now_ms, &action));
+        TEST_ASSERT_INT_EQ(0x04, action.opcode);
+        TEST_ASSERT_INT_EQ(DF_OK, monitor_receive(&monitor, station, local,
+            0x84, ack, sizeof(ack), 0x01020304U, now_ms + 1U, &result));
+        TEST_ASSERT_INT_EQ(1, result.confirmed);
+        TEST_ASSERT_INT_EQ(1, monitor.generation);
+        TEST_ASSERT_INT_EQ(DF_GVS_MONITOR_AWAITING_VIDEO, monitor.state);
+        TEST_ASSERT_INT_EQ(0, monitor.media_ready);
+    }
 }
 
 void test_gvs_monitor_persistent_preview_retries_after_first_frame_timeout(void) {

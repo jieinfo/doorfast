@@ -423,6 +423,8 @@ static int df_media_session_manager_start_monitor(
     if (df_gvs_monitor_set_persistent(&session->monitor,
             session->purpose == DF_MEDIA_SESSION_PREVIEW) != DF_OK)
         return DF_ERR_INVALID;
+    session->monitor.startup_busy_grace =
+        session->purpose == DF_MEDIA_SESSION_PREVIEW && !session->preparation_only;
     return df_gvs_monitor_start_with_generation(&session->monitor,
         manager->config.local, session->station, session->station_ipv4,
         session->media_generation, now_ms);
@@ -837,8 +839,10 @@ static int df_media_session_manager_start_internal(
     if (session != NULL) {
         if (preparation_only && !session->preparation_only)
             return DF_MEDIA_ERROR_CAPACITY_BUSY;
-        if (!preparation_only && session->preparation_only)
+        if (!preparation_only && session->preparation_only) {
             session->preparation_only = false;
+            session->monitor.startup_busy_grace = true;
+        }
         *generation = session->generation;
         return DF_OK;
     }
