@@ -1,5 +1,6 @@
 #include "runtime_ubus.h"
 #include "runtime_config.h"
+#include "media_session_manager.h"
 #include "test.h"
 #include <stdio.h>
 #include <string.h>
@@ -412,6 +413,168 @@ void test_runtime_unlock_failures(void) {
     TEST_ASSERT_INT_EQ(DF_RUNTIME_UNLOCK_CANCELLED, f.u.unlock.stage);
     TEST_ASSERT_INT_EQ(0, f.full_starts);
     df_runtime_ubus_stop(&f.u);
+}
+
+/* Catches waiting for JPEG after a current confirmation, sending a second
+ * command after an uncertain result, and admitting stale module metadata. */
+void test_runtime_unlock_confirmation_fast_path(void) {
+    for (unsigned outcome = 0; outcome < 4; ++outcome) {
+        struct unlock_fixture f;
+        init(&f);
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_unlock_station(&f.u, "gate_main", 100));
+        f.preparation.has_first_request = true;
+        f.preparation.first_request_ms = 101;
+        f.preparation.has_confirmed = true;
+        f.preparation.confirmed_ms = 102;
+        f.preparation.attempts = 1;
+        f.session.state = DF_MEDIA_SESSION_AWAITING_VIDEO;
+        if (outcome == 3) f.send_result = DF_ERR_IO;
+        TEST_ASSERT_INT_EQ(outcome == 3 ? DF_ERR_IO : DF_OK,
+            df_runtime_ubus_tick_manual_unlock(&f.u, 102));
+        TEST_ASSERT_INT_EQ(1, f.sends);
+        TEST_ASSERT_INT_EQ(0, f.u.unlock.has_first_media);
+        TEST_ASSERT_INT_EQ(0, f.preparation.ready);
+        TEST_ASSERT_INT_EQ(0, f.preparation.current_attempt);
+        TEST_ASSERT_INT_EQ(0, f.full_starts);
+        if (outcome < 2) reply(&f, 132, outcome == 0 ? 1 : 0);
+        uint64_t now = outcome < 2 ? 133 : 1102;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&f.u, now));
+        TEST_ASSERT_INT_EQ(outcome == 0 ? DF_RUNTIME_UNLOCK_COMPLETED :
+            outcome == 1 ? DF_RUNTIME_UNLOCK_REJECTED :
+            outcome == 2 ? DF_RUNTIME_UNLOCK_REPLY_TIMEOUT : DF_RUNTIME_UNLOCK_SEND_FAILED,
+            f.u.unlock.stage);
+        ready(&f);
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&f.u, now + 1));
+        TEST_ASSERT_INT_EQ(1, f.sends); /* No JPEG-triggered fallback after send. */
+        df_runtime_ubus_stop(&f.u);
+    }
+    for (unsigned invalid = 0; invalid < 16; ++invalid) {
+        struct unlock_fixture f;
+        init(&f);
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_unlock_station(&f.u, "gate_main", 100));
+        f.preparation.has_first_request = f.preparation.has_confirmed = true;
+        f.preparation.first_request_ms = 101;
+        f.preparation.confirmed_ms = 102;
+        f.session.state = DF_MEDIA_SESSION_AWAITING_VIDEO;
+        switch (invalid) {
+        case 0: f.preparation.has_confirmed = false; break;
+        case 1: f.preparation.confirmed_ms = 99; break;
+        case 2: f.preparation.confirmed_ms = 104; break;
+        case 3: f.preparation.has_first_request = false; break;
+        case 4: f.preparation.first_request_ms = 99; break;
+        case 5: f.preparation.first_request_ms = 103; break;
+        case 6: f.preparation.attempt_generation = 0; break;
+        case 7: f.preparation.busy = true; break;
+        case 8: f.preparation.cooldown = true; break;
+        case 9: f.preparation.active = false; break;
+        case 10: f.session.state = DF_MEDIA_SESSION_STOPPING; break;
+        case 11: f.session.generation++; break;
+        case 12: f.u.auto_unlock_pending = true; break;
+        case 13: strcpy(f.u.runtime_id, "0123456789abcdef"); break;
+        case 14: f.session.viewer_active = true; break;
+        case 15: f.session.purpose = DF_MEDIA_SESSION_CALL; break;
+        }
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&f.u, 103));
+        TEST_ASSERT_INT_EQ(0, f.sends);
+        df_runtime_ubus_stop(&f.u);
+    }
+}
+
+static int monitor_emit(const uint8_t destination[6], uint32_t ipv4,
+    const uint8_t source[6], uint8_t family, uint8_t opcode,
+    const uint8_t *payload, size_t length, void *context) {
+    (void)destination; (void)ipv4; (void)source; (void)family; (void)opcode;
+    (void)payload; (void)length; (void)context;
+    return DF_OK; /* Only the external network transport is replaced. */
+}
+static int monitor_route(const uint8_t peer[6], uint64_t now, uint32_t *ipv4, void *c) {
+    (void)peer; (void)now; (void)c; *ipv4 = 0x01020304U; return DF_OK;
+}
+static int monitor_memory(uint64_t *kib, void *c) {
+    (void)c; *kib = 4096; return DF_OK;
+}
+
+/* Exercises the actual monitor -> optional capability -> runtime send chain.
+ * Removing source/request/expiry/generation/release checks must admit one of
+ * these invalid confirmations, not merely change an internal flag. */
+void test_runtime_unlock_confirmation_protocol_guards(void) {
+    for (unsigned scenario = 0; scenario < 13; ++scenario) {
+        struct unlock_fixture f;
+        struct df_media_session_manager manager = {0};
+        struct df_media_station_config_v3 station = {.id = "gate_main",
+            .stream_name = "doorfast_gate_main", .enabled = true, .ipv4 = 0x01020304U,
+            .logical_address = {0x32, 2, 1, 0, 1, 0}};
+        struct df_media_module_config_v3 config = {.enabled = true,
+            .stations = &station, .station_count = 1, .max_encoders = 1,
+            .first_frame_timeout_s = 8, .fps = 10,
+            .incoming_call_policy = DF_MEDIA_CALL_PREEMPT_OLDEST_PREVIEW};
+        struct df_media_module_callbacks_v3 callbacks = {.emit_control = monitor_emit,
+            .resolve_route = monitor_route, .available_memory = monitor_memory};
+        const uint8_t body[] = {0x1e, 0, 1};
+        struct df_gvs_frame ack = {.family = 3, .opcode = 0x84,
+            .payload = body, .payload_length = sizeof(body)};
+        uint64_t now = 102;
+        init(&f);
+        memcpy(config.local, f.u.access_identity, 6);
+        memcpy(ack.source, station.logical_address, 6);
+        memcpy(ack.destination, config.local, 6);
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_init(&manager, &config, &callbacks));
+        f.module.api = &df_media_module_api_v3;
+        f.module.instance = &manager;
+        f.module.unlock_prepare_api = &df_media_module_unlock_prepare_api_v1;
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_unlock_station(&f.u, "gate_main", 100));
+        if (scenario != 1)
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, 101));
+        uint32_t ipv4 = station.ipv4;
+        if (scenario == 2) ack.source[5]++;
+        if (scenario == 3) ack.destination[5]++;
+        if (scenario == 4) ipv4++;
+        if (scenario == 5) ack.payload_length--;
+        if (scenario == 6) now = 1101; /* Exact request-window expiry. */
+        if (scenario == 7) {
+            struct df_gvs_frame busy = ack;
+            busy.opcode = 0x50; busy.payload = NULL; busy.payload_length = 0;
+            TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(
+                &manager, &busy, station.ipv4, 102));
+            now = 103;
+        }
+        int received = df_media_session_manager_receive_control(&manager, &ack, ipv4, now);
+        TEST_ASSERT_INT_EQ(scenario >= 2 && scenario <= 5 ? DF_ERR_INVALID : DF_OK, received);
+        if (scenario >= 8) {
+            now = 103;
+            if (scenario == 8) {
+                struct df_media_session_key key = {"gate_main", f.u.unlock.media_generation};
+                TEST_ASSERT_INT_EQ(DF_OK, df_media_module_unlock_prepare_api_v1.stop(
+                    &manager, &key, now));
+            } else if (scenario == 9) {
+                now = 8102;
+                TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_tick(&manager, now));
+            } else if (scenario == 10) {
+                const uint8_t stopped = 1;
+                ack.opcode = 0x02; ack.payload = &stopped; ack.payload_length = 1;
+                TEST_ASSERT_INT_EQ(DF_OK, df_media_session_manager_receive_control(
+                    &manager, &ack, station.ipv4, now));
+            } else if (scenario == 11) {
+                /* A retained confirmation from another native attempt. */
+                manager.sessions[0].preview_confirmation_generation++;
+            } else {
+                /* A monitor replacement not yet bound to the media attempt. */
+                manager.sessions[0].monitor.generation++;
+                manager.sessions[0].preview_confirmation_generation++;
+            }
+        }
+        struct df_media_unlock_prepare_status_v1 status;
+        TEST_ASSERT_INT_EQ(DF_OK, df_media_module_unlock_prepare_api_v1.status(
+            &manager, "gate_main", f.u.unlock.media_generation, &status));
+        TEST_ASSERT_INT_EQ(scenario == 0, status.has_confirmed);
+        TEST_ASSERT_INT_EQ(0, status.ready);
+        TEST_ASSERT_INT_EQ(0, status.current_attempt);
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&f.u, now));
+        TEST_ASSERT_INT_EQ(scenario == 0, f.sends);
+        TEST_ASSERT_INT_EQ(0, manager.sessions[0].encoder.running);
+        df_runtime_ubus_stop(&f.u);
+        df_media_session_manager_destroy(&manager);
+    }
 }
 
 struct emitted { char text[4096]; size_t n; };

@@ -442,6 +442,16 @@ int df_runtime_ubus_tick_manual_unlock(struct df_runtime_ubus *u, uint64_t now) 
             status.ready && status.source_live;
         op->first_media_ms = status.first_frame_ms;
         ready = status.active && status.ready && status.source_live && status.current_attempt;
+        /* Only our temporary preparation can use the current monitor ACK.
+         * ready/current_attempt still mean validated JPEG, not control success.
+         * Reused/adopted sessions retain their existing real-media gate. */
+        if (u->manual_unlock_owns_preview && status.active &&
+            entry->purpose == DF_MEDIA_SESSION_PREVIEW &&
+            entry->state == DF_MEDIA_SESSION_AWAITING_VIDEO &&
+            status.attempt_generation != 0 && !status.busy && !status.cooldown &&
+            op->has_first_request && op->has_confirmed &&
+            status.confirmed_ms >= status.first_request_ms && status.confirmed_ms <= now)
+            ready = true;
         /* A viewer/call can adopt the same preparation generation. */
         if (!status.active && !u->manual_unlock_owns_preview) full_media = true;
     }

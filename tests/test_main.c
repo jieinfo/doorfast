@@ -477,6 +477,8 @@ int main(int argc, char **argv) {
     if (argc == 1) test_runtime_unlock_credential_mutation_isolation();
     extern void test_runtime_unlock_lifecycle(void);
     extern void test_runtime_unlock_failures(void);
+    extern void test_runtime_unlock_confirmation_fast_path(void);
+    extern void test_runtime_unlock_confirmation_protocol_guards(void);
     extern void test_runtime_unlock_projection_and_credentials(void);
     extern void test_media_session_manager_unlock_adoption(void);
     extern void test_media_session_manager_unlock_adoption_publishes(void);
@@ -485,6 +487,8 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "--station-unlock") == 0) {
         test_runtime_unlock_lifecycle();
         test_runtime_unlock_failures();
+        test_runtime_unlock_confirmation_fast_path();
+        test_runtime_unlock_confirmation_protocol_guards();
         test_runtime_unlock_projection_and_credentials();
         test_media_session_manager_unlock_adoption();
         test_media_session_manager_unlock_adoption_publishes();
@@ -785,6 +789,8 @@ int main(int argc, char **argv) {
     test_runtime_ubus_manual_unlock_cleanup_and_adoption();
     test_runtime_unlock_lifecycle();
     test_runtime_unlock_failures();
+    test_runtime_unlock_confirmation_fast_path();
+    test_runtime_unlock_confirmation_protocol_guards();
     test_runtime_unlock_projection_and_credentials();
     test_media_session_manager_unlock_adoption();
     test_runtime_unlock_auto_and_reset();

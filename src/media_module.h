@@ -325,9 +325,10 @@ struct df_media_module_lifecycle_api_v2 {
 };
 extern const struct df_media_module_lifecycle_api_v2 df_media_module_lifecycle_api_v2;
 
-/* Optional encoder-free station unlock preparation. This extension is
- * intentionally separate from the fixed v3 API: it only admits monitor and
- * receive/reassembly state until a validated JPEG arrives. */
+/* Optional encoder-free station unlock preparation, separate from fixed v3.
+ * ready/current_attempt describe validated JPEG, never just a control ACK.
+ * has_confirmed is current only while this owned monitor attempt remains
+ * confirmed and usable (not stopped, expired, retrying or adopted). */
 #define DF_MEDIA_MODULE_UNLOCK_PREPARE_ABI_VERSION 1U
 struct df_media_unlock_prepare_status_v1 {
     bool active;
