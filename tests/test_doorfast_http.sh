@@ -47,6 +47,8 @@ elif [ "$*" = 'call doorfast stations' ]; then
   printf '%s\n' '{"runtime_id":"0123456789abcdef","revision":1,"stations":[{"id":"gate_main","name":"Main Gate","logical_address":"32:02:01:00:02:00","enabled":true,"stream_name":"doorfast_gate_main","route_source":"none","route_fresh":false,"monitorable":false,"last_seen_ms":null}]}'
 else
   case "$method" in
+    unlock)
+      printf '%s\n' '{"submitted":true,"station_id":"gate_main","runtime_id":"0123456789abcdef","request_id":"0000000000000001","phase":"waiting_media"}' ;;
     monitor_start)
       printf '{"state":"queued","runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}\n' ;;
     monitor_stop)
@@ -210,7 +212,8 @@ printf '%s\n' 'PASS: station call identity validation and operation forwarding'
 for status_fixture in \
   '{"running":true,"call":{"session":"talking","generation":9,"timer":"confirmation","remaining_ms":500,"end_reason":"none","fault":"confirmation_timeout","last_station_id":"gate_side","last_generation":8},"media":{"sessions":[{"station_id":"gate_main","generation":9,"timer":"first_frame","remaining_ms":900,"end_reason":"none","failure_reason":"none"}],"last_results":[{"station_id":"gate_main","generation":8,"timer":"none","remaining_ms":0,"end_reason":"local_hangup","failure_reason":"cancelled"}]}}' \
   '{"running":true,"call":{"session":"talking","generation":9},"media":{"sessions":[{"station_id":"gate_main","generation":9,"control_requests":3}]}}' \
-  '{"running":true,"call":{"timer":"unknown","end_reason":"unknown","fault":"unknown"},"media":{"sessions":[{"station_id":"gate_main","generation":9,"timer":"unknown","end_reason":"unknown","failure_reason":"unknown"}],"last_results":[]}}'
+  '{"running":true,"call":{"timer":"unknown","end_reason":"unknown","fault":"unknown"},"media":{"sessions":[{"station_id":"gate_main","generation":9,"timer":"unknown","end_reason":"unknown","failure_reason":"unknown"}],"last_results":[]}}' \
+  '{"runtime_id":"0123456789abcdef","media":{},"access":{"version":1,"manual_state":"idle","stations":[{"station_id":"gate_main","mode":"inherit","configured":true,"credential_source":"global","reason":"none"}],"requests":[{"station_id":"gate_main","runtime_id":"0123456789abcdef","request_id":"0000000000000001","phase":"expired","wait_reason":"none","preparation_path":"lightweight","mode":"inherit","credential_source":"global","reused_session":false,"attempts":2,"busy_replies":1,"remaining_ms":0,"physical_result_confirmed":false,"elapsed_ms":1100,"sent_ms":100,"preparation_ms":100}],"request":{"station_id":"gate_main","runtime_id":"0123456789abcdef","request_id":"0000000000000001","phase":"expired","physical_result_confirmed":false}}}'
 do
   (TEST_STATUS_JSON="$status_fixture" run_method /api/v1/status '' GET) >"$workspace/status-fixture"
   TEST_STATUS_JSON="$status_fixture" python3 - "$workspace/status-fixture" <<'PY'
@@ -227,7 +230,15 @@ if 'last_results' in actual['media'] and actual['media']['last_results']:
     assert current['remaining_ms'] == 900 and last['remaining_ms'] == 0
 PY
 done
-run /api/v1/unlock '{"station_id":"gate_main"}'
+run_method /api/v1/unlock '{"station_id":"gate_main"}' POST >"$workspace/unlock"
+python3 - "$workspace/unlock" <<'PY'
+import json, sys
+response = open(sys.argv[1]).read()
+assert json.loads(response.split('\n\n', 1)[1]) == {
+    'submitted': True, 'station_id': 'gate_main',
+    'runtime_id': '0123456789abcdef', 'request_id': '0000000000000001',
+    'phase': 'waiting_media'}
+PY
 run /api/v1/answer '{"runtime_id":"0123456789abcdef","generation":7,"primary_media_port":8303}'
 run_method /api/v1/hangup \
   '{"runtime_id":"0123456789abcdef","generation":7,"reason":"ha"}' POST \
@@ -292,7 +303,7 @@ run_method /api/v1/monitor/viewer \
   '{"active":true,"generation":7,"station_id":"gate_main","runtime_id":"0123456789abcdef"}' POST \
   >"$workspace/monitor-viewer"
 run_method /api/v1/monitor/status '' GET >"$workspace/monitor-status"
-test "$(wc -l <"$trace" | tr -d ' ')" -eq 24
+test "$(wc -l <"$trace" | tr -d ' ')" -eq 25
 grep -Fxq 'call doorfast stations' "$trace"
 grep -Fxq 'call doorfast monitor_start {"runtime_id":"0123456789abcdef","station_id":"gate_main"}' "$trace"
 grep -Fxq 'call doorfast monitor_stop {"runtime_id":"0123456789abcdef","station_id":"gate_main","generation":7}' "$trace"

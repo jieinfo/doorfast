@@ -24,6 +24,7 @@ enum df_gvs_multicast_mode {
 struct df_runtime_config {
     struct df_config config;
     char access_material[17];
+    char access_credentials_path[DF_RUNTIME_PATH_MAX];
     char brand[DF_RUNTIME_BRAND_MAX];
     char gvs_interface[DF_RUNTIME_INTERFACE_MAX];
     char passive_interface[DF_RUNTIME_INTERFACE_MAX];

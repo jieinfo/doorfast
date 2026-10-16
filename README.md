@@ -254,6 +254,75 @@ ubus call doorfast hangup \
 
 `status.access.station_id` 是最近一次**协议解锁事务**的目标：通过事务保存的目的逻辑地址匹配当前启用站点，而非通过当前来电或当前预览推测。目标已移除、被禁用或匹配不唯一时省略该字段；会话结束后仍可保留最近回复的归属。`manual_state=waiting_media|waiting_reply` 和 `manual_station_id` 另行表示正在处理的手动解锁；等待媒体时，原 `access.state/generation/raw_status` 可能仍属于上次事务，不能当成本次结果。无活动会话的手动解锁最多等待真实源在线 30 秒，随后才发解锁报文；准备取消或超时且没有发送时，不产生新的协议回复。`protocol_completed` 只表示门口机协议确认，仍不证明门已经打开。
 
+## 按站点解锁与手动解锁准备（2026-10-16 本地实现）
+
+已实现按站点凭据、轻量准备、分段计时和 LuCI/HA 展示，并完成离线验证；尚未进行本轮目标 SDK 编译、路由器部署或实机延迟比较。现有现场已确认的来电自动解锁及匹配回复后挂断行为继续保留。不能据此声称已经缩短实机等待、物理门已打开或每次都能成功。
+
+### 手动请求与兼容路径
+
+请求仍只接受站点 ID：
+
+```json
+{"station_id":"gate_main"}
+```
+
+`POST /api/v1/unlock` 转发到 `ubus call doorfast unlock`。受理响应包含 `submitted:true`、`station_id`、`runtime_id`、16 位小写十六进制不透明字符串 `request_id` 和 `phase`。受理可能立即进入失败终态；`submitted` 不表示发包或协议成功。同站点待处理请求复用身份，不重复发包；不同站点不能抢占当前开锁事务。终态后下一次明确点击才创建新请求。
+
+| 媒体能力/当前会话 | 手动开锁准备条件 | `preparation_path` |
+| --- | --- | --- |
+| 可选 `df_media_module_unlock_prepare_api_v1` 可用，无可复用会话 | 目标当前成功发送的预览尝试内，有来源、目的、实际 IP 与完整 JPEG 校验的有效媒体；不要求编码器、RTSP 凭据或 ACK 先到 | `lightweight` |
+| 同站点已有有效媒体会话 | 复用当前有效真实媒体；不重建或接管其他站点 | `reused` |
+| 旧模块没有可选准备能力 | 保留完整媒体 `ready`、`source_live` 与 publishing/viewing 条件 | `full_media` |
+| 能力存在但 ABI 无效、启动/状态读取失败 | 明确失败；不绕过到兼容路径 | 不产生伪造就绪 |
+
+固定媒体 ABI v3 未变；新准备能力单独版本化。轻量准备沿用原预览信令调度、忙重试、来电优先和冷却。仅 ACK、历史首帧、冻结帧、编码器运行或旧尝试不能触发发送；不要求 JPEG 必须晚于 ACK。准备截止仍为 30 秒，就绪后在服务调度发送一次 `04/09`，发送后独立保留 1 秒回复窗口，没有固定睡眠、提频或自动重复开门。
+
+清理只针对本次拥有的站点和媒体 generation；失败保留有界 `cleanup_error` 并重试清理，阻止新事务替换。观看者或来电接管后，解锁清理不会停止新所有者；离线测试已验证接管后正常编码器管线收到媒体输入，不代表真实 RTSP 服务收到发布。来电自动解锁继续使用原 CALL-purpose、ready 和配置延迟条件（不新增手动路径的 source_live 条件），同一站点选材；匹配成功或拒绝回复后按原规则挂断对应来电。
+
+### LuCI：每台门口机的方式与材料
+
+| 站点 UCI `unlock_mode` | 材料来源 | 缺失/无效时 |
+| --- | --- | --- |
+| 未配置或 `inherit` | 现有全局 `access_material` | 不可解锁；不自动生成材料 |
+| `direct` | 本站点独立的 8 字节材料，输入为 16 个十六进制字符 | 不可解锁；不回退全局 |
+| `disabled` | 无 | 禁止本站点手动和自动解锁 |
+
+UCI 模式是唯一生效方式权威，旧私有记录不能覆盖 disabled/inherit。普通 `04/09 → 04/89` 帧、声明长度兼容和一次会话一次尝试规则不变；材料不是普通门禁 PIN，不猜密钥或挪用同步 Mini 密钥。随机挑战/加密分支仍只有静态材料，没有动态验收，未实现为可用方式；[厂商材料基线](docs/gvs-portable-package-baseline.md)的协议能力矩阵未因此改变。
+
+独立材料保存在 root 持有、0600 的 `/etc/doorfast/access-credentials`，受控路径、原子替换；不写普通站点 UCI、公开列表、状态、日志或 HA。现有全局材料不自动迁移或删除。损坏/不可读私有存储以 `store_unavailable` 报告不可用；daemon 源码不因该读取错误单独退出，实际 daemon 启动边界尚未在目标系统验证。
+
+LuCI 输入只写不读：留空保留，显式清除只删本站点记录，不改变 UCI 模式。管理身份认证与受限 ACL 允许 `access_credentials_status(station_id)`、`access_credentials_set(station_id, material, mode=direct)` 和 `access_credentials_clear(station_id)`；普通 HTTP CGI 不开放凭据管理。status 只返回有效方式、可用性、原因及 `material_configured` 布尔值，不返回保存材料。set 的 direct 描述待存私有记录，不能覆盖 live UCI 方式。
+
+新站点必须先保存并应用，再填写独立材料；未知新行带材料或清除操作会在任何写入前失败。批量保存先完整校验，再写私有记录和 UCI，等待原生 `uci-applied` 事件及运行态元数据确认；材料写失败、应用未确认或运行态未生效不会提示成功，也不自动第二次重启。写/清除前取消受影响的未发送准备；清理失败则文件字节不变，其他站点准备不受影响。已发送事务保留原归属。站点 ID 不应复用为另一门口机。
+
+### 状态、耗时与 HA
+
+`status.access.version=1` 新增 `stations[]` 有效方式/来源/可用性，以及每个配置站点最多一条最新受理记录的 `requests[]`；`request` 是当前/最近记录的便捷投影，未受理时省略，`requests=[]`。旧 `configured/state/generation/raw_status/manual_state/manual_station_id` 保留；顶层 configured 仍是全局材料状态，不能替代站点有效状态。`manual_state` 仅 idle/waiting_media/waiting_reply，终态见新记录。
+
+| 字段 | 值或语义 |
+| --- | --- |
+| `phase` | waiting_media、waiting_reply、protocol_completed、protocol_rejected、preparation_timeout、expired（回复超时）、cancelled、send_failed |
+| `wait_reason` | none、busy、cooldown、waiting_media、compatibility、station_unavailable、unknown |
+| `mode / credential_source` | inherit/direct/disabled；none/global/station |
+| 站点 `reason` | none、disabled、material_missing、material_invalid、store_unavailable、station_unavailable |
+| `attempts / busy_replies` | 可观察到的成功预览请求/忙回复计数；旧模块或复用路径无计数时为 0 |
+| `remaining_ms / elapsed_ms` | 当前阶段剩余时间/从受理起累计时间；终态剩余为 0，终态计时冻结 |
+| `first_request_ms / confirmed_ms / first_media_ms / sent_ms / reply_ms` | 本次受理后的相对单调毫秒；未知或早于受理的里程碑省略，客户端归一为 null |
+| `preparation_ms / reply_latency_ms` | 准备时长/实际发送至匹配回复；后者必须有真实匹配回复 |
+| `error / cleanup_error` | none 或 unknown；none 或 cleanup_failed |
+
+HA 保留现有每站点锁、进度传感器 unique ID 和设备关联；只发送 station_id，按 runtime/request/station 隔离记录，清除重启前结果并阻止迟到 GET/POST 倒退已受理或终态进度。缺少/损坏/不支持的新记录不会被修补成成功。HA 本机另测 `request_to_acceptance_ms`，不跨主机相减单调时钟，不把状态轮询延迟当物理开门延迟。旧桥接器 submitted-only（以及既有 queued）响应仍兼容，缺失信息不虚构时长；明确禁用/材料不可用的新元数据会使锁控制不可用。
+
+`04/89` 和 JPEG 没有本地请求 ID，不能排除所有同目标迟到流量。本地单事务、来源/目的、窗口与 generation 保护不等于线上精确事务关联。超时表示物理结果未知；`protocol_completed` 仍只表示协议确认，`physical_result_confirmed=false`，锁保持瞬时控制，不显示“门已打开”。
+
+### 可复现离线验收与剩余边界
+
+`tests/fixtures/station_unlock_v1.json` 来自真实 C coordinator 状态及 `df_runtime_unlock_emit_operation`，包含受理/准备、等待回复、完成、拒绝、准备超时、回复超时、取消与重启。host 测试封装与 ubus 相同的 JSON 字段形状；并非编译过的 libubus handler。C 的 `python3 -B -m unittest tests/test_unlock_fixtures.py` 比较实时 serializer 输出与 golden，并经真实 CGI 验证八种状态透传；HA 仓库持有同一 golden，独立 CI 校验解析、缺失计时、错误身份和不泄漏凭据，不依赖相邻 checkout。
+
+本轮还覆盖 current-send 后无效 JPEG、stale-generation 状态/停止、wrong-source/destination/一秒窗口、清理失败保留文件、跨站点隔离和接管后 publication input。root-owner guard 另以不启用测试放宽宏的真实存储代码验证非 root 所有的 0600 文件被拒绝。完整 C、LuCI、HTTP、package、HA Python/Node/static/JSON 检查记录在本轮验收证据中；负向 fixture 日志及 macOS linker deprecation warning 属已记录输出，不能称输出无噪声。
+
+本机缺少 OpenWrt SDK 与 libubus/libubox/UCI headers，未下载或安装依赖，真实 `DF_WITH_UBUS` 编译/handler、目标 ACL、浏览器/路由器应用、真实 go2rtc 发布及物理开门仍待独立验收。后续只有另行授权的有限实机比较，才能报告无会话/已有会话的准备和协议往返分布；本轮不声称延迟收益，也未推送、PR、发布、安装、Actions 轮询或更新 HACS。
+
 ## HTTP 接口
 
 CGI 基础路径为 `/cgi-bin/doorfast`。下表中的 `GET`/`POST` 是客户端调用约定；PCM、monitor 和带 runtime/station_id 的 v1 音频读取会校验 `REQUEST_METHOD`。普通 status、控制、视频和旧式音频快照请求只按路径分派，不能把表中的方法写法当作安全边界。

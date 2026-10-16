@@ -325,6 +325,34 @@ struct df_media_module_lifecycle_api_v2 {
 };
 extern const struct df_media_module_lifecycle_api_v2 df_media_module_lifecycle_api_v2;
 
+/* Optional encoder-free station unlock preparation. This extension is
+ * intentionally separate from the fixed v3 API: it only admits monitor and
+ * receive/reassembly state until a validated JPEG arrives. */
+#define DF_MEDIA_MODULE_UNLOCK_PREPARE_ABI_VERSION 1U
+struct df_media_unlock_prepare_status_v1 {
+    bool active;
+    bool ready;
+    bool source_live;
+    bool current_attempt;
+    uint64_t generation;
+    uint64_t first_frame_ms;
+    unsigned busy_replies;
+    unsigned attempts;
+    uint64_t first_request_ms, confirmed_ms;
+    uint64_t attempt_generation;
+    bool has_first_request, has_confirmed, busy, cooldown;
+};
+struct df_media_module_unlock_prepare_api_v1 {
+    uint32_t abi_version;
+    size_t struct_size;
+    int (*start)(void *, const char *, uint64_t, uint64_t *);
+    int (*status)(const void *, const char *, uint64_t,
+                  struct df_media_unlock_prepare_status_v1 *);
+    int (*stop)(void *, const struct df_media_session_key *, uint64_t);
+};
+extern const struct df_media_module_unlock_prepare_api_v1
+    df_media_module_unlock_prepare_api_v1;
+
 int df_media_module_config_v3_validate(
     const struct df_media_module_config_v3 *,
     const struct df_media_module_callbacks_v3 *);

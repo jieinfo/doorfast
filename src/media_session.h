@@ -42,11 +42,17 @@ struct df_media_session {
     bool outbound_handoff;
     bool outbound_command_sent;
     bool outbound_preview_persistent;
+    bool preparation_only;
+    bool preparation_ready;
+    uint64_t preparation_frame_generation;
     uint64_t preview_confirmation_generation;
     uint64_t started_ms;
     uint64_t frames_received;
     uint64_t last_frame_ms;
     unsigned control_requests;
+    unsigned preparation_requests, preparation_busy_replies;
+    uint64_t first_request_ms;
+    bool has_first_request;
     unsigned busy_replies;
     uint64_t confirmed_ms;
     uint64_t first_frame_ms;
@@ -82,6 +88,9 @@ int df_media_session_push_jpeg(struct df_media_session *,
     const struct df_media_module_config_v3 *,
     const struct df_media_credentials *, const uint8_t *, size_t,
     uint16_t width, uint16_t height, uint64_t timestamp_ms);
+int df_media_session_prepare_jpeg(struct df_media_session *,
+    const uint8_t *, size_t, uint16_t width, uint16_t height,
+    uint64_t timestamp_ms);
 int df_media_session_reset_pipeline(struct df_media_session *);
 int df_media_session_tick_pipeline(struct df_media_session *, uint64_t now_ms);
 int df_media_session_tick_reconnect(struct df_media_session *, uint8_t fps,

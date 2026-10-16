@@ -20,6 +20,39 @@ const modelPath = path.join(__dirname, '..', 'package',
     'luci-app-doorfast', 'htdocs', 'luci-static', 'resources',
     'doorfast', 'status_model.js');
 const source = fs.readFileSync(modelPath, 'utf8');
+const accessViewSource = fs.readFileSync(path.join(__dirname, '..', 'package',
+    'luci-app-doorfast', 'htdocs', 'luci-static', 'resources', 'view', 'doorfast', 'status.js'), 'utf8');
+const accessView = new Function('dom', 'poll', 'rpc', 'view', 'statusModel', 'E', accessViewSource)(
+    {}, {}, {declare: () => () => Promise.resolve({})}, {extend: x => x}, model,
+    (tag, attrs, children) => ({tag, attrs, children}));
+const stationAccess = {version: 1, stations: [{station_id: 'gate_main',
+    configured: false, mode: 'disabled', credential_source: 'none', reason: 'disabled'}],
+    requests: []};
+assert.match(JSON.stringify(accessView.formatAccessStatus(stationAccess)), /已禁用/);
+stationAccess.stations[0] = {station_id: 'gate_main', configured: true,
+    mode: 'direct', credential_source: 'station', reason: 'none'};
+for (const [phase, label] of [['waiting_media', '准备媒体'], ['waiting_reply', '等待协议回复'],
+    ['protocol_completed', '协议完成'], ['protocol_rejected', '协议拒绝'],
+    ['preparation_timeout', '准备超时'], ['expired', '回复超时'],
+    ['send_failed', '发送失败'], ['cancelled', '已取消']]) {
+    stationAccess.requests = [{station_id: 'gate_main', runtime_id: '1111111111111111',
+        request_id: '0000000000000001', phase, elapsed_ms: 0}];
+    const text = JSON.stringify(accessView.formatAccessStatus(stationAccess));
+    assert.match(text, new RegExp(label));
+    assert.match(text, /实体动作未确认/);
+    assert.match(text, /未知/);
+}
+stationAccess.stations[0].reason = 'secret-in-error';
+stationAccess.requests[0].phase = 'secret-in-phase';
+assert.equal(JSON.stringify(accessView.formatAccessStatus(stationAccess)).includes('secret-'), false);
+stationAccess.stations[0].mode = 'constructor';
+stationAccess.stations[0].reason = 'constructor';
+assert.equal(accessView.formatAccessStatus(stationAccess)[0].rows[0][1], '未知');
+assert.equal(accessView.formatAccessStatus(stationAccess)[0].rows[1][1], '未知');
+assert.equal(accessView.formatAccessStatus(stationAccess)[0].rows[2][1], '未知');
+assert.deepEqual(accessView.formatAccessStatus(undefined), []);
+assert.match(JSON.stringify(accessView.formatAccessStatus({configured: true})), /未知/);
+assert.match(JSON.stringify(accessView.formatAccessStatus({version: 1, stations: 'bad'})), /未知/);
 function fakeBaseclass() {}
 fakeBaseclass.extend = function(properties) {
     function LuCIClass() {}

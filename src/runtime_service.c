@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "capture.h"
+#include "access_credentials.h"
 #include "capture_retry.h"
 #include "event.h"
 #include "event_stream.h"
@@ -59,6 +60,22 @@ static const struct df_runtime_media_paths df_runtime_media_paths = {
 
 uint64_t df_runtime_control_generation_next(uint64_t current) {
     return current == UINT64_MAX ? 0U : current + 1U;
+}
+
+int df_runtime_resolve_station_credentials(const struct df_runtime_config *runtime,
+    struct df_station *station, uint8_t material[8],
+    enum df_station_unlock_mode *mode, enum df_access_credential_source *source) {
+    struct df_access_credentials credentials = {0};
+    int result;
+    if (runtime == NULL || station == NULL) return DF_ERR_INVALID;
+    result = df_access_credentials_load(&credentials,
+        runtime->access_credentials_path);
+    if (result != DF_OK && errno != ENOENT) return result;
+    result = df_access_credentials_resolve(&credentials, station,
+        runtime->access_material, material, mode, source);
+    (void)df_access_credentials_populate_station_metadata(&credentials, station);
+    df_access_credentials_destroy(&credentials);
+    return result;
 }
 
 #define DF_RUNTIME_PREVIEW_ROUTE_MAX_AGE_MS 60000U
@@ -939,6 +956,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
     struct df_gvs_memory_sender memory_sender = {0};
     struct df_gvs_call_control call_control = {0};
     struct df_gvs_access_control access = {0};
+    struct df_access_credentials access_credentials = {0};
     struct df_gvs_elevator_control elevator = {0};
     struct df_gvs_elevator_query elevator_query = {0};
     struct df_gvs_udp_sender udp_sender = {.fd = -1};
@@ -1001,6 +1019,9 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_gvs_identity_parse(runtime->config.gvs_local_address, identity) != DF_OK) {
         return DF_ERR_INVALID;
     }
+    /* Store errors disable unlock at resolution; call/preview remain usable. */
+    (void)df_access_credentials_load(&access_credentials,
+        runtime->access_credentials_path);
     if (df_gvs_identity_multicast_ip(identity, derived_multicast_group) != DF_OK)
         return DF_ERR_INVALID;
     if (runtime->multicast_mode == DF_GVS_MULTICAST_AUTO &&
@@ -1183,6 +1204,7 @@ int df_runtime_service_run(const struct df_runtime_config *runtime) {
         df_runtime_ubus_bind_access(&ubus, &access, &session, identity) == DF_OK &&
         df_runtime_ubus_bind_station_access(&ubus, &station_access_session,
             &runtime->stations) == DF_OK &&
+        df_runtime_ubus_bind_unlock_config(&ubus, runtime) == DF_OK &&
         df_runtime_ubus_bind_elevator(&ubus, &elevator, identity) == DF_OK &&
         df_runtime_ubus_bind_audio(&ubus, &audio) == DF_OK &&
         df_runtime_ubus_bind_audio_jitter(&ubus, &audio_jitter) == DF_OK &&
@@ -1851,6 +1873,7 @@ done:
     df_runtime_ubus_stop(&ubus);
     df_gvs_runtime_sync_stop(&sync);
     df_capture_close(capture);
+    df_access_credentials_destroy(&access_credentials);
     (void)fputs("doorfast: stopped\n", stdout);
     return status;
 }

@@ -12,6 +12,7 @@
 #include "gvs_media_lifecycle.h"
 #include "gvs_video_reassembly.h"
 #include "gvs_video_frame_cache.h"
+#include "access_credentials.h"
 
 struct df_runtime_ubus;
 struct df_event_stream;
@@ -79,6 +80,9 @@ int df_runtime_media_push_video_with_event(struct df_runtime_media_module *,
 int df_runtime_media_tick_with_event(struct df_runtime_media_module *,
     struct df_runtime_ubus *, struct df_event_stream *, uint64_t now_ms);
 int df_runtime_service_run(const struct df_runtime_config *runtime);
+int df_runtime_resolve_station_credentials(const struct df_runtime_config *,
+    struct df_station *, uint8_t material[8],
+    enum df_station_unlock_mode *, enum df_access_credential_source *);
 
 /* Control generations belong to the live runtime session; media generations
  * are allocated by the media module and must never be substituted here. */

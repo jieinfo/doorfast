@@ -126,6 +126,13 @@ void test_media_module_validates_v3_contract(void) {
     callbacks.resolve_route = NULL;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
         df_media_module_config_v3_validate(&config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_UNLOCK_PREPARE_ABI_VERSION,
+        df_media_module_unlock_prepare_api_v1.abi_version);
+    TEST_ASSERT_INT_EQ((int)sizeof(struct df_media_module_unlock_prepare_api_v1),
+        (int)df_media_module_unlock_prepare_api_v1.struct_size);
+    TEST_ASSERT_INT_EQ(1, df_media_module_unlock_prepare_api_v1.start != NULL);
+    TEST_ASSERT_INT_EQ(1, df_media_module_unlock_prepare_api_v1.status != NULL);
+    TEST_ASSERT_INT_EQ(1, df_media_module_unlock_prepare_api_v1.stop != NULL);
 }
 
 static int module_write_credentials(char path[]) {

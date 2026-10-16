@@ -258,6 +258,15 @@ void test_runtime_module_rejects_commands_when_unavailable(void) {
         &module, DF_MEDIA_MODULE_COMMAND_STOP, &key, false, 10U));
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_tick(
         &module, 10U));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_unlock_prepare_start(&module,
+            "gate_main", 10U, &(uint64_t){0U}));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_unlock_prepare_status(&module, "gate_main",
+            1U, &(struct df_media_unlock_prepare_status_v1){0}));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_unlock_prepare_stop(&module,
+            &key, 10U));
 }
 
 void test_runtime_module_rejects_incompatible_or_incomplete_api(void) {
@@ -265,6 +274,8 @@ void test_runtime_module_rejects_incompatible_or_incomplete_api(void) {
     const struct df_media_module_config_v3 config = {0};
     const struct df_media_module_callbacks_v3 callbacks = {0};
     struct df_media_module_api_v3 api = runtime_valid_api();
+    struct df_media_module_unlock_prepare_api_v1 prepare_api =
+        df_media_module_unlock_prepare_api_v1;
 
     api.abi_version = DF_MEDIA_MODULE_ABI_VERSION_V2;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_start_with_api(
@@ -281,6 +292,31 @@ void test_runtime_module_rejects_incompatible_or_incomplete_api(void) {
     api.push_video = NULL;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_media_module_start_with_api(
         &module, &api, &config, &callbacks));
+
+    /* A valid legacy v3 module remains usable without the optional symbol. */
+    api = runtime_valid_api();
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_media_module_start_with_api(
+        &module, &api, &config, &callbacks));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_unlock_prepare_start(&module,
+            "gate_main", 10U, &(uint64_t){0U}));
+    prepare_api.abi_version++;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_set_unlock_prepare_api(&module, &prepare_api));
+    TEST_ASSERT_INT_EQ(1, module.unlock_prepare_invalid);
+    prepare_api = df_media_module_unlock_prepare_api_v1;
+    prepare_api.struct_size--;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_set_unlock_prepare_api(&module, &prepare_api));
+    prepare_api = df_media_module_unlock_prepare_api_v1;
+    prepare_api.status = NULL;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_runtime_media_module_set_unlock_prepare_api(&module, &prepare_api));
+    prepare_api = df_media_module_unlock_prepare_api_v1;
+    TEST_ASSERT_INT_EQ(DF_OK,
+        df_runtime_media_module_set_unlock_prepare_api(&module, &prepare_api));
+    TEST_ASSERT_INT_EQ(0, module.unlock_prepare_invalid);
+    df_runtime_media_module_stop(&module);
 }
 
 void test_runtime_module_preserves_dynamic_library_handle(void) {

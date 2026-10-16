@@ -27,6 +27,7 @@
 #define DF_SEEN_SYNC_STATE_PATH (1ULL << 11)
 #define DF_SEEN_ACTIVE_HOST (1ULL << 12)
 #define DF_SEEN_ACCESS_MATERIAL (1ULL << 13)
+#define DF_SEEN_ACCESS_CREDENTIALS_PATH (1ULL << 42)
 #define DF_SEEN_INDOOR_IPADDR (1ULL << 14)
 #define DF_SEEN_INDOOR_NETMASK (1ULL << 15)
 #define DF_SEEN_PASSIVE_INTERFACE (1ULL << 16)
@@ -79,6 +80,9 @@ static void df_runtime_config_defaults(struct df_runtime_config *runtime) {
     memset(runtime, 0, sizeof(*runtime));
     (void)snprintf(runtime->brand, sizeof(runtime->brand), "%s", "gvs");
     df_runtime_config_bind(runtime);
+    (void)snprintf(runtime->access_credentials_path,
+                   sizeof(runtime->access_credentials_path),
+                   "%s", "/etc/doorfast/access-credentials");
     runtime->multicast_mode = DF_GVS_MULTICAST_AUTO;
     (void)snprintf(runtime->sync_state_path, sizeof(runtime->sync_state_path),
                    "%s", "/etc/config/doorfast-sync");
@@ -316,6 +320,14 @@ static int df_apply_option(struct df_runtime_config *runtime, const char *name,
             return DF_ERR_INVALID;
         return df_copy_option(runtime->access_material,
                               sizeof(runtime->access_material), value);
+    }
+    if (strcmp(name, "access_credentials_path") == 0) {
+        if (df_claim_option(seen, DF_SEEN_ACCESS_CREDENTIALS_PATH) != DF_OK)
+            return DF_ERR_INVALID;
+        if (value[0] == '\0' || strlen(value) >= sizeof(runtime->access_credentials_path))
+            return DF_ERR_INVALID;
+        return df_copy_option(runtime->access_credentials_path,
+                              sizeof(runtime->access_credentials_path), value);
     }
     if (strcmp(name, "enabled") == 0) {
         option = DF_SEEN_ENABLED;

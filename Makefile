@@ -29,6 +29,7 @@ TEST_SOURCES += tests/test_gvs_priority.c src/gvs_priority.c
 TEST_SOURCES += tests/test_gvs_station.c src/gvs_station.c
 TEST_SOURCES += tests/test_gvs_station_discovery.c src/gvs_station_discovery.c
 TEST_SOURCES += src/station_registry.c
+TEST_SOURCES += tests/test_access_credentials.c src/access_credentials.c
 TEST_SOURCES += tests/test_gvs_monitor.c src/gvs_monitor.c
 TEST_SOURCES += tests/test_gvs_peer_sim.c tests/support/gvs_peer_sim.c
 DAEMON_SOURCES += src/gvs_priority.c src/gvs_station.c
@@ -104,6 +105,9 @@ TEST_SOURCES += tests/test_media_session_manager.c src/media_session_manager.c
 TEST_SOURCES += tests/test_runtime_media_module.c src/runtime_media_module.c
 TEST_SOURCES += src/runtime_station_call.c tests/test_runtime_station_call.c
 DAEMON_SOURCES += src/runtime_station_call.c
+TEST_SOURCES += src/runtime_unlock.c tests/test_runtime_unlock.c
+DAEMON_SOURCES += src/runtime_unlock.c
+DAEMON_SOURCES += src/access_credentials.c
 build/doorfast-tests: src/evidence_recorder.h
 build/doorfast-tests: src/evidence_classifier.h
 build/doorfast-tests: src/evidence_log.h
@@ -150,7 +154,11 @@ RECORDER_SOURCES += src/evidence_metadata.c src/evidence_log.c
 build/doorfast-recorder: $(RECORDER_SOURCES) | build
 	$(CC) $(CPPFLAGS) -DDF_RECORDER_PROGRAM $(CFLAGS) $(RECORDER_SOURCES) -o $@ $(PCAP_LIBS)
 
-test: build/doorfast-tests build/capture-delivery-tests
+test: build/doorfast-tests build/capture-delivery-tests build/credential-owner-tests
+
+build/credential-owner-tests: tests/test_access_credentials_owner.c src/access_credentials.c src/access_credentials.h | build
+	$(CC) -D_DEFAULT_SOURCE $(CFLAGS) tests/test_access_credentials_owner.c src/access_credentials.c -o $@
+	$@
 
 build/capture-delivery-tests: tests/test_capture_delivery.c src/capture.c src/capture.h tests/test.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) tests/test_capture_delivery.c -o $@ $(PCAP_LIBS)

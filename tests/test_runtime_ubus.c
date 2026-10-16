@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +7,7 @@
 
 #include "runtime_id.h"
 #include "runtime_ubus.h"
+#include "runtime_config.h"
 #include "gvs_audio_playout.h"
 #include "test.h"
 
@@ -17,6 +19,121 @@ struct diagnostic_recording {
     unsigned closed_results;
     unsigned depth;
 };
+
+void test_runtime_ubus_access_credentials(void) {
+    char path[] = "/tmp/doorfast-rpc-credentials-XXXXXX";
+    int fd = mkstemp(path);
+    TEST_ASSERT_INT_EQ(1, fd >= 0);
+    if (fd < 0) return;
+    close(fd);
+    unlink(path);
+    struct df_runtime_config config = {0};
+    strcpy(config.access_credentials_path, path);
+    struct df_station station = {.id = "gate_main", .enabled = true,
+        .unlock_mode = DF_STATION_UNLOCK_DISABLED};
+    struct df_station_registry registry = {.items = &station, .count = 1};
+    struct df_runtime_ubus u = {.started = true, .unlock_config = &config,
+        .access_station_registry = &registry};
+    struct df_runtime_access_status status;
+    struct df_runtime_station_field fields[] = {
+        {"station_id", DF_STATION_FIELD_STRING, "gate_main", 0},
+        {"material", DF_STATION_FIELD_STRING, "0011223344556677", 0},
+        {"mode", DF_STATION_FIELD_STRING, "direct", 0}};
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    TEST_ASSERT_INT_EQ(0, status.configured);
+    TEST_ASSERT_INT_EQ(1, status.material_configured);
+    TEST_ASSERT_INT_EQ(DF_STATION_UNLOCK_DISABLED, status.mode);
+    TEST_ASSERT_INT_EQ(0, strcmp(status.reason, "disabled"));
+    struct df_access_credentials saved = {0};
+    TEST_ASSERT_INT_EQ(DF_OK, df_access_credentials_load(&saved, path));
+    TEST_ASSERT_INT_EQ(0x11, saved.items[0].material[1]);
+    fields[2].string = "unknown";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    fields[2].string = "direct";
+    const char *invalid_material[] = {"", "001122334455667", "001122334455667788", "001122334455667x"};
+    for (size_t i = 0; i < sizeof(invalid_material) / sizeof(invalid_material[0]); ++i) {
+        fields[1].string = invalid_material[i];
+        TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+            DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    }
+    fields[1].string = "0011223344556677";
+    fields[2].string = "inherit";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    fields[2].string = "direct";
+    fields[1].string = "";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    fields[1].string = "0011223344556677";
+    fields[2] = fields[1];
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    fields[2].name = "path";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_CLEAR, fields, 3, &status));
+    fields[0].string = "missing";
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_CLEAR, fields, 1, &status));
+    fields[0].string = "gate_main";
+    fields[0].type = DF_STATION_FIELD_UINT64;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_STATUS, fields, 1, &status));
+    fields[0].type = DF_STATION_FIELD_STRING;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_STATUS, fields, 0, &status));
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 1, &status));
+    struct df_access_credentials unchanged = {0};
+    TEST_ASSERT_INT_EQ(DF_OK, df_access_credentials_load(&unchanged, path));
+    TEST_ASSERT_INT_EQ(0, memcmp(&saved, &unchanged, sizeof(saved)));
+    df_access_credentials_destroy(&unchanged);
+    station.unlock_mode = DF_STATION_UNLOCK_DIRECT;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_STATUS, fields, 1, &status));
+    TEST_ASSERT_INT_EQ(1, status.configured);
+    TEST_ASSERT_INT_EQ(DF_ACCESS_CREDENTIAL_SOURCE_STATION, status.source);
+    u.unlock.stage = DF_RUNTIME_UNLOCK_PREPARING;
+    strcpy(u.unlock.station_id, "gate_main");
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_CLEAR, fields, 1, &status));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_UNLOCK_CANCELLED, u.unlock.stage);
+    TEST_ASSERT_INT_EQ(0, status.material_configured);
+    TEST_ASSERT_INT_EQ(DF_STATION_UNLOCK_DIRECT, status.mode);
+    u.unlock.stage = DF_RUNTIME_UNLOCK_WAITING_REPLY;
+    fields[1] = (struct df_runtime_station_field){"material", DF_STATION_FIELD_STRING, "0011223344556677", 0};
+    fields[2] = (struct df_runtime_station_field){"mode", DF_STATION_FIELD_STRING, "direct", 0};
+    struct df_runtime_unlock_operation sent = u.unlock;
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    TEST_ASSERT_INT_EQ(0, memcmp(&sent, &u.unlock, sizeof(sent)));
+    strcpy(config.access_credentials_path, "/not-a-directory/credentials");
+    TEST_ASSERT_INT_EQ(DF_ERR_IO, df_runtime_ubus_access_credentials(&u,
+        DF_RUNTIME_ACCESS_SET, fields, 3, &status));
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_UNLOCK_WAITING_REPLY, u.unlock.stage);
+    strcpy(config.access_credentials_path, path);
+    unlink(path);
+    fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    TEST_ASSERT_INT_EQ(1, fd >= 0);
+    if (fd >= 0) {
+        TEST_ASSERT_INT_EQ(9, (int)write(fd, "malformed", 9));
+        close(fd);
+        TEST_ASSERT_INT_EQ(DF_ERR_IO, df_runtime_ubus_access_credentials(&u,
+            DF_RUNTIME_ACCESS_CLEAR, fields, 1, &status));
+        TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_access_credentials(&u,
+            DF_RUNTIME_ACCESS_STATUS, fields, 1, &status));
+        TEST_ASSERT_INT_EQ(0, status.configured);
+        TEST_ASSERT_INT_EQ(0, strcmp(status.reason, "store_unavailable"));
+        fd = open(path, O_RDONLY);
+        char bytes[10] = {0};
+        TEST_ASSERT_INT_EQ(9, (int)read(fd, bytes, sizeof(bytes)));
+        TEST_ASSERT_INT_EQ(0, strcmp(bytes, "malformed"));
+        close(fd);
+        unlink(path);
+    }
+    df_access_credentials_destroy(&saved);
+}
 static void diagnostic_string(void *context, const char *key, const char *value) {
     struct diagnostic_recording *recording = context;
     int count = snprintf(recording->text + recording->length,
@@ -1209,6 +1326,9 @@ void test_runtime_ubus_unlock_targets_requested_station(void) {
         df_runtime_ubus_unlock_station(&service, "gate_side", 10));
     TEST_ASSERT_INT_EQ(1, (int)trace.calls);
     TEST_ASSERT_INT_EQ(0, memcmp(side_address, trace.destination, 6));
+    TEST_ASSERT_INT_EQ(1, service.unlock.reused_session);
+    TEST_ASSERT_INT_EQ(0, service.unlock.has_first_request);
+    TEST_ASSERT_INT_EQ(0, service.unlock.has_first_media);
     TEST_ASSERT_INT_EQ(0, memcmp(session.peer, side_address, 6));
     target = df_runtime_ubus_access_station_id(&service);
     TEST_ASSERT_INT_EQ(0, strcmp("gate_side", target == NULL ? "" : target));
@@ -1281,6 +1401,8 @@ void test_runtime_ubus_manual_unlock_defers_idle_station(void) {
         df_runtime_ubus_unlock_station(&service, "gate_main", 10U));
     TEST_ASSERT_INT_EQ(0, (int)trace.calls);
     TEST_ASSERT_INT_EQ(1, service.manual_unlock_owns_preview);
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_UNLOCK_PREPARING, service.unlock.stage);
+    TEST_ASSERT_INT_EQ(0, strcmp("0000000000000001", service.unlock.request_id));
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_unlock_station(&service, "gate_main", 10U));
     TEST_ASSERT_INT_EQ(0, (int)trace.calls);
@@ -1294,15 +1416,28 @@ void test_runtime_ubus_manual_unlock_defers_idle_station(void) {
     media.sessions[0].source_live = true;
     TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 13U));
     TEST_ASSERT_INT_EQ(1, (int)trace.calls);
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_UNLOCK_WAITING_REPLY, service.unlock.stage);
+    TEST_ASSERT_INT_EQ(13, (int)service.unlock.sent_ms);
     TEST_ASSERT_INT_EQ(DF_OK,
         df_runtime_ubus_unlock_station(&service, "gate_main", 13U));
     TEST_ASSERT_INT_EQ(1, (int)trace.calls);
-    access.result.state = DF_GVS_ACCESS_PROTOCOL_COMPLETED;
-    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 14U));
+    uint8_t raw_status = 1;
+    struct df_gvs_frame reply = {.family = 4, .opcode = 0x89,
+        .payload = &raw_status, .payload_length = 1};
+    memcpy(reply.source, station.logical_address, 6);
+    memcpy(reply.destination, local, 6);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_result_observe(&access.result,
+        &access_session, local, &reply, 14));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_handle_auto_unlock_result(&service, 14));
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_result_tick(&access.result, &access_session, local, 15));
+    TEST_ASSERT_INT_EQ(DF_OK, df_runtime_ubus_tick_manual_unlock(&service, 15U));
     TEST_ASSERT_INT_EQ(1, (int)media.command_calls);
     TEST_ASSERT_INT_EQ(DF_MEDIA_MODULE_COMMAND_STOP, media.command);
     TEST_ASSERT_INT_EQ(7, (int)media.command_generation);
     TEST_ASSERT_INT_EQ(0, service.manual_unlock_inflight);
+    TEST_ASSERT_INT_EQ(DF_RUNTIME_UNLOCK_COMPLETED, service.unlock.stage);
+    TEST_ASSERT_INT_EQ(14, (int)service.unlock.reply_ms);
+    TEST_ASSERT_INT_EQ(14, (int)service.unlock.ended_ms);
     df_runtime_ubus_stop(&service);
 }
 

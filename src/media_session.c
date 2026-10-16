@@ -24,6 +24,8 @@ static void df_media_session_clear_publication(struct df_media_session *session)
     session->publication_ms = 0U;
     session->next_reconnect_frame_ms = 0U;
     session->source_state = DF_MEDIA_SOURCE_WAITING;
+    session->preparation_ready = false;
+    session->preparation_frame_generation = 0U;
 }
 
 static void df_media_session_fail_encoder(struct df_media_session *session) {
@@ -239,6 +241,11 @@ int df_media_session_reset_pipeline(struct df_media_session *session) {
     df_gvs_video_reassembly_init(&session->video);
     session->frames_received = 0U;
     session->last_frame_ms = 0U;
+    if (session->preparation_only) {
+        session->preparation_ready = false;
+        session->preparation_frame_generation = 0U;
+        session->first_frame_ms = 0U;
+    }
     session->viewer_active = false;
     session->last_error = DF_MEDIA_ERROR_NONE;
     return result;
@@ -257,6 +264,13 @@ int df_media_session_reset_attempt(struct df_media_session *session,
             session->publication_generation) != DF_OK)
         return DF_ERR_IO;
     session->monitor.media_ready = false;
+    session->preparation_ready = false;
+    session->preparation_frame_generation = 0U;
+    if (session->preparation_only) {
+        session->frames_received = 0U;
+        session->last_frame_ms = 0U;
+        session->first_frame_ms = 0U;
+    }
     session->media_generation = media_generation;
     return DF_OK;
 }
@@ -265,9 +279,14 @@ void df_media_session_mark_source_lost(struct df_media_session *session,
     uint64_t now_ms) {
     if (session == NULL || !session->active ||
         session->purpose != DF_MEDIA_SESSION_PREVIEW ||
-        session->publication_generation == 0U ||
+        (session->publication_generation == 0U && !session->preparation_only) ||
         session->source_state == DF_MEDIA_SOURCE_RECONNECTING) return;
     session->source_state = DF_MEDIA_SOURCE_RECONNECTING;
+    if (session->preparation_only) {
+        session->preparation_ready = false;
+        session->preparation_frame_generation = 0U;
+        return;
+    }
     if (session->last_real_frame.data != NULL) {
         struct df_media_reconnect_frame frozen = {0};
         if (df_media_reconnect_frame_freeze(session->last_real_frame.data,
@@ -342,6 +361,7 @@ int df_media_session_upgrade_to_call(struct df_media_session *session,
     df_gvs_video_reassembly_init(&session->video);
     session->purpose = DF_MEDIA_SESSION_CALL;
     session->generation = generation;
+    session->preparation_only = false;
     session->outbound_handoff = false;
     session->outbound_command_sent = false;
     session->outbound_preview_persistent = false;
@@ -369,6 +389,7 @@ int df_media_session_promote_preview_to_call(struct df_media_session *session,
         return DF_ERR_INVALID;
     session->purpose = DF_MEDIA_SESSION_CALL;
     session->outbound_handoff = true;
+    session->preparation_only = false;
     session->outbound_command_sent = false;
     session->outbound_preview_persistent = session->monitor.persistent;
     /* The formal control owner sends keepalives. The monitor retains media
@@ -524,6 +545,27 @@ int df_media_session_push_jpeg(struct df_media_session *session,
         df_media_session_fail_encoder(session);
         return DF_ERR_IO;
     }
+    session->state = session->viewer_active ? DF_MEDIA_SESSION_VIEWING :
+        DF_MEDIA_SESSION_PUBLISHING;
+    session->last_error = DF_MEDIA_ERROR_NONE;
+    session->failure_reason = DF_MEDIA_FAILURE_NONE;
+    return DF_OK;
+}
+
+int df_media_session_prepare_jpeg(struct df_media_session *session,
+    const uint8_t *jpeg, size_t length, uint16_t width, uint16_t height,
+    uint64_t timestamp_ms) {
+    if (session == NULL || jpeg == NULL || !session->active ||
+        session->state == DF_MEDIA_SESSION_FAILED ||
+        df_gvs_jpeg_validate(jpeg, length) != 0 || width == 0U ||
+        height == 0U || session->media_generation == 0U)
+        return DF_ERR_INVALID;
+    if (timestamp_ms < session->monitor.last_now_ms) return DF_ERR_INVALID;
+    session->frames_received++;
+    session->last_frame_ms = timestamp_ms;
+    session->source_state = DF_MEDIA_SOURCE_LIVE;
+    session->preparation_ready = true;
+    session->preparation_frame_generation = session->media_generation;
     session->state = session->viewer_active ? DF_MEDIA_SESSION_VIEWING :
         DF_MEDIA_SESSION_PUBLISHING;
     session->last_error = DF_MEDIA_ERROR_NONE;

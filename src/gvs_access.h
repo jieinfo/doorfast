@@ -34,6 +34,8 @@ struct df_gvs_access_result {
     uint64_t session_generation;
     uint64_t last_now_ms;
     uint64_t deadline_ms;
+    /* Immutable matched-reply milestone; last_now_ms remains the clock cursor. */
+    uint64_t reply_ms;
     uint8_t destination[6];
     uint8_t source[6];
     uint8_t raw_status;
@@ -77,6 +79,9 @@ int df_gvs_access_control_init(struct df_gvs_access_control *, const char *,
     uint64_t, df_gvs_access_send_fn, void *);
 int df_gvs_access_control_submit(struct df_gvs_access_control *,
     const struct df_gvs_session *, uint64_t, const uint8_t [6], uint64_t);
+int df_gvs_access_control_submit_material(struct df_gvs_access_control *,
+    const struct df_gvs_session *, uint64_t, const uint8_t [6],
+    const uint8_t [8], uint64_t);
 const char *df_gvs_access_state_name(enum df_gvs_access_result_state);
 
 #endif

@@ -7,6 +7,7 @@
 
 #include "doorfast.h"
 #include "runtime_id.h"
+#include "runtime_unlock.h"
 #include "gvs_access.h"
 #include "gvs_elevator_control.h"
 #include "gvs_runtime_sync.h"
@@ -145,6 +146,18 @@ struct df_runtime_station_field {
     const char *string;
     uint64_t number;
 };
+enum df_runtime_access_action { DF_RUNTIME_ACCESS_STATUS,
+    DF_RUNTIME_ACCESS_SET, DF_RUNTIME_ACCESS_CLEAR };
+struct df_runtime_access_status {
+    bool configured;
+    bool material_configured;
+    enum df_station_unlock_mode mode;
+    enum df_access_credential_source source;
+    const char *reason;
+};
+int df_runtime_ubus_access_credentials(struct df_runtime_ubus *,
+    enum df_runtime_access_action, const struct df_runtime_station_field *,
+    size_t, struct df_runtime_access_status *);
 struct df_runtime_station_request {
     const char *runtime_id;
     const char *station_id;
@@ -200,6 +213,11 @@ struct df_station_candidate_snapshot {
 struct df_runtime_station_route_entry;
 
 struct df_runtime_ubus {
+    const struct df_runtime_config *unlock_config;
+    struct df_runtime_unlock_operation unlock;
+    struct df_runtime_unlock_operation *unlock_records;
+    size_t unlock_record_count;
+    uint64_t next_unlock_request;
     df_runtime_status_provider_fn provide_status;
     void *status_context;
     df_runtime_call_status_provider_fn provide_call_status;

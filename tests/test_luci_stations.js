@@ -12,6 +12,7 @@ function GridSection() {}
 function Flag() {}
 function Value() {}
 function ListValue() {}
+function DummyValue() {}
 
 const stationData = {
     gate_existing: {
@@ -27,7 +28,9 @@ const stationData = {
 };
 const uciMutations = [];
 let uciSaveCalls = 0;
+let pendingChanges = {doorfast: [['set', 'gate_existing', 'unlock_mode', 'direct']]};
 const uci = {
+    changes: () => Promise.resolve(pendingChanges),
     load: config => Promise.resolve(config),
     add: (config, type, name) => {
         uciMutations.push(['add', config, type, name]);
@@ -133,9 +136,26 @@ class Map {
                 section => section['.name'])
         });
     }
+
+    save(callback, silent) {
+        assert.equal(silent, true);
+        if (this.invalid) return Promise.reject(new Error('invalid form'));
+        return Promise.resolve().then(callback).then(() => {
+            for (const row of Object.values(stationData)) {
+                for (const option of this.options) {
+                    if (option.optionName.startsWith('_')) continue;
+                    const value = option.formvalue(row['.name']);
+                    if (typeof value === 'string') row[option.optionName] = value;
+                }
+            }
+            return uci.save();
+        });
+    }
+
+    reset() { this.resets = (this.resets || 0) + 1; return this.render(); }
 }
 
-const form = {Map, GridSection, Flag, Value, ListValue};
+const form = {Map, GridSection, Flag, Value, ListValue, DummyValue};
 const candidateUpdates = [];
 const dom = {content: (node, content) => {
     candidateUpdates.push({node, content});
@@ -149,6 +169,25 @@ const poll = {add: callback => {
 }};
 const rpcCalls = [];
 let scanError = null;
+let credentialError = null;
+let credentialFailureStation = null;
+let applyError = null;
+let applyCalls = 0;
+let applyUpdates = true;
+let deferApply = false;
+let finishApply;
+const eventListeners = new Set();
+const fakeDocument = {
+    addEventListener: (name, listener) => { assert.equal(name, 'uci-applied'); eventListeners.add(listener); },
+    removeEventListener: (name, listener) => eventListeners.delete(listener),
+    applied: () => [...eventListeners].forEach(listener => listener())
+};
+const pendingTimers = new globalThis.Map();
+const credentialPayloads = {
+    gate_existing: { configured: false, material_configured: true,
+        mode: 'disabled', source: 'none', reason: 'disabled' }
+};
+const declarations = [];
 const candidatesPayload = {candidates: [{
     logical_address: '32:02:01:00:02:00',
     ipv4: '10.2.1.20',
@@ -158,25 +197,59 @@ const candidatesPayload = {candidates: [{
     configured: false
 }]};
 const rpc = {
-    declare: declaration => (...args) => {
+    declare: declaration => { declarations.push(declaration); return (...args) => {
         rpcCalls.push({method: declaration.method, args});
+        if (declaration.method === 'access_credentials_status')
+            return Object.hasOwn(credentialPayloads, args[0])
+                ? Promise.resolve(credentialPayloads[args[0]]) : Promise.reject(new Error('unknown station'));
+        if (declaration.method === 'access_credentials_set' || declaration.method === 'access_credentials_clear') {
+            if (credentialError && (!credentialFailureStation || credentialFailureStation === args[0]))
+                return Promise.reject(credentialError);
+            credentialPayloads[args[0]].material_configured = declaration.method === 'access_credentials_set';
+            return Promise.resolve({...credentialPayloads[args[0]]});
+        }
         if (declaration.method === 'station_scan' && scanError !== null)
             return Promise.reject(scanError);
         if (declaration.method === 'station_candidates')
             return Promise.resolve(candidatesPayload);
         return Promise.resolve({scheduled: true});
-    }
+    }; }
 };
 const notifications = [];
 const ui = {addNotification: (title, body, level) => {
     notifications.push({title, body, level});
-}};
+}, changes: {apply: () => {
+    applyCalls++;
+    if (applyError) throw applyError;
+    const complete = () => {
+    if (applyUpdates) Object.keys(stationData).forEach(id => {
+        const mode = stationData[id].unlock_mode || 'inherit';
+        const material = credentialPayloads[id]?.material_configured || false;
+        credentialPayloads[id] = { mode, material_configured: material,
+            configured: mode === 'direct' && material,
+            source: mode === 'direct' && material ? 'station' : 'none',
+            reason: mode === 'disabled' ? 'disabled' : mode === 'direct' && material ? 'none' : 'material_missing' };
+    });
+    fakeDocument.applied();
+    };
+    if (deferApply) finishApply = complete;
+    else queueMicrotask(complete);
+    return undefined; // LuCI apply starts asynchronously and has no promise return.
+}}};
 const view = {extend: value => value};
 const E = (tag, attrs, children) => ({tag, attrs, children});
-const fakeWindow = {prompt: () => null};
+const fakeWindow = {prompt: () => null,
+    setTimeout: (callback, duration) => {
+        assert.equal(duration, 120000);
+        const key = {};
+        pendingTimers.set(key, callback);
+        return key;
+    },
+    clearTimeout: key => pendingTimers.delete(key)
+};
 const stations = new Function('dom', 'form', 'poll', 'rpc', 'uci', 'ui',
-    'view', 'E', 'window', source)(dom, form, poll, rpc, uci, ui, view, E,
-    fakeWindow);
+    'view', 'E', 'window', 'document', source)(dom, form, poll, rpc, uci, ui, view, E,
+    fakeWindow, fakeDocument);
 
 (async () => {
     const loaded = await stations.load();
@@ -191,10 +264,20 @@ const stations = new Function('dom', 'form', 'poll', 'rpc', 'uci', 'ui',
     assert.equal(page.stationSection.addremove, true);
     assert.deepEqual(page.stationSection.options.map(option => option.optionName), [
         'enabled', 'name', 'logical_address', 'ipv4',
-        'route_preference', 'stream_name'
+        'route_preference', 'stream_name', 'unlock_mode', '_access_material', '_access_clear', '_access_status'
     ]);
     const byName = name => page.stationSection.options.find(
         option => option.optionName === name);
+    assert.equal(byName('unlock_mode').validate('gate_existing', 'direct'), true);
+    assert.notEqual(byName('unlock_mode').validate('gate_existing', 'bogus'), true);
+    assert.equal(byName('_access_material').password, true);
+    assert.equal(byName('_access_material').editable, true);
+    assert.equal(byName('_access_material').modalonly, false);
+    assert.equal(byName('_access_material').cfgvalue('gate_existing'), '');
+    const mutations = uciMutations.length;
+    byName('_access_material').write('gate_existing', '0011223344556677');
+    byName('_access_material').remove('gate_existing');
+    assert.equal(uciMutations.length, mutations);
     assert.deepEqual(byName('route_preference').values, [
         ['discover_first', '优先发现'], ['fixed', '固定地址']
     ]);
@@ -288,4 +371,140 @@ const stations = new Function('dom', 'form', 'poll', 'rpc', 'uci', 'ui',
     await page.handleScan();
     assert.equal(notifications.at(-1).level, 'danger');
     assert.match(JSON.stringify(notifications.at(-1).body), /Permission denied/);
+
+    assert.deepEqual(declarations.find(x => x.method === 'access_credentials_set').params,
+        ['station_id', 'material', 'mode']);
+    assert.deepEqual(declarations.find(x => x.method === 'access_credentials_clear').params, ['station_id']);
+    assert.deepEqual(declarations.find(x => x.method === 'access_credentials_status').params, ['station_id']);
+    const secretWrites = () => rpcCalls.filter(x => ['access_credentials_set', 'access_credentials_clear'].includes(x.method));
+    const original = {...stationData.gate_existing};
+    byName('unlock_mode').formValues.gate_existing = 'direct';
+    byName('_access_material').formValues.gate_existing = '';
+    byName('_access_clear').formValues.gate_existing = '0';
+    deferApply = true;
+    let applySettled = false;
+    let firstError;
+    const firstApply = page.handleSaveApply().catch(error => { firstError = error; })
+        .finally(() => { applySettled = true; });
+    await new Promise(setImmediate);
+    assert.equal(applyCalls, 1);
+    assert.equal(firstError, undefined);
+    assert.equal(applySettled, false);
+    finishApply();
+    await firstApply;
+    assert.equal(firstError, undefined);
+    deferApply = false;
+    assert.equal(page.stationMap.resets, 1);
+    assert.equal(eventListeners.size, 0);
+    assert.equal(pendingTimers.size, 0);
+    assert.equal(secretWrites().length, 0); // retained direct record despite effective disabled=false
+    assert.equal(credentialPayloads.gate_existing.configured, true);
+    assert.equal(stationData.gate_existing.unlock_mode, 'direct');
+    assert.deepEqual({...stationData.gate_existing, unlock_mode: undefined}, {...original, unlock_mode: undefined});
+    pendingChanges = {};
+    const beforeNoChangeApply = applyCalls;
+    await page.handleSaveApply();
+    assert.equal(applyCalls, beforeNoChangeApply);
+    byName('_access_material').formValues.gate_existing = '0011223344556677';
+    await page.handleSaveApply();
+    assert.equal(applyCalls, beforeNoChangeApply);
+    assert.deepEqual(secretWrites().at(-1).args, ['gate_existing', '0011223344556677', 'direct']);
+    byName('_access_material').formValues.gate_existing = '';
+    pendingChanges = {network: [['set', 'lan', 'mtu', '1500']]};
+    await page.handleSaveApply();
+    assert.equal(applyCalls, beforeNoChangeApply + 1);
+    assert.equal(eventListeners.size, 0);
+    assert.equal(pendingTimers.size, 0);
+    const beforeErrorSave = uciSaveCalls;
+    const beforeErrorApply = applyCalls;
+    byName('_access_material').formValues.gate_existing = '0011223344556677';
+    credentialError = new Error('0011223344556677 sensitive backend error');
+    await assert.rejects(page.handleSaveApply(), /station save\/apply failed/);
+    assert.equal(uciSaveCalls, beforeErrorSave);
+    assert.equal(applyCalls, beforeErrorApply);
+    assert.equal(byName('_access_material').formvalue('gate_existing'), '0011223344556677');
+    assert.equal(JSON.stringify(notifications.at(-1)).includes('0011223344556677'), false);
+    assert.deepEqual(secretWrites().at(-1).args, ['gate_existing', '0011223344556677', 'direct']);
+    credentialError = null;
+    byName('_access_clear').formValues.gate_existing = '1';
+    const beforeConflict = secretWrites().length;
+    await assert.rejects(page.handleSaveApply(), /validation/);
+    assert.equal(secretWrites().length, beforeConflict);
+    byName('_access_material').formValues.gate_existing = '';
+    await page.handleSaveApply();
+    assert.deepEqual(secretWrites().at(-1), {method: 'access_credentials_clear', args: ['gate_existing']});
+    assert.equal(stationData.gate_existing.unlock_mode, 'direct');
+    assert.equal(credentialPayloads.gate_existing.configured, false);
+    assert.match(page.accessStatus.cfgvalue('gate_existing'), /缺少开锁材料/);
+    byName('_access_clear').formValues.gate_existing = '0';
+    byName('_access_material').formValues.gate_main = '8899aabbccddeeff';
+    delete credentialPayloads.gate_main;
+    const beforeUnknown = secretWrites().length;
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(secretWrites().length, beforeUnknown);
+    assert.match(JSON.stringify(notifications.at(-1)), /先保存并应用/);
+    byName('_access_material').formValues.gate_main = '';
+    await page.handleSaveApply(); // creation without secret, explicit unavailable metadata
+    assert.match(page.accessStatus.cfgvalue('gate_main'), /缺少开锁材料/);
+    byName('_access_material').formValues.gate_existing = '0011223344556677';
+    byName('unlock_mode').formValues.gate_main = 'bogus';
+    const beforeInvalidRow = secretWrites().length;
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(secretWrites().length, beforeInvalidRow);
+    byName('unlock_mode').formValues.gate_main = '';
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(secretWrites().length, beforeInvalidRow);
+    byName('unlock_mode').formValues.gate_main = 'inherit';
+    page.stationMap.invalid = true;
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(secretWrites().length, beforeInvalidRow);
+    page.stationMap.invalid = false;
+    credentialPayloads.gate_existing = {configured: false, material_configured: false,
+        mode: 'direct', source: 'none', reason: 'secret detail'};
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(secretWrites().length, beforeInvalidRow);
+    credentialPayloads.gate_existing = {configured: true}; // old/unsupported bridge
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(secretWrites().length, beforeInvalidRow);
+    credentialPayloads.gate_existing = {configured: false, material_configured: false,
+        mode: 'direct', source: 'none', reason: 'material_missing'};
+    byName('_access_material').formValues.gate_existing = '';
+    applyError = new Error('sensitive apply text');
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(JSON.stringify(notifications.at(-1)).includes('sensitive'), false);
+    applyError = null;
+    applyUpdates = false;
+    byName('unlock_mode').formValues.gate_existing = 'disabled';
+    await assert.rejects(page.handleSaveApply()); // runtime still reports direct
+    assert.match(JSON.stringify(notifications.at(-1)), /gate_existing/);
+    assert.match(JSON.stringify(notifications.at(-1)), /配置已保存/);
+    deferApply = true;
+    const timedApply = page.handleSaveApply();
+    const timedResult = assert.rejects(timedApply, /station save\/apply failed/);
+    await new Promise(setImmediate);
+    assert.equal(pendingTimers.size, 1);
+    assert.equal(eventListeners.size, 1);
+    [...pendingTimers.values()].forEach(callback => callback());
+    await timedResult;
+    assert.equal(pendingTimers.size, 0);
+    assert.equal(eventListeners.size, 0);
+    deferApply = false;
+    assert.equal(page.credentialStatus({configured: false}), null);
+    assert.equal(page.credentialStatus({configured: false, material_configured: true,
+        mode: 'inherit', source: 'none', reason: 'secret detail'}).reason, 'unknown');
+    applyUpdates = true;
+    byName('unlock_mode').formValues.gate_existing = 'direct';
+    byName('_access_material').formValues.gate_existing = '0011223344556677';
+    byName('_access_material').formValues.gate_main = '8899aabbccddeeff';
+    credentialError = new Error('private-material-error');
+    credentialFailureStation = 'gate_main';
+    const beforePartialSave = uciSaveCalls;
+    const beforePartialApply = applyCalls;
+    await assert.rejects(page.handleSaveApply());
+    assert.equal(uciSaveCalls, beforePartialSave);
+    assert.equal(applyCalls, beforePartialApply);
+    assert.equal(credentialPayloads.gate_existing.material_configured, true);
+    assert.match(JSON.stringify(notifications.at(-1)), /已更新独立材料：gate_existing/);
+    assert.match(JSON.stringify(notifications.at(-1)), /gate_main/);
+    assert.equal(JSON.stringify(notifications.at(-1)).includes('private-material'), false);
 })();
