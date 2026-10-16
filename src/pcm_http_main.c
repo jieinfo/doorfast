@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -457,6 +458,25 @@ static void render_simple_error(unsigned status, const char *error)
     render_response(&response);
 }
 
+static const char *session_token(void)
+{
+    static const char scheme[] = "DoorfastAudio";
+    const char *legacy = getenv("HTTP_X_DOORFAST_AUDIO_SESSION");
+    const char *authorization = getenv("HTTP_AUTHORIZATION");
+
+    /* uhttpd's CGI header allowlist does not export the custom header. */
+    if (authorization == NULL ||
+        strncasecmp(authorization, scheme, sizeof(scheme) - 1U) != 0)
+        return legacy;
+    authorization += sizeof(scheme) - 1U;
+    if (*authorization != ' ')
+        return NULL;
+    authorization++;
+    if (legacy != NULL && strcmp(legacy, authorization) != 0)
+        return NULL;
+    return authorization;
+}
+
 #ifdef DF_PCM_HTTP_ACCEPTANCE
 int main(int argc, char **argv)
 #else
@@ -501,7 +521,7 @@ int main(void)
     request.runtime_id = fields.runtime_id;
     request.generation = fields.generation;
     request.sequence = fields.sequence;
-    request.session_token = getenv("HTTP_X_DOORFAST_AUDIO_SESSION");
+    request.session_token = session_token();
     request.content_type = getenv("CONTENT_TYPE");
     request.content_length = getenv("CONTENT_LENGTH");
     request.body_fd = STDIN_FILENO;
