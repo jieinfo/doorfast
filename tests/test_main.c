@@ -283,6 +283,11 @@ void test_runtime_config_owns_named_station_registry(void);
 void test_runtime_config_successful_reload_replaces_owned_registry(void);
 void test_runtime_config_failed_reload_preserves_owned_registry(void);
 void test_runtime_config_validates_media_capacity_and_call_policy(void);
+void test_station_registry_parses_unlock_mode(void);
+void test_station_registry_rejects_unknown_unlock_mode(void);
+void test_access_credentials_resolve_modes_and_redacted_status(void);
+void test_access_credentials_load_rejects_duplicate_and_malformed_records(void);
+void test_access_credentials_clear_is_atomic_and_publicly_redacted(void);
 void test_station_registry_loads_named_sections_and_owns_memory(void);
 void test_station_registry_rejects_duplicate_identity_fields(void);
 void test_station_registry_requires_ipv4_for_fixed_routes(void);
@@ -456,6 +461,41 @@ static int capture_media_encoder_arguments(int argc, char **argv)
 }
 
 int main(int argc, char **argv) {
+    extern void test_runtime_unlock_json_fixtures(void);
+    if (argc == 2 && strcmp(argv[1], "--unlock-json-fixtures") == 0) {
+        test_runtime_unlock_json_fixtures();
+        return test_failures() ? 1 : 0;
+    }
+    extern void test_runtime_ubus_access_credentials(void);
+    extern void test_runtime_unlock_credential_mutation_isolation(void);
+    if (argc == 2 && strcmp(argv[1], "--access-rpc") == 0) {
+        test_runtime_ubus_access_credentials();
+        test_runtime_unlock_credential_mutation_isolation();
+        return test_failures() ? 1 : 0;
+    }
+    if (argc == 1) test_runtime_ubus_access_credentials();
+    if (argc == 1) test_runtime_unlock_credential_mutation_isolation();
+    extern void test_runtime_unlock_lifecycle(void);
+    extern void test_runtime_unlock_failures(void);
+    extern void test_runtime_unlock_projection_and_credentials(void);
+    extern void test_media_session_manager_unlock_adoption(void);
+    extern void test_media_session_manager_unlock_adoption_publishes(void);
+    if (argc == 1) test_media_session_manager_unlock_adoption_publishes();
+    extern void test_runtime_unlock_auto_and_reset(void);
+    if (argc == 2 && strcmp(argv[1], "--station-unlock") == 0) {
+        test_runtime_unlock_lifecycle();
+        test_runtime_unlock_failures();
+        test_runtime_unlock_projection_and_credentials();
+        test_media_session_manager_unlock_adoption();
+        test_media_session_manager_unlock_adoption_publishes();
+        test_runtime_unlock_auto_and_reset();
+        test_runtime_ubus_manual_unlock_defers_idle_station();
+        test_runtime_ubus_manual_unlock_cleanup_and_adoption();
+        test_access_credentials_resolve_modes_and_redacted_status();
+        if (test_failures()) return 1;
+        puts("station unlock tests passed");
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "--outbound-field-timing") == 0) {
         test_media_session_manager_video_before_outbound_confirmation();
         test_media_session_manager_video_first_confirmation_guards();
@@ -743,6 +783,11 @@ int main(int argc, char **argv) {
     test_runtime_ubus_unlock_targets_requested_station();
     test_runtime_ubus_manual_unlock_defers_idle_station();
     test_runtime_ubus_manual_unlock_cleanup_and_adoption();
+    test_runtime_unlock_lifecycle();
+    test_runtime_unlock_failures();
+    test_runtime_unlock_projection_and_credentials();
+    test_media_session_manager_unlock_adoption();
+    test_runtime_unlock_auto_and_reset();
     test_gvs_access_failed_send_and_late_reply();
     test_gvs_access_control_sends_once_and_requires_material();
     test_gvs_access_serializes_vendor_direct_unlock_shape();
@@ -849,6 +894,11 @@ int main(int argc, char **argv) {
     test_runtime_config_successful_reload_replaces_owned_registry();
     test_runtime_config_failed_reload_preserves_owned_registry();
     test_runtime_config_validates_media_capacity_and_call_policy();
+    test_station_registry_parses_unlock_mode();
+    test_station_registry_rejects_unknown_unlock_mode();
+    test_access_credentials_resolve_modes_and_redacted_status();
+    test_access_credentials_load_rejects_duplicate_and_malformed_records();
+    test_access_credentials_clear_is_atomic_and_publicly_redacted();
     test_station_registry_loads_named_sections_and_owns_memory();
     test_station_registry_rejects_duplicate_identity_fields();
     test_station_registry_requires_ipv4_for_fixed_routes();

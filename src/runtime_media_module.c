@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int df_runtime_media_module_available(
+    const struct df_runtime_media_module *module);
+
 static int adapted_emit(const uint8_t to[6], uint32_t ip, const uint8_t from[6],
     uint8_t family, uint8_t opcode, const uint8_t *payload, size_t size, void *context) {
     struct df_runtime_media_module *m = context;
@@ -71,6 +74,23 @@ df_runtime_media_module_resolve_outbound_upgrade(void *handle) {
             DF_MEDIA_MODULE_OUTBOUND_UPGRADE_ABI_VERSION ||
         api->struct_size != sizeof(*api) || api->operation == NULL)
         return NULL;
+    return api;
+}
+
+static const struct df_media_module_unlock_prepare_api_v1 *
+df_runtime_media_module_resolve_unlock_prepare(void *handle, bool *invalid) {
+    const struct df_media_module_unlock_prepare_api_v1 *api = NULL;
+
+    if (handle == NULL) return NULL;
+    *(void **)(&api) = dlsym(handle,
+        "df_media_module_unlock_prepare_api_v1");
+    *invalid = api != NULL;
+    if (api == NULL || api->abi_version !=
+            DF_MEDIA_MODULE_UNLOCK_PREPARE_ABI_VERSION ||
+        api->struct_size != sizeof(*api) || api->start == NULL ||
+        api->status == NULL || api->stop == NULL)
+        return NULL;
+    *invalid = false;
     return api;
 }
 
@@ -159,11 +179,65 @@ int df_runtime_media_module_start(struct df_runtime_media_module *module,
             df_runtime_media_module_resolve_diagnostics_v2(handle);
         module->outbound_upgrade_api =
             df_runtime_media_module_resolve_outbound_upgrade(handle);
+        module->unlock_prepare_api =
+            df_runtime_media_module_resolve_unlock_prepare(handle,
+                &module->unlock_prepare_invalid);
         const struct df_media_module_lifecycle_api_v2 *lifecycle = NULL;
         *(void **)(&lifecycle) = dlsym(handle, "df_media_module_lifecycle_api_v2");
         (void)df_runtime_media_module_set_lifecycle_api(module, lifecycle);
     }
     return result;
+}
+
+int df_runtime_media_module_set_unlock_prepare_api(
+    struct df_runtime_media_module *module,
+    const struct df_media_module_unlock_prepare_api_v1 *api) {
+    if (module == NULL) return DF_ERR_INVALID;
+    module->unlock_prepare_api = NULL;
+    module->unlock_prepare_invalid = api != NULL;
+    if (api == NULL || api->abi_version !=
+            DF_MEDIA_MODULE_UNLOCK_PREPARE_ABI_VERSION ||
+        api->struct_size != sizeof(*api) || api->start == NULL ||
+        api->status == NULL || api->stop == NULL)
+        return DF_ERR_INVALID;
+    module->unlock_prepare_api = api;
+    module->unlock_prepare_invalid = false;
+    return DF_OK;
+}
+
+int df_runtime_media_module_unlock_prepare_start(
+    struct df_runtime_media_module *module, const char *station_id,
+    uint64_t now_ms, uint64_t *generation) {
+    if (generation == NULL) return DF_ERR_INVALID;
+    *generation = 0U;
+    if (df_runtime_media_module_available(module) != DF_OK ||
+        module->unlock_prepare_api == NULL || station_id == NULL ||
+        station_id[0] == '\0') return DF_ERR_INVALID;
+    return module->unlock_prepare_api->start(module->instance, station_id,
+        now_ms, generation);
+}
+
+int df_runtime_media_module_unlock_prepare_status(
+    const struct df_runtime_media_module *module, const char *station_id,
+    uint64_t generation, struct df_media_unlock_prepare_status_v1 *status) {
+    if (status == NULL) return DF_ERR_INVALID;
+    memset(status, 0, sizeof(*status));
+    if (df_runtime_media_module_available(module) != DF_OK ||
+        module->unlock_prepare_api == NULL || station_id == NULL ||
+        station_id[0] == '\0' || generation == 0U)
+        return DF_ERR_INVALID;
+    return module->unlock_prepare_api->status(module->instance, station_id,
+        generation, status);
+}
+
+int df_runtime_media_module_unlock_prepare_stop(
+    struct df_runtime_media_module *module,
+    const struct df_media_session_key *key, uint64_t now_ms) {
+    if (df_runtime_media_module_available(module) != DF_OK ||
+        module->unlock_prepare_api == NULL || key == NULL ||
+        key->station_id == NULL || key->generation == 0U)
+        return DF_ERR_INVALID;
+    return module->unlock_prepare_api->stop(module->instance, key, now_ms);
 }
 
 static int df_runtime_media_module_available(

@@ -23,6 +23,8 @@ struct df_runtime_media_module {
     const struct df_media_module_api_v3 *api;
     const struct df_media_module_outbound_upgrade_api_v1 *outbound_upgrade_api;
     const struct df_media_module_lifecycle_api_v2 *lifecycle_api;
+    const struct df_media_module_unlock_prepare_api_v1 *unlock_prepare_api;
+    bool unlock_prepare_invalid;
     struct df_media_module_callbacks_v3 original_callbacks, adapted_callbacks;
     struct df_runtime_incoming_media_binding *incoming_bindings;
     size_t incoming_binding_count;
@@ -44,6 +46,9 @@ int df_runtime_media_module_set_outbound_api(struct df_runtime_media_module *,
     const struct df_media_module_outbound_upgrade_api_v1 *);
 int df_runtime_media_module_set_lifecycle_api(struct df_runtime_media_module *,
     const struct df_media_module_lifecycle_api_v2 *);
+int df_runtime_media_module_set_unlock_prepare_api(
+    struct df_runtime_media_module *,
+    const struct df_media_module_unlock_prepare_api_v1 *);
 int df_runtime_media_module_release_incoming(struct df_runtime_media_module *,
     const char *, uint64_t control_generation, enum df_media_outbound_operation,
     uint64_t now_ms);
@@ -62,6 +67,15 @@ int df_runtime_media_module_start_with_api(struct df_runtime_media_module *,
     const struct df_media_module_callbacks_v3 *);
 int df_runtime_media_module_request_start(struct df_runtime_media_module *,
     const char *station_id, uint64_t now_ms, uint64_t *generation);
+int df_runtime_media_module_unlock_prepare_start(
+    struct df_runtime_media_module *, const char *station_id,
+    uint64_t now_ms, uint64_t *generation);
+int df_runtime_media_module_unlock_prepare_status(
+    const struct df_runtime_media_module *, const char *station_id,
+    uint64_t generation, struct df_media_unlock_prepare_status_v1 *);
+int df_runtime_media_module_unlock_prepare_stop(
+    struct df_runtime_media_module *, const struct df_media_session_key *,
+    uint64_t now_ms);
 int df_runtime_media_module_call(struct df_runtime_media_module *,
     const char *station_id, uint64_t now_ms, uint64_t *generation);
 int df_runtime_media_module_incoming_call(struct df_runtime_media_module *,

@@ -154,3 +154,41 @@ void test_station_registry_maps_legacy_singleton_options(void) {
     }
     df_station_registry_destroy(&registry);
 }
+
+void test_station_registry_parses_unlock_mode(void) {
+    const char input[] =
+        "config station 'gate_main'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Main Gate'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_main'\n"
+        "\toption unlock_mode 'direct'\n";
+    struct df_station_registry registry = {0};
+    const struct df_station *station;
+
+    TEST_ASSERT_INT_EQ(DF_OK, df_station_registry_parse(&registry, input));
+    station = df_station_registry_find(&registry, "gate_main");
+    TEST_ASSERT_INT_EQ(1, station != NULL);
+    if (station != NULL) {
+        TEST_ASSERT_INT_EQ(DF_STATION_UNLOCK_DIRECT, station->unlock_mode);
+        TEST_ASSERT_INT_EQ(0, station->unlock_material_configured);
+    }
+    df_station_registry_destroy(&registry);
+}
+
+void test_station_registry_rejects_unknown_unlock_mode(void) {
+    const char input[] =
+        "config station 'gate_main'\n"
+        "\toption enabled '1'\n"
+        "\toption name 'Main Gate'\n"
+        "\toption logical_address '32:02:01:00:02:00'\n"
+        "\toption route_preference 'discover_first'\n"
+        "\toption stream_name 'doorfast_gate_main'\n"
+        "\toption unlock_mode 'secret'\n";
+    struct df_station_registry registry = {0};
+
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID,
+        df_station_registry_parse(&registry, input));
+    df_station_registry_destroy(&registry);
+}

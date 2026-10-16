@@ -105,6 +105,7 @@ int df_gvs_access_result_begin(
     next.session_generation = session_generation;
     next.last_now_ms = now_ms;
     next.deadline_ms = now_ms + timeout_ms;
+    next.reply_ms = 0;
     next.raw_status = 0;
     next.physical_result_confirmed = false;
     memcpy(next.destination, session->peer, sizeof(next.destination));
@@ -128,6 +129,7 @@ int df_gvs_access_result_observe(
         return DF_ERR_INVALID;
     result->last_now_ms = now_ms;
     result->deadline_ms = 0;
+    result->reply_ms = now_ms;
     result->raw_status = frame->payload[0];
     result->physical_result_confirmed = false;
     result->state = frame->payload[0] == 0x01
@@ -185,13 +187,21 @@ int df_gvs_access_control_init(struct df_gvs_access_control *control,
 int df_gvs_access_control_submit(struct df_gvs_access_control *control,
     const struct df_gvs_session *session, uint64_t generation,
     const uint8_t local[6], uint64_t now_ms) {
+    if (control == NULL || !control->configured) return DF_ERR_INVALID;
+    return df_gvs_access_control_submit_material(control, session, generation,
+        local, control->material, now_ms);
+}
+
+int df_gvs_access_control_submit_material(struct df_gvs_access_control *control,
+    const struct df_gvs_session *session, uint64_t generation,
+    const uint8_t local[6], const uint8_t material[8], uint64_t now_ms) {
     struct df_gvs_access_request request;
     struct df_gvs_access_result next;
     int status;
-    if (control == NULL || !control->configured || control->send == NULL ||
+    if (control == NULL || material == NULL || control->send == NULL ||
         generation == control->attempted_generation ||
         df_gvs_access_prepare_direct(session, generation, local,
-            control->material, &request) != DF_OK)
+            material, &request) != DF_OK)
         return DF_ERR_INVALID;
     next = control->result;
     if (df_gvs_access_result_tick(&next, session, local, now_ms) != DF_OK ||

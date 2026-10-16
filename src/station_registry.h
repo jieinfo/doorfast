@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "doorfast.h"
+#include "access_credentials.h"
 
 enum df_station_route_preference {
     DF_STATION_ROUTE_DISCOVER_FIRST = 0,
@@ -20,6 +21,8 @@ struct df_station {
     char stream_name[65];
     enum df_station_route_preference route_preference;
     bool enabled;
+    enum df_station_unlock_mode unlock_mode;
+    bool unlock_material_configured;
 };
 
 struct df_station_registry {

@@ -19,6 +19,7 @@
 #define DF_STATION_SEEN_IPV4 (1U << 3)
 #define DF_STATION_SEEN_ROUTE (1U << 4)
 #define DF_STATION_SEEN_STREAM (1U << 5)
+#define DF_STATION_SEEN_UNLOCK_MODE (1U << 6)
 #define DF_STATION_REQUIRED (DF_STATION_SEEN_ENABLED | DF_STATION_SEEN_NAME | \
     DF_STATION_SEEN_ADDRESS | DF_STATION_SEEN_ROUTE | DF_STATION_SEEN_STREAM)
 
@@ -279,6 +280,18 @@ static int df_station_apply_option(struct df_station *station, const char *name,
         return df_station_copy(station->stream_name,
                                sizeof(station->stream_name), value);
     }
+    if (strcmp(name, "unlock_mode") == 0) {
+        option = DF_STATION_SEEN_UNLOCK_MODE;
+        if (df_station_claim(seen, option) != DF_OK) return DF_ERR_INVALID;
+        if (strcmp(value, "inherit") == 0)
+            station->unlock_mode = DF_STATION_UNLOCK_INHERIT;
+        else if (strcmp(value, "direct") == 0)
+            station->unlock_mode = DF_STATION_UNLOCK_DIRECT;
+        else if (strcmp(value, "disabled") == 0)
+            station->unlock_mode = DF_STATION_UNLOCK_DISABLED;
+        else return DF_ERR_INVALID;
+        return DF_OK;
+    }
     return DF_ERR_INVALID;
 }
 
@@ -337,6 +350,7 @@ static int df_station_build_legacy(struct df_station_registry *registry,
     registry->count = 1U;
     station = registry->items;
     station->route_preference = DF_STATION_ROUTE_DISCOVER_FIRST;
+    station->unlock_mode = DF_STATION_UNLOCK_INHERIT;
     station->enabled = true;
     if (df_station_copy(station->id, sizeof(station->id), "legacy") != DF_OK ||
         df_station_copy(station->name, sizeof(station->name),

@@ -4,13 +4,13 @@
     "read": {
       "uci": ["doorfast", "doorfast-automation", "doorfast-events"],
       "ubus": {
-        "doorfast": ["status", "stations", "station_candidates", "logs"]
+        "doorfast": ["status", "stations", "station_candidates", "logs", "access_credentials_status"]
       }
     },
     "write": {
       "uci": ["doorfast", "doorfast-automation", "doorfast-events"],
       "ubus": {
-        "doorfast": ["station_scan", "media_credentials"]
+        "doorfast": ["station_scan", "media_credentials", "access_credentials_set", "access_credentials_clear"]
       }
     }
   }

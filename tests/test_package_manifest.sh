@@ -75,10 +75,10 @@ acl = json.load(open('package/luci-app-doorfast/root/usr/share/rpcd/acl.d/luci-a
 assert acl['read']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
 assert acl['write']['uci'] == ['doorfast', 'doorfast-automation', 'doorfast-events']
 assert set(acl['read']['ubus']['doorfast']) == {
-    'status', 'stations', 'station_candidates', 'logs'
+    'status', 'stations', 'station_candidates', 'logs', 'access_credentials_status'
 }
 assert set(acl['write']['ubus']['doorfast']) == {
-    'station_scan', 'media_credentials'
+    'station_scan', 'media_credentials', 'access_credentials_set', 'access_credentials_clear'
 }
 assert set(acl['read']) == {'uci', 'ubus'}
 assert set(acl['write']) == {'uci', 'ubus'}

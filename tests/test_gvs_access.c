@@ -78,6 +78,15 @@ void test_gvs_access_result_tracks_protocol_reply_without_physical_claim(void) {
     TEST_ASSERT_INT_EQ(DF_GVS_ACCESS_PROTOCOL_COMPLETED, result.state);
     TEST_ASSERT_INT_EQ(0x01, result.raw_status);
     TEST_ASSERT_INT_EQ(0, result.physical_result_confirmed);
+    TEST_ASSERT_INT_EQ(200, result.reply_ms);
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_result_tick(&result, &session, local, 1200));
+    TEST_ASSERT_INT_EQ(1200, result.last_now_ms);
+    TEST_ASSERT_INT_EQ(200, result.reply_ms);
+    TEST_ASSERT_INT_EQ(DF_GVS_ACCESS_PROTOCOL_COMPLETED, result.state);
+    session.generation++;
+    TEST_ASSERT_INT_EQ(DF_OK, df_gvs_access_result_begin(&result, &session,
+        session.generation, local, 1200, 1000));
+    TEST_ASSERT_INT_EQ(0, result.reply_ms);
 }
 
 void test_gvs_access_result_rejects_failure_and_expires_unanswered(void) {
@@ -186,6 +195,11 @@ void test_gvs_access_failed_send_and_late_reply(void) {
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_result_observe(
         &control.result, &session, local, &frame, 2));
     frame.source[1]--;
+    frame.destination[1]++;
+    TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_result_observe(
+        &control.result, &session, local, &frame, 2));
+    TEST_ASSERT_INT_EQ(DF_GVS_ACCESS_PROTOCOL_WAITING, control.result.state);
+    frame.destination[1]--;
     TEST_ASSERT_INT_EQ(DF_ERR_INVALID, df_gvs_access_result_observe(
         &control.result, &session, local, &frame, 1001));
     session.state = DF_GVS_ENDED;
